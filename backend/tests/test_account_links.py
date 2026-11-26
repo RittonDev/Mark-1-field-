@@ -145,7 +145,9 @@ def _old_access_token(user: User) -> str:
 # ------------------------------------------------------------------ /meta
 
 
-async def test_meta_tells_if_mail_is_on(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_meta_tells_if_mail_is_on(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert (await client.get(f"{API}/meta")).json()["mail_enabled"] is False
     monkeypatch.setattr(settings, "SMTP_HOST", "smtp.exemplo.com")
     monkeypatch.setattr(settings, "MAIL_FROM", "nao-responda@exemplo.com")
@@ -181,11 +183,17 @@ async def test_forgot_password_answers_the_same(
         assert await db.scalar(select(func.count()).select_from(EmailOutbox)) == 0
     assert mail_box.soon == []
 
-    r = await client.post(f"{API}/auth/forgot-password", json={"email": " Tecnico.Alfa@Exemplo.com "})
+    r = await client.post(
+        f"{API}/auth/forgot-password", json={"email": " Tecnico.Alfa@Exemplo.com "}
+    )
     assert (r.status_code, r.json()) == (202, {"detail": FORGOT_SENT})
     async with _maker(engine)() as db:
         [row] = list(await db.scalars(select(EmailOutbox)))
-    assert (row.template, row.to_email, row.user_id) == (EmailTemplate.PASSWORD_RESET, ALFA, tech.id)
+    assert (row.template, row.to_email, row.user_id) == (
+        EmailTemplate.PASSWORD_RESET,
+        ALFA,
+        tech.id,
+    )
     assert row.context == {"name": "Tecnico Alfa", "origin": "self"}
     assert row.created_by_id is None
     assert mail_box.soon == [row.id], "sai logo depois do commit"
@@ -399,7 +407,9 @@ async def test_password_reset_refused_without_app_access(
     assert (r.status_code, r.json()["code"]) == (410, "LINK_GONE")
 
 
-async def test_change_password_revokes_reset_links(client: AsyncClient, engine: AsyncEngine) -> None:
+async def test_change_password_revokes_reset_links(
+    client: AsyncClient, engine: AsyncEngine
+) -> None:
     tech = await _add_user(engine, email_verified_at=datetime.now(UTC))
     raw = await _mint_reset(engine, tech)
     headers = {"Authorization": f"Bearer {_old_access_token(tech)}"}
@@ -563,26 +573,25 @@ async def test_verify_change_conflict_and_cancelled_request(
 
 
 async def _application(engine: AsyncEngine, **fields: Any) -> TechnicianApplication:
+    defaults: dict[str, Any] = {
+        "status": "pending",
+        "full_name": "Tecnico Alfa",
+        "email": ALFA,
+        "phone": "(11) 99999-0000",
+        "document": "12345678909",
+        "city": "Cidade Exemplo",
+        "state": "SP",
+        "service_areas": [],
+        "skills": [],
+        "has_vehicle": False,
+        "has_driver_license": False,
+        "coverage_area": "Cidade Exemplo",
+        "availability": [],
+        "privacy_consent_at": datetime.now(UTC),
+        "privacy_version": "2026-11-25",
+    }
     async with _maker(engine)() as db:
-        application = TechnicianApplication(
-            id=uuid.uuid4(),
-            status="pending",
-            full_name="Tecnico Alfa",
-            email=ALFA,
-            phone="(11) 99999-0000",
-            document="12345678909",
-            city="Cidade Exemplo",
-            state="SP",
-            service_areas=[],
-            skills=[],
-            has_vehicle=False,
-            has_driver_license=False,
-            coverage_area="Cidade Exemplo",
-            availability=[],
-            privacy_consent_at=datetime.now(UTC),
-            privacy_version="2026-11-25",
-            **fields,
-        )
+        application = TechnicianApplication(id=uuid.uuid4(), **{**defaults, **fields})
         db.add(application)
         await db.commit()
         return application

@@ -112,7 +112,9 @@ async def test_invite_form_and_approval(
     assert detail["invite_label"] == "Tecnico Alfa (indicação)"
     # A ficha guarda a versão do aviso que o formulário mostrou.
     assert detail["privacy_version"] == catalog["privacy_version"] == PRIVACY_VERSION
-    assert "password" not in str(detail)
+    # Da senha, só se ela existe (o hash nunca sai).
+    assert {key for key in detail if "password" in key} == {"has_password"}
+    assert detail["has_password"] is True and "$2" not in str(detail)
     photo = await client.get(detail["photo_url"])
     assert photo.status_code == 200 and photo.content.startswith(b"\x89PNG")
     forged = await client.get(
@@ -127,7 +129,10 @@ async def test_invite_form_and_approval(
         headers=an,
     )
     assert r.status_code == 200, r.text
-    assert (r.json()["role"], r.json()["team"]["name"]) == ("technician", "Campo")
+    technician = r.json()["technician"]
+    assert (technician["role"], technician["team"]["name"]) == ("technician", "Campo")
+    # Sem envio de e-mail configurado, a boas-vindas entra na fila e vence sem sair.
+    assert r.json()["welcome"] == {"status": "not_configured", "to": "ficha.tecnico@exemplo.com"}
     login = await client.post(
         f"{API}/auth/login",
         json={
@@ -154,8 +159,8 @@ async def test_approval_prefills_the_tech_profile(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
     """Aprovada, a ficha já entra no perfil técnico (disponibilidade, transporte e CNH, aptidões),
-    marcada "ficha" com a data da ficha e sem linha no histórico do cadastro. Ferramentas e
-    certificações são texto livre e ficam só na ficha."""
+    marcada "ficha" com a data da ficha. O histórico do cadastro começa com a aprovação (via
+    ficha, por quem aprovou). Ferramentas e certificações são texto livre e ficam só na ficha."""
     an = world.analyst.headers
     token = await new_invite(client, world)
     body = ficha(
@@ -168,12 +173,13 @@ async def test_approval_prefills_the_tech_profile(
     )
     r = await client.post(f"{API}/public/onboarding/{token}", json=body)
     assert r.status_code == 201, r.text
+    protocol = r.json()["protocol"]
     [pending] = (await client.get(f"{API}/onboarding/applications", headers=an)).json()
     r = await client.post(
         f"{API}/onboarding/applications/{pending['id']}/approve", json={}, headers=an
     )
     assert r.status_code == 200, r.text
-    technician_id = r.json()["id"]
+    technician_id = r.json()["technician"]["id"]
     async with engine.connect() as conn:
         created = await conn.scalar(
             text("SELECT created_at FROM technician_applications WHERE id = :i"),
@@ -209,7 +215,16 @@ async def test_approval_prefills_the_tech_profile(
         assert datetime.fromisoformat(stamps[part]["at"]) == created, part
 
     history = await client.get(f"{API}/technicians/{technician_id}/changes", headers=an)
-    assert history.status_code == 200 and history.json() == []
+    assert history.status_code == 200, history.text
+    [line] = history.json()
+    assert (line["via"], line["actor"]["id"], line["note"]) == (
+        "ficha",
+        str(world.analyst.user.id),
+        None,
+    )
+    assert line["changes"] == [
+        {"field": "application", "from": None, "to": f"Aprovado na homologação ({protocol})"}
+    ]
 
 
 async def test_reject_and_revoke(client: AsyncClient, world: World) -> None:

@@ -1,4 +1,5 @@
 import NetInfo from "@react-native-community/netinfo";
+import { router } from "expo-router";
 import { useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type TextInputInstance } from "react-native";
 import Animated, { FadeInDown, useReducedMotion } from "react-native-reanimated";
@@ -13,7 +14,8 @@ import { ApiError, errorMessage } from "../lib/api";
 import { login } from "../lib/auth";
 import { APP_VERSION, defaultApiUrl, normalizeApiUrl } from "../lib/config";
 import { countPending } from "../lib/db";
-import { confirmAction, notify } from "../lib/dialogs";
+import { confirmAction } from "../lib/dialogs";
+import { forgotHandoff } from "../lib/forgotPassword";
 import { canEditServer, session, useSession } from "../lib/session";
 import { RADIUS, useStyles, useTheme, type Palette } from "../theme/theme";
 
@@ -105,12 +107,12 @@ export default function LoginScreen() {
     }
   }
 
-  // Técnicos não redefinem a senha sozinhos: a central gera uma senha provisória.
+  // "Esqueci minha senha": o link chega no e-mail validado. A tela recebe o e-mail digitado (e o servidor, no
+  // desenvolvimento) pela memória, não pela rota: na versão web, iria para o endereço da página.
   function forgot() {
-    notify(
-      "Esqueci minha senha",
-      "Peça à central (analista ou supervisor), no grupo de WhatsApp, para redefinir sua senha. Você recebe uma senha provisória e cria uma nova ao entrar.",
-    );
+    if (loading) return;
+    forgotHandoff.set({ email: email.trim(), server: canEditServer ? apiUrl : undefined });
+    router.push("/esqueci-senha");
   }
 
   return (
@@ -144,7 +146,6 @@ export default function LoginScreen() {
               keyboardType="email-address"
               autoComplete="email"
               textContentType="username"
-              placeholder="seuemail@exemplo.com"
               accessibilityLabel="E-mail"
               returnKeyType="next"
               submitBehavior="submit"
@@ -160,7 +161,6 @@ export default function LoginScreen() {
               secureTextEntry={!showPassword}
               autoComplete="current-password"
               textContentType="password"
-              placeholder="Sua senha"
               accessibilityLabel="Senha"
               returnKeyType="go"
               onSubmitEditing={() => void submit()}
@@ -178,7 +178,7 @@ export default function LoginScreen() {
           </Field>
 
           {canEditServer && editingServer ? (
-            <Field label="Servidor da API" hint="Desenvolvimento: endereço da API na rede local, ex.: 192.168.0.10:8000">
+            <Field label="Servidor da API">
               <Input
                 value={apiUrl}
                 onChangeText={setApiUrl}

@@ -1,5 +1,6 @@
-"""Meu cadastro do técnico: o próprio cadastro no app, a chave PIX com a senha, o histórico do
-cadastro e o aviso à central.
+"""Meu cadastro do técnico: o próprio cadastro no app, o e-mail e as formas de recebimento com a
+senha, o histórico do cadastro e o aviso à central. (As regras das formas de recebimento ficam em
+test_payout_methods.py; os dados pessoais novos e o e-mail pendente, em test_cadastro_v2_profile.py.)
 
 Só dados fictícios: CPF 12345678909, "Tecnico Alfa", @exemplo.com.
 """
@@ -20,7 +21,7 @@ from app.core.enums import ApplicationStatus
 from app.models import TechnicianApplication, User
 from app.schemas.my_profile import NAME_LETTERS
 from app.services import login_guard, my_profile, onboarding, realtime
-from tests.conftest import World, requires_db
+from tests.conftest import MailBox, World, requires_db
 from tests.test_access import restrict_analyst
 from tests.test_api import create
 
@@ -31,12 +32,40 @@ PASSWORD = "senha-teste-123"
 PNG_1PX = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 )
-CPF_PIX = {"key_type": "cpf", "key": "123.456.789-09", "holder_name": "Tecnico Alfa"}
-PHONE_PIX = {"key_type": "phone", "key": "(11) 98888-7777", "holder_name": "Tecnico Alfa"}
+METHODS = f"{API}/me/profile/payout-methods"
+# Formas de recebimento (POST /me/profile/payout-methods): a chave CPF é o documento do titular.
+CPF_KEY = {
+    "kind": "pix",
+    "pix_key_type": "cpf",
+    "pix_key": "123.456.789-09",
+    "holder_name": "Tecnico Alfa",
+}
+PHONE_KEY = {
+    "kind": "pix",
+    "pix_key_type": "phone",
+    "pix_key": "(11) 98888-7777",
+    "holder_name": "Tecnico Alfa",
+    "holder_document": "123.456.789-09",
+}
+PAYOUT_FIELDS = ["payout_methods", "payout_preferred"]
 
 
 async def patch(client: AsyncClient, world: World, **body: object) -> Response:
     return await client.patch(f"{API}/me/profile", json=body, headers=world.tech.headers)
+
+
+async def add_method(
+    client: AsyncClient,
+    headers: dict[str, str],
+    body: dict,
+    password: str | None = PASSWORD,
+    **extra: object,
+) -> Response:
+    """POST /me/profile/payout-methods com a senha (None: sem a senha)."""
+    payload = {**body, **extra}
+    if password is not None:
+        payload["current_password"] = password
+    return await client.post(METHODS, json=payload, headers=headers)
 
 
 async def history(client: AsyncClient, world: World) -> list[dict]:
@@ -215,7 +244,10 @@ async def test_moving_city_clears_home_coordinates(
     assert (await stored(engine, world.tech.user.id)).home_latitude is None
 
 
-async def test_email_change_needs_password(client: AsyncClient, world: World) -> None:
+async def test_email_change_needs_password(
+    client: AsyncClient, world: World, mail_box: MailBox
+) -> None:
+    """O e-mail novo pede a senha e fica pendente até o link: o login continua o de antes."""
     new_email = "Tecnico.Alfa@Exemplo.com"
     r = await patch(client, world, email=new_email)
     assert r.status_code == 422 and messages(r) == [my_profile.PASSWORD_REQUIRED]
@@ -223,23 +255,29 @@ async def test_email_change_needs_password(client: AsyncClient, world: World) ->
     assert r.status_code == 422 and messages(r) == ["Senha atual incorreta"]
     r = await patch(client, world, email="analista@teste.com.br", current_password=PASSWORD)
     assert r.status_code == 422 and messages(r) == ["E-mail já cadastrado"]
+    assert mail_box.soon == []
 
     r = await patch(client, world, email=new_email, current_password=PASSWORD)
     assert r.status_code == 200, r.text
-    assert r.json()["email"] == "tecnico.alfa@exemplo.com"
+    me = r.json()
+    assert (me["email"], me["email_pending"]) == (
+        "tecnico@teste.com.br",
+        "tecnico.alfa@exemplo.com",
+    )
+    assert len(mail_box.soon) == 1
 
     def login(email: str) -> dict:
         return {"email": email, "password": PASSWORD, "channel": "mobile"}
 
-    assert (await client.post(f"{API}/auth/login", json=login(new_email))).status_code == 200
+    # Até o link, o login é o de antes; a sessão aberta continua valendo.
+    assert (await client.post(f"{API}/auth/login", json=login(new_email))).status_code == 401
     old = await client.post(f"{API}/auth/login", json=login("tecnico@teste.com.br"))
-    assert old.status_code == 401
-    # A senha é a mesma: a sessão aberta continua valendo.
+    assert old.status_code == 200
     assert (await client.get(f"{API}/me/profile", headers=world.tech.headers)).status_code == 200
 
     rows = await history(client, world)
-    assert [c for c in rows[0]["changes"] if c["field"] == "email"] == [
-        {"field": "email", "from": "tecnico@teste.com.br", "to": "tecnico.alfa@exemplo.com"}
+    assert rows[0]["changes"] == [
+        {"field": "email_pending", "from": None, "to": "tecnico.alfa@exemplo.com"}
     ]
 
 
@@ -247,9 +285,9 @@ async def test_password_attempts_are_shared_with_change_password(
     client: AsyncClient, world: World
 ) -> None:
     for _ in range(login_guard.MAX_PASSWORD_CHANGE):
-        r = await patch(client, world, pix=CPF_PIX, current_password="errada")
+        r = await add_method(client, world.tech.headers, CPF_KEY, password="errada")
         assert r.status_code == 422 and messages(r) == ["Senha atual incorreta"]
-    blocked = await patch(client, world, pix=CPF_PIX, current_password=PASSWORD)
+    blocked = await add_method(client, world.tech.headers, CPF_KEY)
     assert blocked.status_code == 429 and int(blocked.headers["retry-after"]) > 0
     assert "confirmar a senha" in blocked.json()["detail"]
     # O contador é o mesmo da troca de senha (5 erros, não 5 + 5).
@@ -259,65 +297,11 @@ async def test_password_attempts_are_shared_with_change_password(
         headers=world.tech.headers,
     )
     assert change.status_code == 429 and "trocar a senha" in change.json()["detail"]
-    assert (await client.get(f"{API}/me/profile", headers=world.tech.headers)).json()["pix"] is None
+    me = (await client.get(f"{API}/me/profile", headers=world.tech.headers)).json()
+    assert (me["payout_methods"], me["pix"]) == ([], None)
 
 
-async def test_pix_set_change_and_remove(client: AsyncClient, world: World) -> None:
-    r = await patch(client, world, pix=CPF_PIX)
-    assert r.status_code == 422 and messages(r) == [my_profile.PASSWORD_REQUIRED]
-
-    r = await patch(client, world, pix=CPF_PIX, current_password=PASSWORD)
-    assert r.status_code == 200, r.text
-    pix = r.json()["pix"]
-    assert (pix["key_type"], pix["key"], pix["holder_name"]) == (
-        "cpf",
-        "12345678909",
-        "Tecnico Alfa",
-    )
-    assert pix["updated_at"] is not None
-
-    # A mesma chave de novo: nada muda (nem a data).
-    r = await patch(client, world, pix=CPF_PIX, current_password=PASSWORD)
-    assert r.status_code == 200 and r.json()["pix"] == pix
-    assert len(await history(client, world)) == 1
-
-    r = await patch(client, world, pix=PHONE_PIX, current_password=PASSWORD)
-    assert r.status_code == 200, r.text
-    assert r.json()["pix"]["key"] == "+5511988887777"
-    rows = await history(client, world)
-    assert rows[0]["changes"] == [
-        {"field": "pix", "from": "CPF ***.456.789-**", "to": "Celular +55 (11) *****-7777"}
-    ]
-    assert rows[1]["changes"][0] == {"field": "pix", "from": None, "to": "CPF ***.456.789-**"}
-    text = str(rows)
-    assert "12345678909" not in text and "456.789-09" not in text and "98888" not in text
-
-    # Trocar só o titular também pede a senha e fica no histórico.
-    other_holder = {**PHONE_PIX, "holder_name": "Tecnico Alfa da Silva"}
-    assert (await patch(client, world, pix=other_holder)).status_code == 422
-    r = await patch(client, world, pix=other_holder, current_password=PASSWORD)
-    assert r.status_code == 200 and r.json()["pix"]["holder_name"] == "Tecnico Alfa da Silva"
-    assert (await history(client, world))[0]["changes"] == [
-        {"field": "pix_holder", "from": "Tecnico Alfa", "to": "Tecnico Alfa da Silva"}
-    ]
-
-    bad = await patch(
-        client, world, pix={**CPF_PIX, "key": "111.111.111-11"}, current_password=PASSWORD
-    )
-    assert bad.status_code == 422 and messages(bad) == ["CPF inválido: confira os números"]
-    assert bad.json()["detail"][0]["label"] == "Chave PIX"
-    bad = await patch(client, world, pix={**CPF_PIX, "holder_name": " "}, current_password=PASSWORD)
-    assert messages(bad) == ["Informe o nome do titular da conta"]
-
-    # null tira a chave (também com a senha).
-    assert (await patch(client, world, pix=None)).status_code == 422
-    r = await patch(client, world, pix=None, current_password=PASSWORD)
-    assert r.status_code == 200 and r.json()["pix"] is None
-    removed = (await history(client, world))[0]["changes"]
-    assert {"field": "pix", "from": "Celular +55 (11) *****-7777", "to": None} in removed
-
-
-async def test_pix_change_warns_the_central(
+async def test_payout_change_warns_the_central(
     client: AsyncClient, world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     published: list[dict] = []
@@ -326,97 +310,75 @@ async def test_pix_change_warns_the_central(
         published.append(event)
 
     monkeypatch.setattr(realtime.bus, "publish", capture)
-    r = await patch(client, world, pix=CPF_PIX, current_password=PASSWORD)
+    r = await add_method(client, world.tech.headers, CPF_KEY)
     assert r.status_code == 200, r.text
     events = [e for e in published if e["type"] == "profile.changed"]
     assert len(events) == 1
     event = events[0]
     assert event["user_id"] == str(world.tech.user.id) and event["name"] == "Tecnico"
     assert event["actor_id"] == str(world.tech.user.id)
-    assert event["data"] == {"fields": ["pix"], "via": "app"}
+    assert event["data"] == {"fields": PAYOUT_FIELDS, "via": "app"}
     assert event["audience"] == {"managers_only": True}
     assert "12345678909" not in str(event)
 
-    # Sem mudança, nenhum aviso.
+    # Sem mudança, nenhum aviso (a mesma chave de novo é repetida).
     published.clear()
-    assert (await patch(client, world, pix=CPF_PIX, current_password=PASSWORD)).status_code == 200
+    again = await add_method(client, world.tech.headers, CPF_KEY)
+    assert again.status_code == 409 and again.json()["code"] == "PAYOUT_METHOD_DUPLICATE"
     assert (await patch(client, world, name="Tecnico")).status_code == 200
     assert published == []
 
     # A central removendo também avisa (via central, sem virar alerta na web).
+    method_id = r.json()["payout_methods"][0]["id"]
     r = await client.delete(
-        f"{API}/technicians/{world.tech.user.id}/pix", headers=world.analyst.headers
+        f"{API}/technicians/{world.tech.user.id}/payout-methods/{method_id}",
+        headers=world.analyst.headers,
     )
     assert r.status_code == 204
     assert [(e["data"], e["actor_id"]) for e in published] == [
-        ({"fields": ["pix"], "via": "central"}, str(world.analyst.user.id))
+        ({"fields": PAYOUT_FIELDS, "via": "central"}, str(world.analyst.user.id))
     ]
 
 
-async def test_pix_visibility(client: AsyncClient, world: World) -> None:
+async def test_payout_methods_visibility(client: AsyncClient, world: World) -> None:
     an, tech_id = world.analyst.headers, str(world.tech.user.id)
-    r = await patch(client, world, pix=CPF_PIX, current_password=PASSWORD)
+    r = await add_method(client, world.tech.headers, CPF_KEY)
     assert r.status_code == 200, r.text
 
     listed = await client.get(f"{API}/technicians", headers=an)
     row = next(t for t in listed.json() if t["id"] == tech_id)
-    assert row["has_pix"] is True and row["pix_updated_at"] is not None
+    assert row["payout_methods_count"] == 1 and row["payout_changed_at"] is not None
     other = next(t for t in listed.json() if t["id"] == str(world.tech_other.user.id))
-    assert other["has_pix"] is False and other["pix_updated_at"] is None
-    assert "12345678909" not in listed.text
-    one = await client.get(f"{API}/technicians/{tech_id}", headers=an)
-    assert one.json()["has_pix"] is True and "12345678909" not in one.text
+    assert other["payout_methods_count"] == 0 and other["payout_changed_at"] is None
+    assert "12345678909" not in listed.text and "has_pix" not in row
 
     plain = await client.get(f"{API}/payouts", params={"technician_id": tech_id}, headers=an)
-    assert plain.status_code == 200 and plain.json()["pix"] == {}
+    assert plain.status_code == 200 and plain.json()["payout_methods"] == {}
+    assert "pix" not in plain.json()
     board = await client.get(
-        f"{API}/payouts", params={"technician_id": tech_id, "with_pix": "true"}, headers=an
+        f"{API}/payouts",
+        params={"technician_id": tech_id, "with_payout_methods": "true"},
+        headers=an,
     )
     assert board.status_code == 200, board.text
-    info = board.json()["pix"][tech_id]
-    assert (info["key_type"], info["key"], info["holder_name"]) == (
+    summary = board.json()["payout_methods"][tech_id]
+    preferred = summary["preferred"]
+    assert (preferred["pix_key_type"], preferred["pix_key"], preferred["holder_name"]) == (
         "cpf",
         "12345678909",
         "Tecnico Alfa",
     )
+    assert summary["total"] == 1
 
-    # Meus ganhos do técnico não trazem a chave.
+    # Meus ganhos do técnico não trazem a forma de recebimento.
     mine = await client.get(f"{API}/me/earnings", headers=world.tech.headers)
-    assert mine.status_code == 200 and "pix" not in mine.json()
+    assert mine.status_code == 200
+    assert "pix" not in mine.json() and "payout_methods" not in mine.json()
 
 
-async def test_central_removes_but_cannot_set_pix(client: AsyncClient, world: World) -> None:
-    an, url = world.analyst.headers, f"{API}/technicians/{world.tech.user.id}"
-    assert (await patch(client, world, pix=CPF_PIX, current_password=PASSWORD)).status_code == 200
-
-    # A ficha em Técnicos não grava chave (o campo nem existe ali).
-    r = await client.patch(url, json={"pix_key": "99999999999", "pix_key_type": "cpf"}, headers=an)
-    assert r.status_code == 200, r.text
-    me = (await client.get(f"{API}/me/profile", headers=world.tech.headers)).json()
-    assert me["pix"]["key"] == "12345678909"
-
-    # Técnico e quem só vê Pagamentos não removem.
-    assert (await client.delete(f"{url}/pix", headers=world.tech.headers)).status_code == 403
-    await restrict_analyst(client, world, **{"commercial.payouts": "view"})
-    denied = await client.delete(f"{url}/pix", headers=an)
-    assert denied.status_code == 403 and denied.json()["code"] == "MODULE_FORBIDDEN"
-
-    sup = world.supervisor.headers
-    assert (await client.delete(f"{url}/pix", headers=sup)).status_code == 204
-    me = (await client.get(f"{API}/me/profile", headers=world.tech.headers)).json()
-    assert me["pix"] is None
-    rows = await client.get(f"{url}/changes", headers=sup)
-    latest = rows.json()[0]
-    assert latest["via"] == "central" and latest["actor"]["name"] == "Super"
-    assert {"field": "pix", "from": "CPF ***.456.789-**", "to": None} in latest["changes"]
-    # Sem chave: 204 sem histórico.
-    assert (await client.delete(f"{url}/pix", headers=sup)).status_code == 204
-    assert len((await client.get(f"{url}/changes", headers=sup)).json()) == len(rows.json())
-
-
-async def test_paid_payout_records_the_pix_used(client: AsyncClient, world: World) -> None:
+async def test_paid_payout_records_the_payout_method(client: AsyncClient, world: World) -> None:
     an, tech_id = world.analyst.headers, str(world.tech.user.id)
-    assert (await patch(client, world, pix=CPF_PIX, current_password=PASSWORD)).status_code == 200
+    assert (await add_method(client, world.tech.headers, CPF_KEY)).status_code == 200
     t = await create(client, world, title="Rack", assignee_id=tech_id)
     r = await client.put(
         f"{API}/tickets/{t['id']}/payouts/{tech_id}", json={"amount": 90}, headers=an
@@ -427,12 +389,13 @@ async def test_paid_payout_records_the_pix_used(client: AsyncClient, world: Worl
     assert paid.json() == {"changed": 1}
     events = (await client.get(f"{API}/tickets/{t['id']}/events", headers=an)).json()
     payment = next(e for e in events if (e.get("data") or {}).get("action") == "paid")
-    assert payment["data"]["pix"] == "CPF ***.456.789-**"
-    # Desfazer não leva chave.
+    assert payment["data"]["payout_method"] == "PIX CPF ***.456.789-**"
+    assert "pix" not in payment["data"]
+    # Desfazer não leva a forma.
     await client.post(f"{API}/payouts/unpay", json={"ids": [payout_id]}, headers=an)
     events = (await client.get(f"{API}/tickets/{t['id']}/events", headers=an)).json()
     undone = next(e for e in events if (e.get("data") or {}).get("action") == "unpaid")
-    assert "pix" not in undone["data"]
+    assert "payout_method" not in undone["data"]
 
 
 async def test_my_photo_upload_and_remove(
@@ -551,7 +514,7 @@ async def test_central_changes_go_to_history(
     assert rows[0]["changes"] == [
         {"field": "email", "from": "tecnico@teste.com.br", "to": "tecnico.alfa@exemplo.com"},
         {"field": "team", "from": "Campo", "to": "Redes"},
-        {"field": "is_active", "from": "Liberado", "to": "Bloqueado"},
+        {"field": "is_active", "from": "Liberado", "to": "Sem acesso"},
     ]
     assert rows[1]["changes"] == [
         {"field": "phone", "from": None, "to": "(11) 97777-6666"},
@@ -597,7 +560,7 @@ async def test_technician_by_id(client: AsyncClient, world: World) -> None:
 
 
 async def test_taken_email_is_told_only_after_the_password(
-    client: AsyncClient, world: World
+    client: AsyncClient, world: World, mail_box: MailBox
 ) -> None:
     """Sem a senha, ou com a errada, ninguém descobre se um e-mail já está cadastrado; com a certa,
     só algumas trocas por hora."""
@@ -616,24 +579,29 @@ async def test_taken_email_is_told_only_after_the_password(
     assert me["email"] == "tecnico@teste.com.br"
 
 
-async def test_temporary_password_cannot_change_email_or_pix(
-    client: AsyncClient, world: World, monkeypatch: pytest.MonkeyPatch
+async def test_temporary_password_cannot_change_email_company_or_payouts(
+    client: AsyncClient, world: World, monkeypatch: pytest.MonkeyPatch, mail_box: MailBox
 ) -> None:
-    """A provisória quem gerou foi a central: com ela, e-mail e chave PIX ficam fechados até o
-    técnico criar a senha dele (o app já pede isso antes de abrir o Meu cadastro)."""
+    """A provisória quem gerou foi a central: com ela, e-mail, empresa e formas de recebimento
+    ficam fechados até o técnico criar a senha dele (o app já pede isso antes de abrir o Meu
+    cadastro)."""
     events = capture_events(monkeypatch)
     url = f"{API}/me/profile"
     temp = await reset_by_central(client, world)
     h = await login_mobile(client, "tecnico@teste.com.br", temp)
-    r = await client.patch(url, json={"pix": CPF_PIX, "current_password": temp}, headers=h)
+    r = await add_method(client, h, CPF_KEY, password=temp)
     assert r.status_code == 422 and messages(r) == [my_profile.TEMPORARY_PASSWORD]
     body = {"email": "outro.login@exemplo.com", "current_password": temp}
     r = await client.patch(url, json=body, headers=h)
     assert r.status_code == 422 and messages(r) == [my_profile.TEMPORARY_PASSWORD]
+    body = {"company_document": "12.345.678/0001-95", "current_password": temp}
+    r = await client.patch(url, json=body, headers=h)
+    assert r.status_code == 422 and messages(r) == [my_profile.TEMPORARY_PASSWORD]
     # O resto do cadastro continua aberto.
     r = await client.patch(url, json={"phone": "(11) 98888-7777"}, headers=h)
-    assert r.status_code == 200 and r.json()["pix"] is None
-    assert r.json()["email"] == "tecnico@teste.com.br"
+    assert r.status_code == 200 and r.json()["payout_methods"] == []
+    assert (r.json()["email"], r.json()["email_pending"]) == ("tecnico@teste.com.br", None)
+    assert r.json()["company_document"] is None
 
     # A senha definida pela central em Usuários também é provisória.
     r = await client.patch(
@@ -643,26 +611,26 @@ async def test_temporary_password_cannot_change_email_or_pix(
     )
     assert r.status_code == 200 and r.json()["must_change_password"] is True
     h = await login_mobile(client, "tecnico@teste.com.br", "provisoria-456")
-    r = await client.patch(
-        url, json={"pix": CPF_PIX, "current_password": "provisoria-456"}, headers=h
-    )
+    r = await add_method(client, h, CPF_KEY, password="provisoria-456")
     assert r.status_code == 422 and messages(r) == [my_profile.TEMPORARY_PASSWORD]
 
     # Com a senha dele, passa; o aviso diz quem redefiniu por último.
     h = await change_password(client, h, "provisoria-456", "senha-do-tecnico-1")
-    r = await client.patch(
-        url, json={"pix": CPF_PIX, "current_password": "senha-do-tecnico-1"}, headers=h
-    )
+    r = await add_method(client, h, CPF_KEY, password="senha-do-tecnico-1")
     assert r.status_code == 200, r.text
-    assert events[-1]["fields"] == ["pix"] and events[-1]["after_reset"]["by"] == "Admin"
+    assert events[-1]["fields"] == PAYOUT_FIELDS and events[-1]["after_reset"]["by"] == "Admin"
 
 
 async def test_password_lines_and_the_reset_warning(
-    client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient,
+    world: World,
+    engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    mail_box: MailBox,
 ) -> None:
-    """A senha criada ou trocada no app entra no histórico, e a troca de e-mail ou PIX até 72 h
-    depois de a central redefinir a senha avisa quem redefiniu (sem bloquear: o técnico novo
-    recebe a senha da central e cadastra o PIX)."""
+    """A senha criada ou trocada no app entra no histórico, e a troca de e-mail ou de forma de
+    recebimento até 72 h depois de a central redefinir a senha avisa quem redefiniu (sem
+    bloquear: o técnico novo recebe a senha da central e cadastra onde recebe)."""
     events = capture_events(monkeypatch)
     temp = await reset_by_central(client, world)
     h = await login_mobile(client, "tecnico@teste.com.br", temp)
