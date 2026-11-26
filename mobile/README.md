@@ -726,18 +726,25 @@ tarde." com **Tentar de novo**
     ([src/components/settings/EmailPendingBox.tsx](src/components/settings/EmailPendingBox.tsx)) mostra o e-mail novo,
     "Pendente de validação" e quando o link saiu ("Link enviado às 14:30"), com **Reenviar link** e **Cancelar troca**
     (pergunta antes; o login continua o de hoje), e a linha Contato do menu diz "E-mail pendente", em âmbar. Aberto o
-    link (página web "Validar e-mail"), o login passa a ser o novo, sem tirar ninguém do app; a leitura seguinte do
-    cadastro leva o novo para a sessão e para a tela de login (`session.updateUser` grava também o `mc_last_email`).
-    E-mail que não recebe mensagens: "Este e-mail não recebe mensagens."; e-mail da empresa é recusado ("Use um e-mail
-    que não seja da empresa"); a troca tem limite de 10 por hora (429 "Muitas tentativas. Tente mais tarde.").
+    link (página web "Validar e-mail"), o login passa a ser o novo, sem tirar ninguém do app; ao voltar ao app, a tela
+    relê o cadastro, e a primeira resposta com o login novo (a renovação do token ou a leitura do cadastro) o leva para
+    a sessão e para a tela de login (`mc_last_email`, em `session.setTokens` e `session.updateUser`). Se a tela ainda
+    estava com a troca pendente, **Cancelar troca** confere o cadastro que o servidor devolve: o pendente que já virou o
+    login dá "Seu e-mail já foi validado" / "Agora você entra com {e-mail}." (`cancelChangeNotice`), e não "Troca de
+    e-mail cancelada". E-mail que não recebe mensagens: "Este e-mail não recebe mensagens."; e-mail da empresa é
+    recusado ("Use um e-mail que não seja da empresa"); a troca tem limite de 10 por hora (429 "Muitas tentativas.
+    Tente mais tarde.").
   - **O login de hoje**: a dica do campo diz "Validado" ou "Pendente de validação" (com "· link enviado às 14:30"), com
     **Enviar link** (ou **Reenviar link**): o link chega no próprio e-mail e o valida, e é o e-mail validado que
-    libera o "Esqueci minha senha". Até 3 links por hora (429 "Aguarde N minutos para pedir outro link").
+    libera o "Esqueci minha senha". Até 3 links por hora (429 "Aguarde N minutos para pedir outro link"). Já validado
+    no navegador com a tela aberta: o 409 `EMAIL_ALREADY_VERIFIED` relê o cadastro e avisa "Seu e-mail já está
+    validado", sem tom de erro.
   - **Envio de e-mail desligado** no servidor (`mail_enabled` falso): o e-mail fica só leitura, com "Para trocar, fale
     com a central pelo WhatsApp.", e sem o estado da validação; uma troca já pedida mostra só **Cancelar troca**.
 - **Mini biografia** (`/configuracoes/biografia`): um texto curto e opcional sobre a experiência e a atuação, que a
-  central vê na ficha; até 500 caracteres, com o contador ("120/500"); espaços e quebras de linha se juntam, como o
-  servidor grava; vazio apaga. Não pede senha.
+  central vê na ficha; até 500 caracteres, com o contador ("120/500"). Os parágrafos ficam, como o servidor grava
+  (`normalizeBio` de `lib/constants.ts`): sem espaços no fim das linhas, três ou mais quebras viram duas (uma linha em
+  branco) e sem quebras nem espaços nas pontas; o limite e o contador contam depois disso. Vazio apaga. Não pede senha.
 - **Dados empresariais** (`/configuracoes/empresa`): CNPJ (aceita o alfanumérico), razão social e nome fantasia, os três
   opcionais e gravados juntos; razão social ou nome fantasia pedem o CNPJ ("Informe o CNPJ."; inválido, "CNPJ
   inválido."). Mudar pede a senha atual ("Mudar os dados da empresa pede a senha atual."): conta invadida não troca a
@@ -749,7 +756,9 @@ tarde." com **Tentar de novo**
   - **Lista**: a preferencial primeiro, depois as mais novas; cada cartão com o ícone de chave ou de banco,
     "Chave PIX · CPF" e a chave mascarada ("•••.456.789-••") ou o banco e "Conta corrente · Ag. 0001 · ••••5678-9", o
     titular e a ficha neutra "Preferencial". Tocar abre **Editar**, **Tornar preferencial** (menos na preferencial) e
-    **Excluir**. Vazio: "Nenhuma forma de recebimento" / "Adicione uma chave PIX ou uma conta bancária.". No rodapé,
+    **Excluir**, num menu com a forma no título como ela é escrita (`plainTitle`: sem caixa alta, para a chave e-mail
+    mascarada não virar maiúsculas). Vazio: "Nenhuma forma de recebimento" / "Adicione uma chave PIX ou uma conta
+    bancária.". No rodapé,
     **Adicionar chave ou conta** (no limite, "Limite de 10 formas de recebimento. Exclua uma para incluir outra."); no
     fim, o link **Aviso de privacidade**.
   - **A folha** (adicionar e editar; editar não muda o tipo): Chave PIX ou Conta bancária. Na chave, o tipo (CPF, CNPJ,
@@ -766,8 +775,11 @@ tarde." com **Tentar de novo**
   - **Tornar preferencial** e **Excluir** pedem a senha numa folha que diz para onde os pagamentos passam a ir ("Os
     pagamentos passam a ir para PIX CPF •••.456.789-••."); excluir a preferencial passa a preferência para a mais nova
     das que ficam (a folha diz qual antes) ou avisa "Você fica sem forma de recebimento.".
-  - Uma gravação por vez, como na Formação (a trava vale também depois de sair e voltar à tela). A forma que a central
-    excluiu com a tela aberta some na releitura ("Esta forma de recebimento não existe mais. Atualize a lista").
+  - Uma gravação por vez, como na Formação (a trava vale também depois de sair e voltar à tela). Quando a lista da tela
+    pode estar velha, o app relê o cadastro (`payoutListStale`): a falha sem resposta (o servidor pode ter gravado a
+    forma), a forma que a central excluiu com a tela aberta ("Esta forma de recebimento não existe mais. Atualize a
+    lista"), a repetida (409) e o limite (422). Assim, depois de uma queda de rede, a forma que entrou aparece na lista
+    e a folha passa a dizer "Esta chave PIX já está na lista." no campo.
   - O técnico não vê nada interno da central: nem o "Nova" nem o "Titular diferente".
 - **Senha atual** (folha "Confirme com sua senha"): mudar o e-mail e os dados da empresa; as formas de recebimento pedem
   a senha na própria folha (conta invadida não desvia o pagamento). A senha não fica guardada. Senha errada e o
@@ -880,8 +892,8 @@ estado das telas e os catálogos), [src/lib/autoSave.ts](src/lib/autoSave.ts) e 
   CEPs buscados e os catálogos ficam só na memória ([src/lib/profile.ts](src/lib/profile.ts),
   [src/lib/cep.ts](src/lib/cep.ts) e [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts)), nunca no SQLite, no
   kv ou no SecureStore, e somem ao sair da conta. O cadastro é lido ao entrar (sem aviso se falhar), ao abrir cada tela
-  de Configurações, ao puxar o Faturamento e, na tela inicial e no Faturamento, quando falta ou passou de 6 h (o link da
-  foto vale 12 h).
+  de Configurações, ao puxar essas telas e o Faturamento, ao voltar ao app com uma delas aberta e, na tela inicial e no
+  Faturamento, quando falta ou passou de 6 h (o link da foto vale 12 h).
 - **Gravações em fila** ([src/lib/profile.ts](src/lib/profile.ts), `writeProfile`): salvar, enviar a foto e removê-la,
   as formas de recebimento e o link do e-mail (enviar e cancelar a troca) saem uma por vez, e cada uma guarda o
   `MyProfile` que voltou (a seguinte espera a anterior responder, e não sai se a sessão mudou na espera). Uma leitura
@@ -1006,7 +1018,7 @@ no topo até o técnico mexer na tela.
 Tela `/privacidade` ([src/app/privacidade.tsx](src/app/privacidade.tsx)), só de leitura.
 
 - **Texto**: `PRIVACY_NOTICE` de [src/lib/constants.ts](src/lib/constants.ts), o mesmo da ficha da homologação (cópia
-  idêntica da web), com "Atualizado em 25/11/2026" (`PRIVACY_DATE`: a data de `PRIVACY_VERSION`, sem o ".2" de uma
+  idêntica da web), com "Atualizado em 26/11/2026" (`PRIVACY_DATE`: a data de `PRIVACY_VERSION`, sem o ".2" de uma
   segunda versão no mesmo dia). Cita os dados do cadastro (com CPF, RG, nascimento, telefone secundário, o e-mail
   validado, a mini biografia, o veículo e os dados da empresa), as formas de recebimento (chaves PIX e contas, com o
   titular), o perfil técnico (aptidões, formação, ferramental, meios de transporte e CNH, os dias e turnos e os
@@ -1114,7 +1126,8 @@ src/
     profileForm.ts useProfileForm.ts  telas do cadastro em Configurações (Dados pessoais, Endereço e CEP, Contato e e-mail, Mini biografia, Dados empresariais e o veículo): as regras e os resumos (puro, com sonda) e o estado do formulário, com a pergunta antes de enviar ("Confira o CPF")
     cep.ts             busca de CEP do Endereço (GET /public/cep, logado): achou e não achou na memória até a troca de sessão; nunca lança
     payoutMethods.ts   formas de recebimento: as rotas /me/profile/payout-methods, com a senha, na fila das gravações
-    payoutForm.ts banks.ts  a folha da chave PIX e da conta, a próxima preferencial e os textos (puro, com sonda); os 29 bancos sugeridos, com o código de compensação (conferir na lista do STR do Banco Central)
+    payoutForm.ts banks.ts  a folha da chave PIX e da conta, a próxima preferencial, os textos e quando reler a lista depois de uma falha (payoutListStale) (puro, com sonda); os 29 bancos sugeridos, com o código de compensação (conferir na lista do STR do Banco Central)
+    dateField.ts       o campo de data no iPhone: quando o calendário fecha (isDayTap; puro, com sonda)
     unavailability.ts  indisponibilidade: a folha do período, o corpo do PATCH e o resumo de Dias e horários (puro, com sonda)
     avatarFlow.ts      Foto do perfil: tirar, escolher, remover, o andamento e a recuperação no Android
     technicalProfile.ts  perfil profissional: o estado das telas, a trava das listas (Aptidões, Formação, Formas de recebimento e Indisponibilidade), o aviso UNAVAILABLE e os catálogos na memória (ferramental e sugestões de aptidão)
@@ -1150,7 +1163,7 @@ src/
     realtime.ts        WebSocket
     sla.ts             porta de backend/app/services/sla.py::compute_sla_status
     device.ts          POST/DELETE /devices (o servidor diz se o push chega: live ou simulated)
-tests/                 sondas das regras puras (node:test); resolve-ts.mjs registra o gancho que resolve "./masks" para "./masks.ts"
+tests/                 sondas das regras puras (node:test); resolve-ts.mjs registra o gancho que resolve "./masks" para "./masks.ts"; stubs/ tem os dublês (SecureStore, API, React, Expo) da sonda que roda session.ts e profile.ts de verdade
 ```
 
 `types.ts`, `constants.ts` e `workflow.ts` são cópias exatas dos arquivos da web. Ao mudar regras de
