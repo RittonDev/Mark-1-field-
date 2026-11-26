@@ -2573,13 +2573,17 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
 - Leitura: os de fim ≥ hoje, pelo início (`MyProfile`, `TechnicianOut` e `AssignableUser`). Textos iguais na API e nas
   telas: `period_text` = `periodText` ("20/12/2026 a 05/01/2027"; um dia, "20/12/2026") e `period_short` =
   `periodShort` ("até 30/11" quando já começou, "em 10/12", "de 20/12 a 05/01/2027").
-- No período, o técnico sai das sugestões e das ofertas nos dias da visita (`days_of`; OS sem horário: hoje); a
-  atribuição manual não trava (a web avisa). A central só vê.
+- No período, o técnico sai das sugestões e das ofertas nos dias da visita (`days_of`, do dia do início ao do fim:
+  a visita que vira a noite conta os dois dias; OS sem horário: hoje); a atribuição manual não trava (a web avisa). Na
+  oferta, só contam os períodos que não acabaram (numa visita que já passou, o período que terminou antes de hoje não
+  recusa): os mesmos que a central recebe. A web confere os mesmos dias (`unavailableBetween` de `lib/constants.ts`, o
+  primeiro período, pelo início, com algum dia entre o primeiro e o último dia da visita). A central só vê.
 
 **Situação na operação e quem recebe OS** (`services/technician_status.py`).
 - `POST /technicians/{user_id}/operational-status` `{status: "active" | "inactive" | "blocked", reason (3 a 500),
   cut_access?}` → `Technician`. A mesma situação: 409 `OPERATIONAL_STATUS_UNCHANGED`; motivo curto: 422 "Informe o
-  motivo"; situação desconhecida: 422 "Escolha a situação" (`label` "Situação"). Para Inativo ou Bloqueado, as ofertas
+  motivo"; situação ausente, nula ou desconhecida: 422 "Escolha a situação" (`label` "Situação"; o "Status" das OS
+  continua). Para Inativo ou Bloqueado, as ofertas
   em aberto para ele fecham antes (`offer_cancelled` com a nota "Técnico inativo na operação" ou "Técnico bloqueado na
   operação"). Grava a situação, o motivo, quem e quando; `cut_access` (só fora de Ativo e com o acesso liberado) corta
   também o acesso ao app, encerra as sessões e revoga os links de senha. Histórico via "central", com o motivo em
@@ -2594,20 +2598,32 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   - ofertas: 422 "{nome} está inativo e não recebe OS: {motivo}" (ou bloqueado) e "{nome} está indisponível
     {period_short}"; o aceite de quem saiu de Ativo (a oferta que escapou do fechamento) dá 409 `OFFER_UNAVAILABLE`;
   - atribuição (`POST /tickets/{id}/assign`, o responsável no `PATCH` e na abertura) e outros técnicos da visita: só
-    quem **entra** precisa estar Ativo (a mesma 422; na abertura, antes de a OS ganhar número); quem já está na OS fica,
-    e a indisponibilidade não trava;
+    quem **entra** precisa do acesso ao app e de estar Ativo, nessa ordem (sem acesso: 422 "{nome} está sem acesso ao
+    app: libere o acesso em Técnicos", a frase das ofertas; fora de Ativo, a mesma 422 das ofertas; na abertura, antes
+    de a OS ganhar número; quem não existe ou não é da equipe: "Responsável inválido" ou "Técnico auxiliar inválido");
+    quem já está na OS fica, também sem acesso (o Bloquear com "Cortar acesso" não trava incluir ou trocar outro
+    auxiliar), e a indisponibilidade não trava;
   - `GET /users/assignable`: só quem tem acesso, com `operational_status`, `operational_reason` (só fora de Ativo) e
     `unavailability` (a web mostra Inativo e Bloqueado travados, com o motivo, e avisa a indisponibilidade);
   - favoritos: o automático só põe Ativos (o fixado pela central continua); `FavoriteTechnician` e `NearbyTechnician`
-    ganham `operational_status`.
+    ganham `operational_status` e `operational_reason` (no Mais próximos, o motivo do técnico sem acesso é "Sem acesso
+    ao app");
+  - mapa: `GET /tracking/live` e `/tracking/distances` trazem os mesmos dois campos (ver
+    [Rastreamento](#rastreamento-do-técnico-jornada-e-gps));
+  - Minha fila: o responsável fora de Ativo dá `technician_inactive` ("Técnico inativo: troque") ou `technician_blocked`
+    ("Técnico bloqueado: troque"), no lugar do "Técnico sem acesso" (ver
+    [Fila do analista](#fila-do-analista-e-relatório-do-cliente)).
 
 **Homologação** (`services/onboarding.py`).
 - Ficha pública (`POST /public/onboarding/{token}`), campos novos, todos opcionais: `phone_secondary`, `rg_number`,
   `rg_issuer` e `rg_state` (em grupo), `address` (o logradouro), `address_number`, `address_complement`,
   `address_district`, `bio`, `company_name` e `company_trade_name` (pedem o CNPJ), `vehicle_model` e `vehicle_plate` (só
-  com veículo próprio); nascimento de 18 a 90. O CPF de um usuário também barra ("Já existe um cadastro com este CPF. Se
-  você já enviou a ficha, aguarde a análise."). Ao enviar, o link de validação do e-mail vai para a fila (`signup`), e a
-  resposta é `{protocol, email_verification}` (o status do `EmailQueued`).
+  com veículo próprio); nascimento de 18 a 90. O nome segue a regra do app ("Use só letras no nome": ele entra na
+  saudação do e-mail de validação, que vai para o endereço digitado); o órgão emissor com a UF no fim ("SSP/SP") grava o
+  órgão e a UF separados; o número vai em maiúsculas; a mini biografia guarda os parágrafos. O CPF de um usuário também
+  barra ("Já existe um cadastro com este CPF. Se você já enviou a ficha, aguarde a análise."). Ao enviar, o link de
+  validação do e-mail vai para a fila (`signup`), e a resposta é `{protocol, email_verification}` (o status do
+  `EmailQueued`).
 - `ApplicationSummary` + `email_verified_at`, `reopened_at`. `ApplicationDetail` + os campos novos, `has_password`,
   `reviews` (a mais antiga primeiro), `reopened_by` e `purge_at` (na reprovada: a última análise +
   `ONBOARDING_RETENTION_DAYS`, 180 dias).
@@ -2617,10 +2633,15 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   ela, uma aleatória e a troca obrigatória), a foto, a cidade na grafia padrão, o endereço em partes e o CEP, CPF e CNPJ
   (só os válidos; razão social e nome fantasia só com o CNPJ), nascimento, RG, mini biografia, veículo, as áreas
   (`service_areas`), a validação do e-mail, Ativo e o perfil técnico da ficha (ver
-  [Perfil técnico](#perfil-técnico-2026-11-19)). `reviews` ganha `approved`; o histórico do cadastro começa com
-  `application` "Aprovado na homologação (HOM-XXXXXXXX)" via "ficha" (autor: quem aprovou); a boas-vindas vai para a
-  fila. Resposta `ApplicationApproved {technician: User, welcome: EmailQueued}`; depois do commit saem a boas-vindas, o
-  `profile.changed` e o `onboarding.updated` "approved".
+  [Perfil técnico](#perfil-técnico-2026-11-19)). A ficha com o logradouro e sem o número (a de antes da publicação,
+  com a linha inteira "Rua Exemplo, 123 - Apto 4") tem a linha separada pela regra da migração
+  (`onboarding.ficha_address`, com `personal.split_address_line`), com o complemento da ficha depois do que veio na
+  linha; o que não separa com segurança, ou os dois complementos juntos com mais de 60, fica como está. `reviews` ganha
+  `approved`; o histórico do cadastro começa com `application` "Aprovado na homologação (HOM-XXXXXXXX)" via "ficha"
+  (autor: quem aprovou); a boas-vindas vai para a fila. Resposta `ApplicationApproved {technician: User, welcome:
+  EmailQueued, password_link}`: `password_link` verdadeiro quando a boas-vindas leva o link de criar a senha (a ficha
+  sem senha e o e-mail validado; `welcome.status` diferente de `queued`: nada sai); depois do commit saem a
+  boas-vindas, o `profile.changed` e o `onboarding.updated` "approved".
 - Reprovar (`{reason}`, 3 a 2000, como antes): apaga a senha da ficha, `reviews` ganha `rejected` e sai
   `onboarding.updated` "rejected". O candidato não vê o motivo.
 - **Reabrir** (`POST …/reopen {reason}`, 3 a 500): só a reprovada (também a expirada). 409: "Só a ficha reprovada pode
@@ -2628,7 +2649,9 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   desta pessoa em análise ou aprovada" (`APPLICATION_DUPLICATE`: o mesmo e-mail ou CPF) e "Este CPF já está em outro
   cadastro" (`CPF_TAKEN`). Volta a pendente com `reopened_at`/`reopened_by`, sem a última análise (`reviewed_*` e
   `review_note` limpos; ela fica em `reviews`, com a reabertura e o motivo), e sai `onboarding.updated` "reopened". A
-  reaberta não tem senha (a reprovação apagou): aprovada, a boas-vindas leva o link para criar a dele.
+  reaberta não tem senha (a reprovação apagou): aprovada, a boas-vindas leva o link para criar a dele só com o e-mail
+  validado; sem a validação, ela diz "Senha: a central manda uma senha provisória pelo WhatsApp.", e a central gera a
+  provisória (o link num e-mail digitado errado daria a conta a quem abrisse).
 - Retenção (`purge_expired`): a pendente expira contando de `reopened_at` (sem ela, do envio) e entra em `reviews` como
   `expired` ("Expirada sem análise"); a reprovada é apagada 180 dias depois da última análise, com a foto, os links e os
   e-mails dela.
