@@ -16,10 +16,15 @@ ao banco como está) responde 422 em qualquer rota, com um aviso no log (o SQLST
 `{"detail": "Algum valor está fora do tamanho ou do formato aceito. Confira os campos."}`. O asyncpg entrega esses
 erros como `DBAPIError` genérico, e o handler de `main.py` decide pelo SQLSTATE (desde 24/11/2026; antes, a API respondia
 500 nesses casos). Registro repetido e referência que não existe (`IntegrityError`) continuam 409 com a mensagem da
-restrição; os outros erros do banco seguem como erro não tratado: 500 `{"detail": "Erro interno. Tente de novo; se
-continuar, avise a central."}` e o log "Erro não tratado em …". O erro do banco vai para o log com o SQL sem os
-valores (`hide_parameters` em `db/session.py`, também no `DB_ECHO`), que levariam dados pessoais (nome, contato,
-formação, chave PIX).
+restrição. Desde 26/11/2026, a gravação que o banco desfaz por causa de outra ao mesmo tempo (impasse, SQLSTATE 40P01, ou
+falha de serialização, 40001) responde 503 `{"detail": "Outra gravação ao mesmo tempo. Tente de novo"}`, sem `code` e
+sem traceback no log; as rotas dos links do e-mail repetem uma vez antes (ver [Cadastro V2](#cadastro-v2-2026-11-25)).
+Os outros erros do banco seguem como erro não tratado: 500 `{"detail": "Erro interno. Tente de novo; se continuar,
+avise a central."}` e o log "Erro não tratado em …". Os avisos no log do 409, do 422 e do 503 levam só o SQLSTATE, o
+nome da restrição (no 409) e, no 503, o método e o caminho da rota com os parâmetros pelo nome (nunca o pedido, que pode
+levar o token de um link): nunca o texto do erro do banco, que traz os valores (o DETAIL de um índice único mostra a
+chave, como o CPF; `app/db/errors.py`). O SQL vai para o log sem os valores (`hide_parameters` em `db/session.py`,
+também no `DB_ECHO`), que levariam dados pessoais (nome, contato, formação, chave PIX).
 
 ## Papéis
 
@@ -290,6 +295,15 @@ não duplica (reenvio seguro do lote). Histórico apagado após `TRACKING_RETENT
   `services/field.py`): a parada há mais tempo não vira a OS atual (a Início a mostra como alerta).
   `no_signal` = em jornada sem posição há mais de 5 min. `GET /tracking/history?user_id=&date=` → pontos do dia e
   as mudanças de status que o técnico fez, com o GPS de cada uma (`date` fora de 2000–2100: 422).
+  `GET /tracking/distances?location_id=&team_id=` → `{place, technicians: [{id, name, phone, live, live_at, home,
+  live_to_place, home_to_place, live_to_home, operational_status, operational_reason}]}`: a posição de agora e a casa
+  de cada técnico e, com a loja, as distâncias até ela ("Medir técnicos"). O rótulo da casa junta rua, número e
+  complemento ("Casa · Rua das Flores, 10 - Casa 2, Bairro Exemplo, Cidade Exemplo-SP"; `map_distances.street_text`).
+- Situação na operação no mapa (cadastro V2): `/tracking/live` e `/tracking/distances` trazem `operational_status`
+  (padrão `active`) e `operational_reason` (só fora de Ativo). Inativo e Bloqueado continuam nas respostas (as
+  distâncias seguem só pela distância); a web mostra o selo com o motivo no título, manda quem não está Ativo para o
+  fim na ordem por loja e mostra o Inativo ou Bloqueado em jornada e sem OS em campo como "Em jornada", em cinza, fora
+  da contagem e do filtro "Disponível" (ele não recebe OS).
 - As transições de status aceitam `latitude`/`longitude` (check-in); o app deve mandar em deslocamento, atendimento e resolução.
 
 ### Calendário e conflito de horário (gestão)
@@ -318,9 +332,10 @@ Gestão: `GET|POST /onboarding/invites` (`{label?, reusable, days_valid}`; o `to
 `DELETE /onboarding/invites/{id}` · `GET /onboarding/applications?status=` · `GET /onboarding/applications/pending-count` ·
 `GET /onboarding/applications/{id}` (com `photo_url` assinado; desde 25/11/2026, também `has_password`, `reviews`,
 `reopened_by` e `purge_at`) · `POST .../{id}/approve` (num passo, corpo opcional `{team_id?, job_title?, note?}`; a web
-manda `{}`) → `ApplicationApproved {technician: UserOut, welcome: EmailQueued}` (o técnico entra com o e-mail e a senha
-da ficha e com tudo o que ela coletou, o perfil técnico já vem com a disponibilidade, o transporte e as aptidões da
-ficha, ver [Perfil técnico](#perfil-técnico-2026-11-19), e a boas-vindas vai para a fila) ·
+manda `{}`) → `ApplicationApproved {technician: UserOut, welcome: EmailQueued, password_link}` (o técnico entra com o
+e-mail e a senha da ficha e com tudo o que ela coletou, o perfil técnico já vem com a disponibilidade, o transporte e
+as aptidões da ficha, ver [Perfil técnico](#perfil-técnico-2026-11-19), e a boas-vindas vai para a fila; sem senha na
+ficha, ela leva o link de criar a senha só com o e-mail validado, `password_link`) ·
 `POST .../{id}/reject {reason}` · `POST .../{id}/reopen {reason}` (a reprovada volta para análise) ·
 `POST .../{id}/email-verification` (reenvia a validação do e-mail da ficha). As regras de 25/11/2026 estão em
 [Cadastro V2](#cadastro-v2-2026-11-25).
@@ -566,8 +581,11 @@ prazo mais apertado; `total` é o tamanho de verdade e `truncated` avisa do cort
 - `reasons: [{code, label, tone}]`: `sla_violated` (danger), `sla_at_risk` (warning), `late_start` (danger,
   agendada que passou 30 min do horário sem sair, a tolerância da Início e do prazo de chegada; não vale com
   visita improdutiva no horário ou depois), `no_technician` (warning, sem técnico de campo),
-  `inactive_technician` (warning, "Técnico sem acesso: libere ou troque": técnico sem acesso ao app, `is_active`
-  falso; a situação na operação, Inativo ou Bloqueado, não entra aqui), `unproductive` (warning, improdutiva sem nova agenda, fora de campo; enquanto espera a data
+  `inactive_technician` (warning, "Técnico sem acesso: libere ou troque": técnico Ativo e sem acesso ao app,
+  `is_active` falso), `technician_inactive` (warning, "Técnico inativo: troque") e `technician_blocked` (danger,
+  "Técnico bloqueado: troque"): o técnico responsável fora de Ativo na operação, que fica com a OS até a central trocar
+  (sem o `inactive_technician` junto: liberar o acesso não resolve; a mesma regra na contagem de `counts` e de
+  `GET /queues`), `unproductive` (warning, improdutiva sem nova agenda, fora de campo; enquanto espera a data
   nova, sem os motivos de chegada), `violation_pending` (info, concluída
   com SLA a justificar), `field_stuck` (danger, "Em campo há 13 h: conclua ou corrija", em dias a partir de
   24 h; dado parado, a regra de `services/field.py`) e as regras de campo (ver abaixo): `arrival_late`,
@@ -773,7 +791,8 @@ python -m app.importers.fieldcontrol /tmp/fc_export --wipe-demo --report /tmp/fc
 - `--report`: relatório em JSON (contagens por entidade, itens pulados e motivo, tempos), sem dados pessoais.
 
 **Mapeamento.**
-- Usuários do escritório: admin/dono vira gestor (`supervisor`), o resto vira analista. Colaboradores viram técnicos (ativos ou inativos como no Field Control), com cidade/UF de moradia. O mesmo e-mail é uma pessoa só. Ninguém entra com senha antes de uma redefinição; a gestão também entra com a Microsoft.
+- Usuários do escritório: admin/dono vira gestor (`supervisor`), o resto vira analista. Colaboradores viram técnicos (com ou sem acesso ao app, como ativos ou inativos no Field Control), com cidade/UF de moradia. O mesmo e-mail é uma pessoa só. Ninguém entra com senha antes de uma redefinição; a gestão também entra com a Microsoft.
+- Endereço do técnico em partes, como o cadastro guarda desde o cadastro V2 (`technician_address`): a rua em `address_line`, o número como o app e a central gravam (em maiúsculas; "SN" e "S / N" viram "S/N") e o complemento. Número com mais de 10 caracteres fica junto da rua ("rua, número") e complemento com mais de 60 vai para a linha; o endereço padrão do escritório não entra. Rodar de novo grava os três, também vazios, sem repetir na rua o número que a migração já separou. Clientes e locais continuam com a linha inteira.
 - Clientes: CNPJ só com dígitos (repetido fica vazio e vai para as observações), e-mail/telefone principal e etiquetas (`tags`).
 - Locais: o código sai do nome ("43 - Barra Salvador" vira código 43). Também vêm CNPJ, endereço, UF, CEP, coordenadas, contato e observações.
 - Tipos de serviço (com a duração) e catálogo de preços. Os produtos entram como produto; os serviços com preço que aparecem nos orçamentos entram como serviço.
