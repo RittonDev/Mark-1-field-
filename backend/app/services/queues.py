@@ -18,7 +18,14 @@ from sqlalchemy import ColumnElement, and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import permissions
-from app.core.enums import PartRequestStatus, SlaStatus, TicketEventType, TicketStatus, UserRole
+from app.core.enums import (
+    OperationalStatus,
+    PartRequestStatus,
+    SlaStatus,
+    TicketEventType,
+    TicketStatus,
+    UserRole,
+)
 from app.db.base import utcnow
 from app.models import Ticket, TicketEvent, User
 from app.models.part_request import TicketPartRequest
@@ -52,6 +59,12 @@ LIMIT = 500
 CHECKIN_FAR_M = 1000
 # Em campo há mais de 12 h (services/field.py): dado parado, vai para "precisa de atenção".
 FIELD_STUCK = "field_stuck"
+# Técnico responsável fora de Ativo na operação (services/technician_status.py): code, texto e
+# tom. "inactive_technician" é outro motivo, o de antes: sem acesso ao app.
+NOT_ACTIVE_REASON = {
+    OperationalStatus.INACTIVE: ("technician_inactive", "Técnico inativo: troque", "warning"),
+    OperationalStatus.BLOCKED: ("technician_blocked", "Técnico bloqueado: troque", "danger"),
+}
 
 # Colunas que os motivos e as seções leem (a contagem não carrega a OS inteira).
 _COUNT_COLUMNS = (
@@ -137,11 +150,14 @@ def reasons_for(
     *,
     part_request_open: bool = False,
     assignee_active: bool | None = None,
+    assignee_status: str | None = None,
     checkin_far_m: int | None = None,
     field_since: datetime | None = None,
 ) -> list[QueueReason]:
     """Motivos de atenção da OS (serve para a OS do ORM e para linhas de consulta). `field_since`
-    é desde quando ela está em campo (services/field.py), para a regra das 12 h."""
+    é desde quando ela está em campo (services/field.py), para a regra das 12 h;
+    `assignee_active` e `assignee_status`, o acesso ao app e a situação na operação do técnico
+    responsável."""
     reasons: list[QueueReason] = []
     is_open = t.status in OPEN_STATUSES
     if is_open:
@@ -170,17 +186,24 @@ def reasons_for(
             reasons.append(QueueReason(code="late_start", label="Atrasada", tone="danger"))
         if t.status not in WAITING and assignee_role != UserRole.TECHNICIAN:
             reasons.append(QueueReason(code="no_technician", label="Sem técnico", tone="warning"))
-        # Técnico inativo no cadastro = sem acesso ao app (no Field Control, "inativo" é só sem
-        # licença, e ele continua atendendo): a OS não chega ao app até alguém liberar o acesso
-        # (Técnicos) ou trocar o técnico.
-        if assignee_role == UserRole.TECHNICIAN and assignee_active is False:
-            reasons.append(
-                QueueReason(
-                    code="inactive_technician",
-                    label="Técnico sem acesso: libere ou troque",
-                    tone="warning",
+        if assignee_role == UserRole.TECHNICIAN:
+            status = OperationalStatus(assignee_status or OperationalStatus.ACTIVE)
+            if status != OperationalStatus.ACTIVE:
+                # Fora de Ativo na operação: a OS que ele já tem fica com ele, mas a central troca
+                # (liberar o acesso não resolve, então o "sem acesso" não entra junto).
+                code, label, tone = NOT_ACTIVE_REASON[status]
+                reasons.append(QueueReason(code=code, label=label, tone=tone))
+            elif assignee_active is False:
+                # Sem acesso ao app (no Field Control, "inativo" é só sem licença, e ele continua
+                # atendendo): a OS não chega ao app até alguém liberar o acesso (Técnicos) ou
+                # trocar o técnico.
+                reasons.append(
+                    QueueReason(
+                        code="inactive_technician",
+                        label="Técnico sem acesso: libere ou troque",
+                        tone="warning",
+                    )
                 )
-            )
         # Esperando data nova depois da improdutiva (em campo de novo, não: a visita está
         # acontecendo), como o grupo "Improdutivas sem reagendar" da Início.
         if t.status not in FIELD and field_rules.awaiting_new_visit(t):
@@ -305,6 +328,7 @@ async def queue_counts(
                 field_rules.field_since().label("field_since"),
                 User.role.label("assignee_role"),
                 User.is_active.label("assignee_active"),
+                User.operational_status.label("assignee_status"),
             )
             .outerjoin(User, User.id == Ticket.assignee_id)
             .where(which, *conds)
@@ -324,6 +348,7 @@ async def queue_counts(
             row.assignee_role,
             part_request_open=row.id in asking,
             assignee_active=row.assignee_active,
+            assignee_status=row.assignee_status,
             checkin_far_m=far.get(row.id),
             field_since=row.field_since,
         )
@@ -401,6 +426,7 @@ async def my_queue(
             t.assignee.role if t.assignee else None,
             part_request_open=t.id in asking,
             assignee_active=t.assignee.is_active if t.assignee else None,
+            assignee_status=t.assignee.operational_status if t.assignee else None,
             checkin_far_m=far.get(t.id),
             field_since=since.get(t.id),
         )

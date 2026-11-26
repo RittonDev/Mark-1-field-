@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.core.enums import OperationalStatus
 from app.schemas.common import ORMModel, Ref
 from app.schemas.ticket import LocalDatetime
 
@@ -88,6 +89,10 @@ class LiveTechnician(BaseModel):
     # Em campo numa OS de outra fila (quem pede só vê a própria): o estado aparece, a OS não.
     current_ticket_hidden: bool = False
     open_tickets: int
+    # Situação na operação (o selo da central): Inativo e Bloqueado continuam no mapa e não
+    # recebem OS; o motivo (o title do selo) só fora de Ativo.
+    operational_status: OperationalStatus = OperationalStatus.ACTIVE
+    operational_reason: str | None = None
 
 
 class HistoryPoint(BaseModel):
@@ -151,6 +156,9 @@ class TechnicianDistance(BaseModel):
     live_to_place: DistanceLeg | None = None
     home_to_place: DistanceLeg | None = None
     live_to_home: DistanceLeg | None = None
+    # Situação na operação, como no mapa ao vivo: quem está perto e não recebe OS tem o selo.
+    operational_status: OperationalStatus = OperationalStatus.ACTIVE
+    operational_reason: str | None = None
 
 
 class MapDistances(BaseModel):

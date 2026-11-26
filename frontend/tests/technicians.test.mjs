@@ -4,7 +4,14 @@
 // Na pasta frontend: node --experimental-strip-types --test "tests/*.test.mjs"
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { CADASTRO_DELIVERY, isSendableEmail, periodShort, TECH_SECTION_GROUPS, unavailableOn } from "../src/lib/constants.ts";
+import {
+  CADASTRO_DELIVERY,
+  isSendableEmail,
+  periodShort,
+  TECH_SECTION_GROUPS,
+  unavailableBetween,
+  unavailableOn,
+} from "../src/lib/constants.ts";
 import {
   EMAIL_STATUS_LABEL,
   EMAIL_TEMPLATE_LABEL,
@@ -233,6 +240,19 @@ describe("indisponibilidade e e-mail (de lib/constants.ts)", () => {
     assert.equal(unavailableOn(periods, "2026-11-30"), periods[0]);
     assert.equal(unavailableOn(periods, "2026-12-01"), null);
     assert.equal(unavailableOn(undefined, "2026-11-25"), null);
+  });
+
+  it("unavailableBetween: os dias da visita, do início ao fim (a oferta que a API recusaria)", () => {
+    const away = [{ id: ID, start: "2026-12-01", end: "2026-12-05" }];
+    // OS de 30/11 às 22h com 240 min: termina 01/12 às 2h e toca o período que começa no 2º dia.
+    assert.equal(unavailableOn(away, "2026-11-30"), null);
+    assert.equal(unavailableBetween(away, "2026-11-30", "2026-12-01"), away[0]);
+    // Visita de vários dias com o período só no meio.
+    assert.equal(unavailableBetween([{ id: ID, start: "2026-12-01", end: "2026-12-01" }], "2026-11-30", "2026-12-02")?.start, "2026-12-01");
+    // Termina na véspera do período: livre.
+    assert.equal(unavailableBetween(away, "2026-11-29", "2026-11-30"), null);
+    // Já começou (o mesmo período da lista): pega.
+    assert.equal(unavailableBetween(periods, "2026-11-25", "2026-11-25"), periods[0]);
   });
 
   it("periodShort: já começou ou ainda vai começar", () => {

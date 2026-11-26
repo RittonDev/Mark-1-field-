@@ -20,8 +20,10 @@ class FavoriteTechnician(BaseModel):
     phone: str | None
     avatar_url: str | None
     is_active: bool
-    # Situação na operação: Inativo e Bloqueado ficam fora do automático (o fixado continua).
+    # Situação na operação: Inativo e Bloqueado ficam fora do automático (o fixado continua). O
+    # motivo (o title do selo na central) só fora de Ativo.
     operational_status: OperationalStatus = OperationalStatus.ACTIVE
+    operational_reason: str | None = None
     on_shift: bool
     open_tickets: int
     base_city: str | None

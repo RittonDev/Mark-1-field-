@@ -33,6 +33,8 @@ from app.services.errors import CodedError, NotFound, WorkflowError
 LABELS: dict[str, str] = {"active": "Ativo", "inactive": "Inativo", "blocked": "Bloqueado"}
 
 NO_ACCESS = "Sem acesso ao app"
+# Quem entra numa OS (responsável, auxiliar ou oferta) sem o acesso ao app.
+NO_ACCESS_TO_ENTER = "{name} está sem acesso ao app: libere o acesso em Técnicos"
 SAME_STATUS = "O técnico já está {label}"
 SAME_STATUS_CODE = "OPERATIONAL_STATUS_UNCHANGED"
 NOT_RECEIVING = "{name} está {label} e não recebe OS"
@@ -56,6 +58,14 @@ def _reason(user: User) -> str:
     return " ".join((user.operational_reason or "").split())
 
 
+def badge(user: User) -> dict[str, Any]:
+    """A situação e o motivo para o selo da central (`operational_status`, `operational_reason`
+    = o title): o motivo só fora de Ativo, como no Colaborador (o da reativação não aparece)."""
+    status = _status(user.operational_status)
+    reason = _reason(user) if status != OperationalStatus.ACTIVE else ""
+    return {"operational_status": status, "operational_reason": reason or None}
+
+
 def receive_block(user: User) -> str | None:
     """Por que o técnico não recebe OS agora, para a central: "Sem acesso ao app", "Inativo:
     {motivo}" ou "Bloqueado: {motivo}"; None quando recebe."""
@@ -70,8 +80,8 @@ def receive_block(user: User) -> str | None:
 
 def ensure_can_receive(user: User) -> None:
     """Técnico Inativo ou Bloqueado não entra numa OS (responsável, auxiliar ou oferta): 422
-    "{nome} está inativo e não recebe OS: {motivo}". O acesso ao app cada lugar confere com a
-    mensagem dele. Quem não é técnico passa."""
+    "{nome} está inativo e não recebe OS: {motivo}". O acesso ao app cada lugar confere antes
+    (NO_ACCESS_TO_ENTER). Quem não é técnico passa."""
     if user.role != UserRole.TECHNICIAN:
         return
     status = _status(user.operational_status)
@@ -95,14 +105,16 @@ def unavailable_between(stored: Iterable[Any] | None, first: date, last: date) -
 
 
 def unavailable_for_visit(user: User, start: datetime | None, end: datetime | None) -> dict | None:
-    """O período de indisponibilidade que toca os dias da visita (sem horário: hoje)."""
+    """O período de indisponibilidade que toca os dias da visita (sem horário: hoje). Só conta o
+    que não acabou (fim >= hoje), os mesmos que a central recebe para avisar: numa visita que já
+    passou, o período que terminou antes de hoje não recusa."""
     first, last = unavailability.days_of(start, end)
-    return unavailable_between(user.unavailability, first, last)
+    return unavailable_between(user.unavailability, max(first, today()), last)
 
 
 def ensure_available(user: User, start: datetime | None, end: datetime | None) -> None:
-    """Para a oferta: indisponível nos dias da visita (sem horário: hoje) → 422 "{nome} está
-    indisponível de 20/12 a 05/01/2027"."""
+    """Para a oferta: indisponível nos dias da visita (sem horário: hoje; a visita que vira a noite
+    conta os dois dias) → 422 "{nome} está indisponível de 20/12 a 05/01/2027"."""
     period = unavailable_for_visit(user, start, end)
     if period is not None:
         text = unavailability.period_short(period, today())

@@ -42,7 +42,7 @@ from app.schemas.technician_favorite import (
     FavoritesOut,
     FavoriteTechnician,
 )
-from app.services import technician_regions, technicians
+from app.services import technician_regions, technician_status, technicians
 from app.services.errors import NotFound, WorkflowError
 from app.services.technician_regions import fold_text
 from app.services.workflow import OPEN_STATUSES
@@ -384,7 +384,7 @@ def _technician(board: _Board, user: User, people: _People) -> FavoriteTechnicia
         phone=user.phone,
         avatar_url=technicians.avatar_url(user),
         is_active=user.is_active,
-        operational_status=user.operational_status,
+        **technician_status.badge(user),
         on_shift=user.id in people.on_shift,
         open_tickets=people.open_tickets.get(user.id, 0),
         base_city=user.base_city,

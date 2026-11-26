@@ -905,6 +905,9 @@ export interface LiveTechnician {
   /** Em atendimento numa OS de outra fila: `current_ticket` vem null. */
   current_ticket_hidden?: boolean;
   open_tickets: number;
+  /** Situação na operação: Inativo e Bloqueado vêm com o motivo. A API antiga não manda (vale "active"). */
+  operational_status?: OperationalStatus;
+  operational_reason?: string | null;
 }
 
 /** Um ponto do mapa; `approximate` = medido pelo centro da cidade. */
@@ -938,6 +941,9 @@ export interface TechnicianDistance {
   live_to_place: DistanceLeg | null;
   home_to_place: DistanceLeg | null;
   live_to_home: DistanceLeg | null;
+  /** Situação na operação: Inativo e Bloqueado vêm com o motivo. A API antiga não manda (vale "active"). */
+  operational_status?: OperationalStatus;
+  operational_reason?: string | null;
 }
 
 export interface MapDistances {
@@ -1863,8 +1869,9 @@ export interface NearbyTechnician {
   open_tickets: number;
   on_shift: boolean;
   reasons: string[];
-  /** A API antiga não manda (vale "active"). */
+  /** Inativo e Bloqueado vêm com o motivo. A API antiga não manda (vale "active"). */
   operational_status?: OperationalStatus;
+  operational_reason?: string | null;
 }
 
 export interface NearbyResult {
@@ -1896,8 +1903,9 @@ export interface FavoriteTechnician {
   note: string | null;
   set_by: Ref | null;
   set_at: ISODate | null;
-  /** Fora de "active", não entra no automático. A API antiga não manda (vale "active"). */
+  /** Fora de "active", não entra no automático e vem com o motivo. A API antiga não manda (vale "active"). */
   operational_status?: OperationalStatus;
+  operational_reason?: string | null;
 }
 
 export interface FavoriteCity {
@@ -2386,7 +2394,11 @@ export interface EmailLog {
 export interface OperationalStatusIn { status: OperationalStatus; reason: string; cut_access?: boolean }
 
 export interface ApplicationReview { action: "approved" | "rejected" | "reopened" | "expired"; at: ISODate; by: Ref | null; note: string | null }
-export interface ApplicationApproved { technician: User; welcome: EmailQueued }
+/**
+ * `password_link`: a boas-vindas leva o link de criar senha (ficha sem senha e e-mail validado). false com a ficha sem
+ * senha: o e-mail não estava validado, e a central gera a senha provisória e manda pelo WhatsApp.
+ */
+export interface ApplicationApproved { technician: User; welcome: EmailQueued; password_link: boolean }
 
 /** signup: a ficha; change: o login passou a ser `email`; check: o login de sempre. */
 export interface VerifyEmailResult { email: string; kind: "signup" | "change" | "check" }

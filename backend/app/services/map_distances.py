@@ -25,7 +25,7 @@ from app.schemas.tracking import (
     TechnicianDistance,
     TechnicianHome,
 )
-from app.services import geo, technician_regions, tracking
+from app.services import geo, technician_regions, technician_status, tracking
 from app.services.suggestions import km_between
 
 ROAD_FACTOR = 1.3
@@ -35,6 +35,14 @@ def travel_minutes(road_km: float) -> int:
     """Tempo de carro estimado: trânsito de cidade até 20 km, estrada depois."""
     speed = 25 if road_km <= 20 else 50 if road_km <= 100 else 70
     return max(1, round(road_km / speed * 60))
+
+
+def street_text(line: str | None, number: str | None, complement: str | None) -> str:
+    """O endereço gravado em partes numa linha: "Rua Exemplo, 123 - Apto 4" (a junção da
+    importação do Field Control e da volta da migração); o que faltar some, sem sobrar vírgula."""
+    parts = [(p or "").strip() for p in (line, number, complement)]
+    street = ", ".join(p for p in parts[:2] if p)
+    return " - ".join(p for p in (street, parts[2]) if p)
 
 
 def leg(a: MapPoint, b: MapPoint) -> DistanceLeg:
@@ -51,10 +59,12 @@ def leg(a: MapPoint, b: MapPoint) -> DistanceLeg:
 async def _home(
     db: AsyncSession, user: User, centroids: dict[tuple[str, str], tuple[float, float, str] | None]
 ) -> TechnicianHome | None:
-    """Casa do técnico: o endereço com coordenada; sem ele, a cidade de casa; sem ela, a base."""
+    """Casa do técnico: o endereço com coordenada ("Casa · Rua Exemplo, 123 - Apto 4, Bairro
+    Exemplo, Cidade Exemplo-SP"); sem ele, a cidade de casa; sem ela, a base."""
     place = "-".join(p for p in (user.home_city, user.home_state) if p)
     if geo.valid_coords(user.home_latitude, user.home_longitude):
-        where = ", ".join(p for p in (user.address_line, user.address_district, place) if p)
+        street = street_text(user.address_line, user.address_number, user.address_complement)
+        where = ", ".join(p for p in (street, user.address_district, place) if p)
         return TechnicianHome(
             latitude=float(user.home_latitude),  # type: ignore[arg-type]
             longitude=float(user.home_longitude),  # type: ignore[arg-type]
@@ -92,7 +102,8 @@ async def distances(
     location_id: uuid.UUID | None = None,
     team_id: uuid.UUID | None = None,
 ) -> MapDistances:
-    """Técnicos ativos com a posição de agora e a casa; com loja, as distâncias até ela, do mais
+    """Técnicos com acesso ao app, com a posição de agora, a casa e a situação na operação (Inativo
+    e Bloqueado aparecem com o selo: não recebem OS); com loja, as distâncias até ela, do mais
     perto para o mais longe (pela posição de agora, se recente; senão, pela casa)."""
     now = utcnow()
     place: MapPoint | None = None
@@ -137,6 +148,7 @@ async def distances(
                 live_to_place=leg(live, place) if live and place else None,
                 home_to_place=leg(home, place) if home and place else None,
                 live_to_home=leg(live, home) if live and home else None,
+                **technician_status.badge(tech),
             )
         )
 

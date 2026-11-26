@@ -31,7 +31,7 @@ from app.schemas.tracking import (
     TrackingHistory,
 )
 from app.services import field as field_svc
-from app.services import geo
+from app.services import geo, technician_status
 from app.services.activities import day_bounds
 from app.services.realtime import bus
 from app.services.tickets import LIST_NOLOAD, can_view, visibility_clause
@@ -264,9 +264,10 @@ async def publish_shift(user: User, on_shift: bool) -> None:
 async def live(
     db: AsyncSession, team_id: uuid.UUID | None = None, viewer: User | None = None
 ) -> list[LiveTechnician]:
-    """Todos os técnicos ativos com jornada, última posição, OS em campo (há até 12 h) e estado.
-    A OS em campo de uma fila que `viewer` não vê sai sem os detalhes (current_ticket_hidden); a
-    contagem de OS abertas de cada técnico continua agregada."""
+    """Todos os técnicos com acesso ao app, com jornada, última posição, OS em campo (há até 12 h),
+    estado e a situação na operação (Inativo e Bloqueado aparecem com o selo). A OS em campo de
+    uma fila que `viewer` não vê sai sem os detalhes (current_ticket_hidden); a contagem de OS
+    abertas de cada técnico continua agregada."""
     now = utcnow()
     stmt = select(User).where(User.role == UserRole.TECHNICIAN, User.is_active.is_(True))
     if team_id is not None:
@@ -383,6 +384,7 @@ async def live(
                 else None,
                 current_ticket_hidden=hidden,
                 open_tickets=open_counts.get(tech.id, 0),
+                **technician_status.badge(tech),
             )
         )
     return out

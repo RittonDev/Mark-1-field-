@@ -400,15 +400,53 @@ export function isValidRg(text: string): boolean {
   const rg = normalizeRg(text).trim();
   return rg.length >= 5 && (rg.match(/\d/g) ?? []).length >= 4;
 }
-/** Letras sem acento e espaço, maiúsculas ("SSP"). */
-export function normalizeIssuer(text: string): string {
+/** O órgão emissor sem o corte: letras sem acento, espaço, "/" e "-", em maiúsculas. */
+function issuerText(text: string): string {
   return text
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toUpperCase()
-    .replace(/[^A-Z ]/g, "")
-    .replace(/\s+/g, " ")
-    .slice(0, PROFILE_LIMITS.rgIssuer);
+    .replace(/[^A-Z /-]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+/** O campo do órgão emissor enquanto se digita, até 20 ("SSP/SP"); ao salvar, splitIssuer. */
+export function normalizeIssuer(text: string): string {
+  return issuerText(text).slice(0, PROFILE_LIMITS.rgIssuer);
+}
+
+/** As 27 UFs (= UFS de backend/app/schemas/onboarding.py). */
+export const UFS: readonly string[] = [
+  "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB",
+  "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
+];
+
+/**
+ * O órgão emissor ao salvar (o backend separa igual). Termina em "/" ou "-" e uma UF, com o órgão antes ("SSP/SP",
+ * "ssp-sp", "SSP / SP"): órgão "SSP" e UF "SP"; a tela põe a UF no campo dela quando ele está vazio e, com outra UF lá,
+ * fica a do campo. Sem UF válida no fim, "/" e "-" viram espaço ("SSP/XX" → "SSP XX"). Sem o corte de 20: o tamanho do
+ * órgão a tela confere.
+ */
+export function splitIssuer(text: string): { issuer: string; state: string | null } {
+  const value = issuerText(text).trim();
+  const tidy = (part: string) => part.replace(/[/-]/g, " ").replace(/\s+/g, " ").trim();
+  const match = /^(.*?)\s*[/-]\s*([A-Z]{2})$/.exec(value);
+  const issuer = match ? tidy(match[1]) : "";
+  if (match && issuer && UFS.includes(match[2])) return { issuer, state: match[2] };
+  return { issuer: tidy(value), state: null };
+}
+
+/**
+ * A mini biografia como se grava (= personal.bio): "\r\n" vira "\n", sem espaços no fim das linhas, três ou mais
+ * quebras viram duas (uma linha em branco entre os parágrafos) e sem quebras nem espaços nas pontas. O limite de
+ * PROFILE_LIMITS.bio conta depois disso.
+ */
+export function normalizeBio(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[^\S\n]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** Recebe e-mail (= mail.sendable): "@", domínio com ponto, não termina em .invalid/.local (importados). */
@@ -438,9 +476,14 @@ export interface CepSlots { street: string; district: string; city: string; stat
 const cepFold = (text: string) =>
   text.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
 
+const NO_CEP_SLOTS: ReadonlySet<keyof CepSlots> = new Set();
+
 /**
  * O CEP sobre o formulário (6 lugares): campo livre (vazio, igual ao aberto ou de busca anterior: `auto`) recebe o valor;
- * o digitado fica e, se difere, `differs` ("CEP de {cepSummary}." + "Usar este endereço"). Logradouro trocado: a tela
+ * o digitado fica e, se difere, `differs` ("CEP de {cepSummary}." + "Usar este endereço"). O que o CEP não traz (CEP
+ * geral: logradouro e bairro null) não mexe no digitado nem no gravado: só o campo de `stale` (ainda com o valor da
+ * busca anterior) se esvazia e entra em `filled`. `stale` é sempre o da busca anterior, também no "Usar este
+ * endereço", que passa todos em `auto` (o `auto` nunca esvazia). Logradouro trocado de fato (sameStreet): a tela
  * esvazia número e complemento livres.
  */
 export function cepFill(
@@ -448,6 +491,7 @@ export function cepFill(
   opened: CepSlots,
   auto: ReadonlySet<keyof CepSlots>,
   found: CepAddress,
+  stale: ReadonlySet<keyof CepSlots> = NO_CEP_SLOTS,
 ): { next: CepSlots; filled: (keyof CepSlots)[]; differs: boolean } {
   const values: CepSlots = { street: found.street ?? "", district: found.district ?? "", city: found.city, state: found.state };
   const next = { ...current };
@@ -455,7 +499,13 @@ export function cepFill(
   let differs = false;
   for (const key of ["street", "district", "city", "state"] as const) {
     const value = values[key];
-    if (!value) continue;
+    if (!value) {
+      if (stale.has(key) && current[key] !== "") {
+        next[key] = "";
+        filled.push(key);
+      }
+      continue;
+    }
     const free = !current[key].trim() || current[key] === opened[key] || auto.has(key);
     if (free) {
       if (current[key] !== value) {
@@ -467,6 +517,11 @@ export function cepFill(
     }
   }
   return { next, filled, differs };
+}
+
+/** A mesma rua sem contar acento, maiúsculas e espaços repetidos (a comparação de cepFill): "R. Exemplo" é outra. */
+export function sameStreet(a: string | null | undefined, b: string | null | undefined): boolean {
+  return cepFold(a ?? "") === cepFold(b ?? "");
 }
 
 export const UNAVAILABILITY_LIMITS = { periods: 10, horizonDays: 365 } as const;
@@ -488,9 +543,27 @@ export function periodShort(period: { start: string; end: string }, today: strin
   return period.start === period.end ? `em ${short(period.start)}` : `de ${short(period.start)} a ${short(period.end)}`;
 }
 
+/**
+ * O primeiro período (pelo início) com algum dia entre `first` e `last` ("AAAA-MM-DD"), as pontas inclusive, como
+ * technician_status.unavailable_between: para a visita, do dia do início ao do fim. `last` antes de `first` vale
+ * `first` (= unavailability.days_of).
+ */
+export function unavailableBetween(
+  periods: readonly UnavailabilityPeriod[] | null | undefined,
+  first: string,
+  last: string,
+): UnavailabilityPeriod | null {
+  const end = last < first ? first : last;
+  let found: UnavailabilityPeriod | null = null;
+  for (const p of periods ?? []) {
+    if (p.start <= end && p.end >= first && (!found || p.start < found.start)) found = p;
+  }
+  return found;
+}
+
 /** O período que contém `day`, os dois dias inclusive. */
 export function unavailableOn(periods: readonly UnavailabilityPeriod[] | null | undefined, day: string): UnavailabilityPeriod | null {
-  return (periods ?? []).find((p) => p.start <= day && day <= p.end) ?? null;
+  return unavailableBetween(periods, day, day);
 }
 
 /** Grupos e seções com os mesmos nomes na central e no app; `app`: o nome no app quando difere. */
@@ -1099,13 +1172,14 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
  * Versão do aviso: a mesma de PRIVACY_VERSION em backend/app/schemas/onboarding.py (a ficha grava a do servidor no
  * aceite). Mudou o texto de PRIVACY_NOTICE? Mude a versão aqui e lá, no mesmo dia, e publique a web antes da API (ou
  * junto): com a API na frente, a ficha da web pede para recarregar e não envia até a web nova entrar. Formato
- * "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" (as versões se comparam como texto). 2026-11-25: RG,
- * nascimento e CPF no cadastro, veículo, dados da empresa, formas de recebimento, biografia, e-mail validado,
- * indisponibilidade, situação na operação, e-mails do cadastro e a reabertura da ficha reprovada.
+ * "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" (as versões se comparam como texto). 2026-11-26 (a
+ * publicação da Entrega 1): RG, nascimento e CPF no cadastro, veículo, dados da empresa, formas de recebimento,
+ * biografia, e-mail validado, indisponibilidade, situação na operação, e-mails do cadastro e a reabertura da ficha
+ * reprovada.
  */
-export const PRIVACY_VERSION = "2026-11-25";
+export const PRIVACY_VERSION = "2026-11-26";
 
-/** A data da versão para mostrar ("25/11/2026"): os 10 primeiros caracteres, sem um ".2". */
+/** A data da versão para mostrar ("26/11/2026"): os 10 primeiros caracteres, sem um ".2". */
 export const PRIVACY_DATE = PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/");
 
 /** O aviso de privacidade do técnico: a ficha da homologação mostra junto do aceite, e o app, para consulta. */

@@ -1,6 +1,7 @@
 // Cadastro V2 (Entrega 1) em lib/constants.ts (a mesma cópia do app): os casos iguais aos do pytest (placa, idade,
-// períodos de indisponibilidade, formas de recebimento mascaradas, e-mail que recebe, RG), o CEP sobre o formulário, os
-// grupos de seções da central e do app, os rótulos do histórico e o aviso de privacidade. Dados fictícios.
+// períodos de indisponibilidade, formas de recebimento mascaradas, e-mail que recebe, RG e órgão emissor com a UF), a
+// mini biografia com parágrafos, o CEP sobre o formulário (com o CEP geral depois de outro), a rua igual, os grupos de
+// seções da central e do app, os rótulos do histórico e o aviso de privacidade. Dados fictícios.
 // Sem dependência nova: node:test com o type stripping do Node 22.
 // Na pasta frontend: node --experimental-strip-types --test "tests/*.test.mjs"
 import assert from "node:assert/strict";
@@ -128,6 +129,47 @@ describe("indisponibilidade (os casos do pytest)", () => {
     assert.equal(C.unavailableOn(undefined, TODAY), null);
   });
 
+  describe("unavailableBetween (= technician_status.unavailable_between)", () => {
+    const P = { id: "00000000-0000-4000-8000-0000000000b1", start: "2026-12-01", end: "2026-12-05" };
+    const LATER = { id: "00000000-0000-4000-8000-0000000000b2", start: "2026-12-10", end: "2026-12-12" };
+
+    it("as pontas contam: o 1º dia do intervalo no fim do período e o último no início", () => {
+      assert.equal(C.unavailableBetween([P], "2026-11-28", "2026-12-01"), P);
+      assert.equal(C.unavailableBetween([P], "2026-12-05", "2026-12-07"), P);
+      assert.equal(C.unavailableBetween([P], "2026-11-28", "2026-11-30"), null);
+      assert.equal(C.unavailableBetween([P], "2026-12-06", "2026-12-08"), null);
+    });
+
+    it("intervalo dentro do período ou cobrindo o período inteiro", () => {
+      assert.equal(C.unavailableBetween([P], "2026-12-02", "2026-12-03"), P);
+      assert.equal(C.unavailableBetween([P], "2026-11-25", "2026-12-20"), P);
+    });
+
+    it("visita das 22h às 2h (30/11 a 01/12): o período que começa no 2º dia pega; só o dia do início, não", () => {
+      assert.equal(C.unavailableOn([P], "2026-11-30"), null);
+      assert.equal(C.unavailableBetween([P], "2026-11-30", "2026-12-01"), P);
+    });
+
+    it("o primeiro pelo início, mesmo fora de ordem", () => {
+      assert.equal(C.unavailableBetween([LATER, P], "2026-11-30", "2026-12-15"), P);
+      assert.equal(C.unavailableBetween([LATER, P], "2026-12-06", "2026-12-15"), LATER);
+    });
+
+    it("fim antes do início vale só o início (= days_of); sem períodos, null", () => {
+      assert.equal(C.unavailableBetween([P], "2026-12-03", "2026-11-20"), P);
+      assert.equal(C.unavailableBetween([P], "2026-12-06", "2026-12-01"), null);
+      assert.equal(C.unavailableBetween([], "2026-12-01", "2026-12-05"), null);
+      assert.equal(C.unavailableBetween(null, "2026-12-01", "2026-12-05"), null);
+      assert.equal(C.unavailableBetween(undefined, "2026-12-01", "2026-12-05"), null);
+    });
+
+    it("unavailableOn é o intervalo de um dia", () => {
+      for (const day of ["2026-11-30", "2026-12-01", "2026-12-03", "2026-12-05", "2026-12-06"]) {
+        assert.equal(C.unavailableOn([P, LATER], day), C.unavailableBetween([P, LATER], day, day), day);
+      }
+    });
+  });
+
   it("UNAVAILABILITY_LIMITS igual ao servidor", () => {
     assert.deepEqual(C.UNAVAILABILITY_LIMITS, { periods: 10, horizonDays: 365 });
   });
@@ -207,10 +249,49 @@ describe("RG e órgão emissor", () => {
     assert.equal(C.normalizeRg("1".repeat(30)).length, C.PROFILE_LIMITS.rgNumber);
   });
 
-  it("órgão emissor: letras sem acento, maiúsculas", () => {
+  it("órgão emissor enquanto se digita: letras sem acento, espaço, \"/\" e \"-\", maiúsculas, até 20", () => {
     assert.equal(C.normalizeIssuer("ssp"), "SSP");
     assert.equal(C.normalizeIssuer("Polícia  Civil"), "POLICIA CIVIL");
-    assert.equal(C.normalizeIssuer("ssp/sp"), "SSPSP");
+    assert.equal(C.normalizeIssuer("ssp/sp"), "SSP/SP");
+    assert.equal(C.normalizeIssuer("ssp-sp"), "SSP-SP");
+    // Espaço e separador no fim ficam: a pessoa ainda está digitando.
+    assert.equal(C.normalizeIssuer("SSP "), "SSP ");
+    assert.equal(C.normalizeIssuer("SSP/"), "SSP/");
+    assert.equal(C.normalizeIssuer("S.S.P_1"), "SSP");
+    assert.equal(C.normalizeIssuer("A".repeat(30)).length, C.PROFILE_LIMITS.rgIssuer);
+  });
+
+  it("splitIssuer: \"/\" ou \"-\" com UF no fim separa órgão e UF", () => {
+    assert.deepEqual(C.splitIssuer("SSP/SP"), { issuer: "SSP", state: "SP" });
+    assert.deepEqual(C.splitIssuer("ssp-sp"), { issuer: "SSP", state: "SP" });
+    assert.deepEqual(C.splitIssuer("DETRAN/RJ"), { issuer: "DETRAN", state: "RJ" });
+    assert.deepEqual(C.splitIssuer(" SSP / SP "), { issuer: "SSP", state: "SP" });
+    assert.deepEqual(C.splitIssuer("Polícia Civil-MG"), { issuer: "POLICIA CIVIL", state: "MG" });
+  });
+
+  it("splitIssuer: sem UF válida no fim, \"/\" e \"-\" viram espaço", () => {
+    assert.deepEqual(C.splitIssuer("SSP"), { issuer: "SSP", state: null });
+    assert.deepEqual(C.splitIssuer("SSP/XX"), { issuer: "SSP XX", state: null });
+    assert.deepEqual(C.splitIssuer("SSP/"), { issuer: "SSP", state: null });
+    assert.deepEqual(C.splitIssuer("SSP/S"), { issuer: "SSP S", state: null });
+    assert.deepEqual(C.splitIssuer("SSPSP"), { issuer: "SSPSP", state: null });
+    assert.deepEqual(C.splitIssuer(""), { issuer: "", state: null });
+    // Sem órgão antes da UF, nada a separar.
+    assert.deepEqual(C.splitIssuer("/SP"), { issuer: "SP", state: null });
+  });
+
+  it("splitIssuer: sem o corte de 20, a UF do fim não se perde (o tamanho do órgão a tela confere)", () => {
+    const { issuer, state } = C.splitIssuer("Secretaria de Segurança/SP");
+    assert.equal(issuer, "SECRETARIA DE SEGURANCA");
+    assert.equal(state, "SP");
+    assert.ok(issuer.length > C.PROFILE_LIMITS.rgIssuer);
+  });
+
+  it("UFS: as 27, sem repetir", () => {
+    assert.equal(C.UFS.length, 27);
+    assert.ok(unique(C.UFS));
+    assert.ok(C.UFS.every((uf) => /^[A-Z]{2}$/.test(uf)));
+    assert.ok(C.UFS.includes("DF") && C.UFS.includes("SP") && !C.UFS.includes("XX"));
   });
 
   it("PROFILE_LIMITS igual ao servidor", () => {
@@ -223,6 +304,38 @@ describe("RG e órgão emissor", () => {
       companyName: 160,
       vehicleModel: 60,
     });
+  });
+});
+
+describe("mini biografia (normalizeBio, = personal.bio)", () => {
+  it("mantém os parágrafos; \\r\\n vira \\n", () => {
+    assert.equal(C.normalizeBio("Técnico de CFTV.\r\nAtendo a região.\r\n\r\nTenho carro."), "Técnico de CFTV.\nAtendo a região.\n\nTenho carro.");
+    assert.equal(C.normalizeBio("Linha 1\nLinha 2"), "Linha 1\nLinha 2");
+  });
+
+  it("tira os espaços do fim de cada linha e junta 3 ou mais quebras em 2", () => {
+    assert.equal(C.normalizeBio("Parágrafo 1   \n\n\n\nParágrafo 2\t "), "Parágrafo 1\n\nParágrafo 2");
+    // Linha só com espaços conta como linha em branco.
+    assert.equal(C.normalizeBio("Um\n   \n \t \nDois"), "Um\n\nDois");
+  });
+
+  it("apara o começo e o fim; o resto do texto fica como está", () => {
+    assert.equal(C.normalizeBio("\n\n  Olá, sou o Tecnico Alfa.  \n\n"), "Olá, sou o Tecnico Alfa.");
+    assert.equal(C.normalizeBio("Um\n  recuo e  dois espaços"), "Um\n  recuo e  dois espaços");
+    assert.equal(C.normalizeBio("   \r\n \n"), "");
+    assert.equal(C.normalizeBio(""), "");
+  });
+
+  it("o limite de 500 conta depois da limpeza", () => {
+    const text = `${"a".repeat(C.PROFILE_LIMITS.bio)}   \n\n\n\n`;
+    assert.ok(text.length > C.PROFILE_LIMITS.bio);
+    assert.equal(C.normalizeBio(text).length, C.PROFILE_LIMITS.bio);
+  });
+
+  it("idempotente", () => {
+    for (const text of ["A  \r\n\r\n\r\nB ", " \n a \n\n\n b \n "]) {
+      assert.equal(C.normalizeBio(C.normalizeBio(text)), C.normalizeBio(text));
+    }
   });
 });
 
@@ -296,6 +409,72 @@ describe("CEP", () => {
     const { filled } = C.cepFill(current, current, NONE, SE);
     assert.deepEqual(filled, ["street", "district"]);
     assert.deepEqual(current, copy);
+  });
+
+  describe("CEP geral depois de outro CEP (stale: os campos ainda com o valor da busca anterior)", () => {
+    const ALL = new Set(["street", "district", "city", "state"]);
+
+    it("CEP geral depois de CEP específico: rua e bairro da busca anterior saem; o digitado fica", () => {
+      // 1ª busca: o CEP específico preenche os 4.
+      const first = C.cepFill(EMPTY, EMPTY, NONE, SE);
+      assert.deepEqual(first.filled, ["street", "district", "city", "state"]);
+      // 2ª busca, CEP geral, sem ninguém mexer: rua e bairro de antes saem; cidade troca; a UF igual fica.
+      const all = C.cepFill(first.next, EMPTY, ALL, GENERAL, ALL);
+      assert.deepEqual(all.next, { street: "", district: "", city: "Cidade Exemplo", state: "SP" });
+      assert.deepEqual(all.filled, ["street", "district", "city"]);
+      assert.equal(all.differs, false);
+      // A pessoa trocou a rua depois da 1ª busca: a rua digitada fica; o bairro da busca sai.
+      const typed = { ...first.next, street: "Rua Exemplo" };
+      const keep = new Set(["district", "city", "state"]);
+      const mixed = C.cepFill(typed, EMPTY, keep, GENERAL, keep);
+      assert.deepEqual(mixed.next, { street: "Rua Exemplo", district: "", city: "Cidade Exemplo", state: "SP" });
+      assert.deepEqual(mixed.filled, ["district", "city"]);
+      assert.equal(mixed.differs, false);
+    });
+
+    it("\"Usar este endereço\" (todos em auto) com CEP geral: só o stale esvazia, nunca o auto", () => {
+      const current = { street: "Rua Exemplo", district: "Bairro Exemplo", city: "São Paulo", state: "SP" };
+      const use = C.cepFill(current, EMPTY, ALL, GENERAL, new Set(["city", "state"]));
+      assert.deepEqual(use.next, { street: "Rua Exemplo", district: "Bairro Exemplo", city: "Cidade Exemplo", state: "SP" });
+      assert.deepEqual(use.filled, ["city"]);
+      const stale = C.cepFill(current, EMPTY, ALL, GENERAL, new Set(["district"]));
+      assert.deepEqual(stale.next, { street: "Rua Exemplo", district: "", city: "Cidade Exemplo", state: "SP" });
+      assert.deepEqual(stale.filled, ["district", "city"]);
+    });
+
+    it("sem o 5º parâmetro (chamadas de antes): CEP geral não mexe em rua e bairro, nem os de auto", () => {
+      const current = { street: "Praça da Sé", district: "Sé", city: "São Paulo", state: "SP" };
+      const { next, filled } = C.cepFill(current, EMPTY, ALL, GENERAL);
+      assert.deepEqual(next, { street: "Praça da Sé", district: "Sé", city: "Cidade Exemplo", state: "SP" });
+      assert.deepEqual(filled, ["city"]);
+    });
+
+    it("o gravado (igual ao aberto) não é stale: fica", () => {
+      const opened = { street: "Rua Exemplo", district: "Bairro Exemplo", city: "São Paulo", state: "SP" };
+      const { next, filled } = C.cepFill(opened, opened, NONE, GENERAL, NONE);
+      assert.deepEqual(next, { street: "Rua Exemplo", district: "Bairro Exemplo", city: "Cidade Exemplo", state: "SP" });
+      assert.deepEqual(filled, ["city"]);
+    });
+
+    it("stale já vazio não entra em filled; CEP com o campo usa o valor novo (não esvazia)", () => {
+      const current = { street: "", district: "Sé", city: "São Paulo", state: "SP" };
+      const general = C.cepFill(current, EMPTY, ALL, GENERAL, ALL);
+      assert.deepEqual(general.filled, ["district", "city"]);
+      assert.deepEqual(general.next, { street: "", district: "", city: "Cidade Exemplo", state: "SP" });
+      const specific = C.cepFill({ ...current, street: "Rua Exemplo" }, EMPTY, ALL, SE, ALL);
+      assert.deepEqual(specific.next, { street: "Praça da Sé", district: "Sé", city: "São Paulo", state: "SP" });
+      assert.deepEqual(specific.filled, ["street"]);
+    });
+  });
+
+  it("sameStreet: sem acento, maiúsculas e espaços repetidos; abreviação é outra rua", () => {
+    assert.equal(C.sameStreet("Rua  Exemplo", "rua exemplo"), true);
+    assert.equal(C.sameStreet(" Praça da Sé ", "PRACA DA SE"), true);
+    assert.equal(C.sameStreet("R. Exemplo", "Rua Exemplo"), false);
+    assert.equal(C.sameStreet("Rua Exemplo", "Rua Exemplo 2"), false);
+    assert.equal(C.sameStreet("Rua Exemplo", ""), false);
+    assert.equal(C.sameStreet("", null), true);
+    assert.equal(C.sameStreet(undefined, "  "), true);
   });
 });
 
@@ -419,7 +598,7 @@ describe("aviso de privacidade", () => {
   const all = C.PRIVACY_NOTICE.map((item) => `${item.title} ${item.body}`).join(" ");
 
   it("versão nova, da Entrega 1 (a publicação põe a data do dia, igual no backend)", () => {
-    assert.ok(C.PRIVACY_VERSION >= "2026-11-25", C.PRIVACY_VERSION);
+    assert.ok(C.PRIVACY_VERSION >= "2026-11-26", C.PRIVACY_VERSION);
     assert.equal(C.PRIVACY_DATE, C.PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/"));
   });
 

@@ -691,6 +691,7 @@ async def nearby(
         from app.services.tracking import active_shifts  # evita import circular
 
         on_shift = set(await active_shifts(db, ids))
+    from app.services import technician_status  # evita import circular
     from app.services.technicians import avatar_url  # evita import circular
 
     rows = []
@@ -700,7 +701,7 @@ async def nearby(
         if load:
             reasons.append("1 OS aberta agora" if load == 1 else f"{load} OS abertas agora")
         if not u.is_active:
-            reasons.append("Inativo no app")
+            reasons.append(technician_status.NO_ACCESS)  # "Sem acesso ao app"
         rows.append(
             {
                 "id": u.id,
@@ -708,8 +709,9 @@ async def nearby(
                 "email": u.email,
                 "phone": u.phone,
                 "is_active": u.is_active,
-                # Inativo e Bloqueado aparecem (a web mostra o selo): não recebem OS.
-                "operational_status": u.operational_status,
+                # Inativo e Bloqueado aparecem (a web mostra o selo, com o motivo no title): não
+                # recebem OS.
+                **technician_status.badge(u),
                 "avatar_url": avatar_url(u),
                 "base_city": u.base_city,
                 "base_state": u.base_state,

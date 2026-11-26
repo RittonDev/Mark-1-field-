@@ -437,9 +437,9 @@ export function splitIssuer(text: string): { issuer: string; state: string | nul
 }
 
 /**
- * A mini biografia como se grava (= personal.bio): "\r\n" vira "\n", sem espaços no fim das linhas, três ou mais quebras
- * viram duas (uma linha em branco entre os parágrafos) e sem quebras nem espaços nas pontas. PROFILE_LIMITS.bio conta
- * depois disso.
+ * A mini biografia como se grava (= personal.bio): "\r\n" vira "\n", sem espaços no fim das linhas, três ou mais
+ * quebras viram duas (uma linha em branco entre os parágrafos) e sem quebras nem espaços nas pontas. O limite de
+ * PROFILE_LIMITS.bio conta depois disso.
  */
 export function normalizeBio(text: string): string {
   return text
@@ -481,10 +481,10 @@ const NO_CEP_SLOTS: ReadonlySet<keyof CepSlots> = new Set();
 /**
  * O CEP sobre o formulário (6 lugares): campo livre (vazio, igual ao aberto ou de busca anterior: `auto`) recebe o valor;
  * o digitado fica e, se difere, `differs` ("CEP de {cepSummary}." + "Usar este endereço"). O que o CEP não traz (CEP
- * geral: logradouro e bairro null) não mexe no digitado nem no gravado: só o campo de `stale` (ainda com o valor da busca
- * anterior) se esvazia e entra em `filled`. `stale` é sempre o da busca anterior, também no "Usar este endereço", que
- * passa todos em `auto` (o `auto` nunca esvazia). Logradouro trocado de fato (sameStreet): a tela esvazia número e
- * complemento livres.
+ * geral: logradouro e bairro null) não mexe no digitado nem no gravado: só o campo de `stale` (ainda com o valor da
+ * busca anterior) se esvazia e entra em `filled`. `stale` é sempre o da busca anterior, também no "Usar este
+ * endereço", que passa todos em `auto` (o `auto` nunca esvazia). Logradouro trocado de fato (sameStreet): a tela
+ * esvazia número e complemento livres.
  */
 export function cepFill(
   current: CepSlots,
@@ -545,8 +545,8 @@ export function periodShort(period: { start: string; end: string }, today: strin
 
 /**
  * O primeiro período (pelo início) com algum dia entre `first` e `last` ("AAAA-MM-DD"), as pontas inclusive, como
- * technician_status.unavailable_between: para a visita, do dia do início ao do fim. `last` antes de `first` vale `first`
- * (= unavailability.days_of).
+ * technician_status.unavailable_between: para a visita, do dia do início ao do fim. `last` antes de `first` vale
+ * `first` (= unavailability.days_of).
  */
 export function unavailableBetween(
   periods: readonly UnavailabilityPeriod[] | null | undefined,

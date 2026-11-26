@@ -439,9 +439,8 @@ async def _technicians(db: AsyncSession, ticket: Ticket, ids: list[uuid.UUID]) -
         if user.role != UserRole.TECHNICIAN:
             raise WorkflowError(f"{user.name} não é técnico de campo")
         if not user.is_active:
-            raise WorkflowError(
-                f"{user.name} está sem acesso ao app: libere o acesso em Técnicos antes de ofertar"
-            )
+            text = technician_status.NO_ACCESS_TO_ENTER.format(name=user.name)
+            raise WorkflowError(f"{text} antes de ofertar")
         technician_status.ensure_can_receive(user)
         technician_status.ensure_available(user, ticket.scheduled_start, ticket.scheduled_end)
         if user.id in helpers:

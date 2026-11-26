@@ -10,7 +10,7 @@ import io
 import math
 import re
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta
 from enum import Enum
 from typing import Any, NamedTuple
@@ -986,6 +986,27 @@ async def close_offers_on_status(
         )
 
 
+ASSIGNEE_INVALID = "Responsável inválido"
+HELPER_INVALID = "Técnico auxiliar inválido"
+
+
+def _ensure_access(user: User, invalid: str) -> None:
+    """Quem entra na OS precisa do acesso ao app: o técnico sem ele, 422 "{nome} está sem acesso ao
+    app: libere o acesso em Técnicos" (a frase das ofertas); outro usuário desativado, `invalid`."""
+    if user.is_active:
+        return
+    if user.role == UserRole.TECHNICIAN:
+        raise WorkflowError(technician_status.NO_ACCESS_TO_ENTER.format(name=user.name))
+    raise WorkflowError(invalid)
+
+
+def _ensure_enters(user: User, invalid: str) -> None:
+    """Quem entra como responsável: o acesso ao app (_ensure_access) e a situação Ativo
+    (technician_status.ensure_can_receive), nessa ordem (a de receive_block)."""
+    _ensure_access(user, invalid)
+    technician_status.ensure_can_receive(user)
+
+
 async def _assign(
     db: AsyncSession,
     ticket: Ticket,
@@ -1003,17 +1024,18 @@ async def _assign(
 
     `via`: como o técnico entrou na OS, gravado no evento (ex.: "offer", aceitou a oferta).
     Definir o técnico fecha as ofertas pendentes da OS (o aceite fecha as outras antes, como
-    "outro técnico aceitou"). O técnico que entra precisa estar Ativo na operação
-    (technician_status.ensure_can_receive); salvar a OS com o mesmo responsável não confere de
-    novo, e a indisponibilidade não trava (a web avisa)."""
+    "outro técnico aceitou"). O técnico que entra precisa do acesso ao app e de estar Ativo na
+    operação (_ensure_enters); salvar a OS com o mesmo responsável não confere de novo (a
+    central cortou o acesso ao bloquear: a OS continua com ele), e a indisponibilidade não trava
+    (a web avisa)."""
     prev_id = ticket.assignee_id
     assignee: User | None = None
     if assignee_id is not None:
         assignee = await db.get(User, assignee_id)
-        if assignee is None or not assignee.is_active or not assignee.is_staff:
-            raise WorkflowError("Responsável inválido ou inativo")
+        if assignee is None or not assignee.is_staff:
+            raise WorkflowError(ASSIGNEE_INVALID)
         if assignee_id != prev_id:
-            technician_status.ensure_can_receive(assignee)
+            _ensure_enters(assignee, ASSIGNEE_INVALID)
 
     team_changed = False
     if team_id is not None and team_id != ticket.team_id:
@@ -1187,9 +1209,17 @@ def _clean_text(value: str | None, *, single_line: bool = False) -> str | None:
 
 
 async def _helper_users(
-    db: AsyncSession, ids: list[uuid.UUID], assignee_id: uuid.UUID | None, actor: User
+    db: AsyncSession,
+    ids: list[uuid.UUID],
+    assignee_id: uuid.UUID | None,
+    actor: User,
+    *,
+    kept: Collection[uuid.UUID] = (),
 ) -> list[User]:
-    """Outros técnicos da visita: ativos, da equipe, sem repetir o responsável."""
+    """Outros técnicos da visita: da equipe, sem repetir o responsável. Quem entra precisa do
+    acesso ao app (_ensure_access); quem já está na visita (`kept`) fica mesmo sem ele (a central
+    cortou o acesso ao bloquear: a OS continua com ele). A situação na operação quem chama confere,
+    também só de quem entra."""
     wanted = [i for i in dict.fromkeys(ids) if i != assignee_id]
     if not wanted:
         return []
@@ -1198,8 +1228,10 @@ async def _helper_users(
     found = {u.id: u for u in await db.scalars(select(User).where(User.id.in_(wanted)))}
     for user_id in wanted:
         user = found.get(user_id)
-        if user is None or not user.is_active or not user.is_staff:
-            raise WorkflowError("Técnico auxiliar inválido ou inativo")
+        if user is None or not user.is_staff:
+            raise WorkflowError(HELPER_INVALID)
+        if user_id not in kept:
+            _ensure_access(user, HELPER_INVALID)
     return [found[i] for i in wanted]
 
 
@@ -1224,8 +1256,9 @@ async def _check_assignee_not_added(
 async def _set_helpers(
     db: AsyncSession, ticket: Ticket, ids: list[uuid.UUID], actor: User, *, allow: bool
 ) -> bool:
-    users = await _helper_users(db, ids, ticket.assignee_id, actor)
     before = {h.id: h for h in ticket.helpers}
+    # A web manda a lista inteira: quem já estava na visita não é conferido de novo.
+    users = await _helper_users(db, ids, ticket.assignee_id, actor, kept=before.keys())
     after = {u.id: u for u in users}
     added = [u for user_id, u in after.items() if user_id not in before]
     removed = [h for user_id, h in before.items() if user_id not in after]
@@ -1348,14 +1381,15 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     helpers = await _helper_users(
         db, [] if is_requester else data.helper_ids, data.assignee_id, actor
     )
-    # Todos entram agora e precisam estar Ativos na operação; o responsável também (_assign
-    # confere de novo), antes de a OS ganhar número.
+    # Todos entram agora: com acesso ao app (os auxiliares já conferidos) e Ativos na operação; o
+    # responsável também (_assign confere de novo), antes de a OS ganhar número.
     for helper in helpers:
         technician_status.ensure_can_receive(helper)
     if data.assignee_id is not None and not is_requester:
         chosen = await db.get(User, data.assignee_id)
-        if chosen is not None:
-            technician_status.ensure_can_receive(chosen)
+        if chosen is None or not chosen.is_staff:
+            raise WorkflowError(ASSIGNEE_INVALID)
+        _ensure_enters(chosen, ASSIGNEE_INVALID)
     # Antes de gravar: uma OS barrada por conflito não pode consumir número.
     await schedule.check_slot(
         db,
