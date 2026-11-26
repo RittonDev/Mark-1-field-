@@ -154,19 +154,23 @@ function CriteriaList({ title, criteria }: { title: string; criteria: LevelCrite
  * OS de outra fila (quem pede vê só a própria) fica sem link e sem essas ações. Os textos chegam prontos da API.
  * Fica fora do fieldset travado do cadastro: só com Visualizar, ainda dá para ver mais.
  * `dirty`: o cadastro tem alteração não salva (o link para Configurações abre em outra aba).
+ * `hideTitle`: dentro de um cartão que já tem o título "Elo" (a seção da ficha do técnico), o título daqui some.
  */
 export function LevelSection({
   tech,
   readOnly,
   dirty,
   onDraftChange,
+  hideTitle = false,
 }: {
   tech: Pick<Technician, "id" | "name">;
   readOnly: boolean;
   dirty: boolean;
   /** Há um motivo digitado e ainda não enviado: o cadastro pergunta antes de fechar. */
   onDraftChange?: (draft: boolean) => void;
+  hideTitle?: boolean;
 }) {
+  const title = hideTitle ? null : <SectionTitle>Elo</SectionTitle>;
   const ids = useId();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -264,7 +268,7 @@ export function LevelSection({
   if (level.isLoading) {
     return (
       <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
-        <SectionTitle>Elo</SectionTitle>
+        {title}
         <Skeleton className="h-16 w-full" />
       </section>
     );
@@ -274,7 +278,7 @@ export function LevelSection({
     if (!level.error || (level.error instanceof ApiError && level.error.status === 404)) return null;
     return (
       <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
-        <SectionTitle>Elo</SectionTitle>
+        {title}
         <ErrorBox message={errorMessage(level.error)} onRetry={() => void level.refetch()} />
       </section>
     );
@@ -296,7 +300,7 @@ export function LevelSection({
       <div className="flex items-center gap-3">
         <LevelMedal tier={detail.tier} size={40} />
         <div className="flex min-w-0 flex-col gap-0.5">
-          <SectionTitle>Elo</SectionTitle>
+          {title}
           <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-ink-muted">
             <span>
               <span className="font-semibold text-ink">{tier.label}</span> · desde {formatDate(detail.since)}

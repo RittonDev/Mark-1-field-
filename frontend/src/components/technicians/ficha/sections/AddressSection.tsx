@@ -88,7 +88,10 @@ export function AddressSection({ tech, canEdit }: { tech: Technician; canEdit: b
           opened={{ street: base.street, district: base.district, city: base.city, state: base.state }}
           // Outro logradouro de fato (a mesma rua com outra grafia não conta): número e complemento que não foram
           // digitados agora (os gravados) saem.
-          onApply={(next) => patch(addressAfterCep(value, base, next, !sameStreet(next.street, value.street)))}
+          onApply={(next) =>
+            // Outra rua de fato (sameStreet: outra grafia não conta; o CEP geral que esvazia a rua também não).
+            patch(addressAfterCep(value, base, next, !!next.street.trim() && !sameStreet(next.street, value.street)))
+          }
           focusRef={numberRef}
           streetRef={streetRef}
           error={errors.zip}

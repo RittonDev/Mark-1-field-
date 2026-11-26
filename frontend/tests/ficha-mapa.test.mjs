@@ -62,7 +62,9 @@ describe("CEP sobre o endereço da ficha (addressAfterCep com sameStreet)", () =
     state: "SP",
   };
   const place = { district: "Centro Exemplo", city: "Cidade Exemplo", state: "SP" };
-  const apply = (value, street) => addressAfterCep(value, base, { ...place, street }, !sameStreet(street, value.street));
+  // A mesma conta da AddressSection: outra rua de fato (o CEP geral que esvazia a rua não conta).
+  const apply = (value, street) =>
+    addressAfterCep(value, base, { ...place, street }, !!street.trim() && !sameStreet(street, value.street));
 
   it("a mesma rua escrita de outro jeito (maiúsculas, acento, espaços): número e complemento ficam", () => {
     for (const street of ["RUA EXEMPLO", "Rua Exêmplo", "  Rua   Exemplo "]) {
@@ -85,11 +87,11 @@ describe("CEP sobre o endereço da ficha (addressAfterCep com sameStreet)", () =
     assert.equal(changes.complement, "");
   });
 
-  it("CEP geral depois de um específico (a rua da busca anterior se esvazia): os gravados saem", () => {
+  it("CEP geral depois de um específico (a rua da busca anterior se esvazia): número e complemento ficam", () => {
     const changes = apply({ ...base, street: "Praça Exemplo" }, "");
     assert.equal(changes.street, "");
-    assert.equal(changes.number, "");
-    assert.equal(changes.complement, "");
+    assert.equal(changes.number, undefined);
+    assert.equal(changes.complement, undefined);
   });
 });
 

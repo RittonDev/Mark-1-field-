@@ -367,9 +367,9 @@ export interface CepPatch {
  * O CEP achado sobre o Endereço, com a regra dos 6 lugares (cepFill): campo livre (vazio, igual ao gravado ou preenchido
  * pela busca anterior, `auto`) recebe o valor; o digitado fica. `use`: "Usar este endereço" (todos contam como livres).
  * O que o CEP não traz (CEP geral: logradouro e bairro) esvazia só o campo que ainda tem o valor da busca anterior
- * (`auto`, o `stale` de cepFill, também no `use`); o digitado e o gravado ficam. Logradouro trocado de fato (sameStreet:
- * outra grafia não conta): Número e Complemento que a pessoa não mexeu (iguais ao gravado) eram do endereço de antes e
- * ficam vazios.
+ * (`auto`, o `stale` de cepFill, também no `use`); o digitado e o gravado ficam. Logradouro trocado de fato por outro
+ * (sameStreet: outra grafia não conta): Número e Complemento que a pessoa não mexeu (iguais ao gravado) eram do endereço
+ * de antes e ficam vazios. Logradouro esvaziado por um CEP geral não conta: a pessoa digita a rua e o número fica.
  */
 export function cepPatch(
   form: AddressForm,
@@ -386,7 +386,7 @@ export function cepPatch(
     if (key === "state") patch.uf = result.next.state;
     else patch[key] = result.next[key];
   }
-  if (result.filled.includes("street") && !sameStreet(result.next.street, form.street)) {
+  if (result.filled.includes("street") && result.next.street.trim() && !sameStreet(result.next.street, form.street)) {
     if (form.number && form.number === base.number) patch.number = "";
     if (form.complement && form.complement === base.complement) patch.complement = "";
   }

@@ -591,15 +591,16 @@ describe("CEP no Endereço (cepPatch, cepDiffers, cepMiss)", () => {
     assert.equal(used.patch.city, "Cidade Geral");
   });
 
-  it("logradouro da busca anterior que sai: o número e o complemento iguais ao gravado também saem", () => {
+  it("logradouro da busca anterior esvaziado por um CEP geral: o número e o complemento ficam (a pessoa digita a rua)", () => {
     const first = cepPatch(saved, saved, NONE, FOUND);
     const found = { ...saved, ...first.patch };
     assert.equal(found.number, "");
     const back = { ...found, number: "100", complement: "Apto 4" };
     const r = cepPatch(back, saved, autoOf(back, first.filled), GENERAL);
     assert.equal(r.patch.street, "");
-    assert.equal(r.patch.number, "");
-    assert.equal(r.patch.complement, "");
+    assert.equal(r.patch.number, undefined);
+    assert.equal(r.patch.complement, undefined);
+    assert.equal(r.focus, "street");
   });
 
   it("rua igual de outro jeito (sameStreet) não esvazia número nem complemento; outra rua, sim", () => {
