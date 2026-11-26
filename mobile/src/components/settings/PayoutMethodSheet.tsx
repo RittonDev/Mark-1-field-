@@ -89,6 +89,7 @@ export function PayoutMethodSheet({
   const accountRef = useRef<TextInputInstance>(null);
   const digitRef = useRef<TextInputInstance>(null);
   const passwordRef = useRef<TextInputInstance>(null);
+  const sending = useRef(false);
 
   const others = editing ? methods.filter((m) => m.id !== editing.id) : methods;
   const problems = payoutProblem(draft, others);
@@ -106,8 +107,9 @@ export function PayoutMethodSheet({
     setError(null);
   }
 
-  function change(next: PayoutDraft) {
-    setDraft(next);
+  /** Uma regra de lib/payoutForm.ts sobre a folha como está (trocar o tipo da chave, digitar ou escolher o banco). */
+  function change(step: (current: PayoutDraft) => PayoutDraft) {
+    setDraft(step);
     setError(null);
   }
 
@@ -129,6 +131,8 @@ export function PayoutMethodSheet({
   }
 
   async function submit() {
+    // O "Concluído" do teclado na senha também envia: com um envio no ar, não manda outro.
+    if (sending.current) return;
     setAttempted(true);
     setError(null);
     const input = Object.keys(problems).length ? null : payoutInput(draft);
@@ -136,9 +140,15 @@ export function PayoutMethodSheet({
       haptic.warning();
       return;
     }
+    sending.current = true;
     setBusy(true);
-    const message = await onSubmit(input, { preferred: draft.preferred, password: draft.password });
-    setBusy(false);
+    let message: string | null;
+    try {
+      message = await onSubmit(input, { preferred: draft.preferred, password: draft.password });
+    } finally {
+      sending.current = false;
+      setBusy(false);
+    }
     if (!message) return;
     haptic.warning();
     setError(message);
@@ -188,7 +198,7 @@ export function PayoutMethodSheet({
                 if (Array.isArray(next) || next === draft.pixType) return;
                 haptic.select();
                 setPasteEmpty(false);
-                change(choosePixType(draft, next, owner, editing));
+                change((current) => choosePixType(current, next, owner, editing));
               }}
             />
           </Field>
@@ -229,7 +239,7 @@ export function PayoutMethodSheet({
           <Field label="Banco" required hint={draft.bankPicked ? `Código ${draft.bankCode}` : undefined} error={shown.bankName}>
             <Input
               value={draft.bankName}
-              onChangeText={(text) => change(typeBank(draft, text))}
+              onChangeText={(text) => change((current) => typeBank(current, text))}
               maxLength={PAYOUT_LIMITS.bankName}
               autoCapitalize="words"
               autoCorrect={false}
@@ -248,7 +258,7 @@ export function PayoutMethodSheet({
                   const bank = Array.isArray(code) ? null : bankByCode(code);
                   if (!bank) return;
                   haptic.select();
-                  change(pickBank(draft, bank));
+                  change((current) => pickBank(current, bank));
                 }}
               />
             </View>
@@ -323,39 +333,35 @@ export function PayoutMethodSheet({
         </>
       )}
 
-      {draft.kind === "bank" || pixType ? (
-        <>
-          <Field label="Titular" required error={shown.holderName}>
-            <Input
-              ref={holderRef}
-              value={draft.holderName}
-              onChangeText={(holderName) => update({ holderName })}
-              maxLength={PAYOUT_LIMITS.holderName}
-              autoCapitalize="words"
-              autoCorrect={false}
-              accessibilityLabel="Titular"
-              returnKeyType="next"
-              submitBehavior="submit"
-              onSubmitEditing={() => (needsDocument ? documentRef.current?.focus() : passwordRef.current?.focus())}
-            />
-          </Field>
-          {needsDocument ? (
-            <Field label="CPF ou CNPJ do titular" required error={shown.holderDocument}>
-              <Input
-                ref={documentRef}
-                value={draft.holderDocument}
-                onChangeText={(text) => update({ holderDocument: maskDocument(text) })}
-                keyboardType={MIXED_KEYBOARD}
-                autoCapitalize="characters"
-                autoCorrect={false}
-                accessibilityLabel="CPF ou CNPJ do titular"
-                returnKeyType="next"
-                submitBehavior="submit"
-                onSubmitEditing={() => passwordRef.current?.focus()}
-              />
-            </Field>
-          ) : null}
-        </>
+      <Field label="Titular" required error={shown.holderName}>
+        <Input
+          ref={holderRef}
+          value={draft.holderName}
+          onChangeText={(holderName) => update({ holderName })}
+          maxLength={PAYOUT_LIMITS.holderName}
+          autoCapitalize="words"
+          autoCorrect={false}
+          accessibilityLabel="Titular"
+          returnKeyType="next"
+          submitBehavior="submit"
+          onSubmitEditing={() => (needsDocument ? documentRef.current?.focus() : passwordRef.current?.focus())}
+        />
+      </Field>
+      {needsDocument ? (
+        <Field label="CPF ou CNPJ do titular" required error={shown.holderDocument}>
+          <Input
+            ref={documentRef}
+            value={draft.holderDocument}
+            onChangeText={(text) => update({ holderDocument: maskDocument(text) })}
+            keyboardType={MIXED_KEYBOARD}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            accessibilityLabel="CPF ou CNPJ do titular"
+            returnKeyType="next"
+            submitBehavior="submit"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+          />
+        </Field>
       ) : null}
 
       {!editing && methods.length > 0 ? (
