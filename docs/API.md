@@ -2672,9 +2672,11 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   web manda só o que mudou). O veículo e o perfil técnico continuam só com o técnico.
 - Trocar o e-mail (aqui ou no `PATCH /users/{id}` de um técnico) troca o login na hora (`account.central_email_changed`):
   zera a validação e o pedido de troca do app, revoga os links, vence as validações na fila, passa para o endereço novo a
-  boas-vindas e a nova senha que ainda não saíram e manda a validação (`check`) para o novo, logo depois do commit.
-  Cortar o acesso, gerar a senha provisória (`reset-password`) ou definir a senha em Usuários revogam os links de
-  senha.
+  boas-vindas e a nova senha que ainda não saíram e manda a validação (`check`) para o novo, logo depois do commit. No
+  `PATCH /users/{id}`, que também encerra as sessões, a nova senha que ainda não saiu vence ("Não enviado": ver
+  E-mails) e a boas-vindas sai sem o link de criar senha; a central manda outro link se precisar. Cortar o acesso, gerar
+  a senha provisória (`reset-password`) ou definir a senha em Usuários revogam os links de senha, e o link de senha
+  pedido antes disso que ainda está na fila não sai mais.
 - `POST …/email-verification`: o link de validação para o e-mail pendente ou, sem ele, para o login não validado.
   Validado e sem pendente: 409 `EMAIL_ALREADY_VERIFIED`; sem endereço que recebe mensagens: 422 "Este técnico não tem
   e-mail válido. Corrija em Contato ou use a senha provisória"; 5 por hora por técnico (429) → 202 `EmailQueued`.
@@ -2705,11 +2707,24 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   - `verify_email`, "Confirme seu e-mail", botão "Confirmar e-mail": a ficha (`signup`), o e-mail novo pedido no app
     (`change`: até validar, ele continua entrando com o e-mail atual) ou o login de sempre (`check`); vale 72 h;
   - `welcome`, "Cadastro aprovado: boas-vindas à {empresa}": como entrar (o login de agora; a senha da ficha ou, sem
-    ela, o link para criar a dele, 72 h; o link do app, `TECH_APP_URL`, ou "peça o link à central pelo WhatsApp"),
-    "Confirme também o seu e-mail" quando ele tem senha e o e-mail não está validado, os primeiros passos, o Elo sem
-    números e "Dúvidas sobre o trabalho? Fale com a central pelo WhatsApp.";
+    ela, o link para criar a dele, 72 h, só com o e-mail validado e a senha sem troca desde a aprovação
+    (`mail.sends_password_link`); senão, "Senha: a central manda uma senha provisória pelo WhatsApp.", sem link de
+    senha nem de validação, porque validar e pedir "Esqueci minha senha" daria a conta do mesmo jeito; o link do app,
+    `TECH_APP_URL`, ou "peça o link à central pelo WhatsApp"), "Confirme também o seu e-mail" quando ele tem a senha
+    da ficha e o e-mail não está validado, os primeiros passos, o Elo sem números e "Dúvidas sobre o trabalho? Fale
+    com a central pelo WhatsApp.";
   - `password_reset`, "Criar uma nova senha", botão "Criar nova senha": pelo "Esqueci minha senha" (`self`) ou pela
     central (`central`); vale 2 h e avisa que o app pede para entrar de novo nos aparelhos.
+- A saudação ("Olá, {primeiro nome}.") usa a primeira palavra do nome só quando ela é um nome: letras (também
+  acentuadas), apóstrofo ou hífen, até 30 caracteres e com uma letra pelo menos (`mail_templates.first_name`); senão,
+  só "Olá." (um "nome" com site viraria link dentro de um e-mail legítimo da empresa). O `name` de
+  `/auth/password-reset/check` segue a mesma regra ("" quando não é nome).
+- Nova senha e boas-vindas conferem o técnico no envio, antes de criar o link: sem acesso ao app, a linha vence sem
+  sair (`expired`, "Não enviado"; `last_error` "Sem acesso ao app": a boas-vindas diria que ele já pode entrar);
+  senha trocada, provisória gerada, acesso cortado ou outra troca que encerra as sessões depois do pedido
+  (`sessions_revoked_at` depois de `created_at`): a nova senha vence ("A senha mudou ou o acesso caiu depois do
+  pedido": o link desfaria a senha nova) e a boas-vindas sai sem o link de criar senha, com a linha da senha
+  provisória. Um pedido igual feito depois (outro "Esqueci minha senha") vira linha nova, e a pendente de antes vence.
 - Links `{WEB_URL}/validar-email#token=…` e `{WEB_URL}/definir-senha#token=…`: o token nasce na hora do envio e vai no
   fragmento (não chega a servidor nem a log); o banco guarda só o SHA-256. Uso único. Um link de senha novo revoga os
   anteriores; os de validação não (qualquer um válido serve). Falhou o envio, o link criado é desfeito junto.
@@ -2725,7 +2740,8 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
 - As três rotas de token somam 30 aberturas a cada 10 min por IP (429).
 - `POST /auth/password-reset/check {token}`: não gasta o link → `{email: "t***@exemplo.com", name: o primeiro nome,
   kind: "create" (o link da boas-vindas) | "reset", app_url}`. Vencido, usado, revogado ou mandado a um endereço que
-  não é mais o login: 410 `LINK_GONE`; acesso cortado: 410 com o texto do acesso.
+  não é mais o login: 410 `LINK_GONE`; o link que vale, com o acesso ao app cortado: 410 `ACCESS_CUT` ("Seu acesso ao
+  app está desativado. Fale com a central pelo WhatsApp"; o mesmo no `POST /auth/password-reset`).
 - `POST /auth/password-reset {token, password}`: grava a senha, tira a provisória (`must_change_password` false),
   encerra os acessos abertos (`sessions_revoked_at`), revoga os outros links de senha e valida o e-mail de login (o link
   chegou nele). Histórico via "link" (autor: o técnico): `password` "criada pelo link do e-mail" (boas-vindas) ou
@@ -2736,10 +2752,15 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   login, validado, o pedido sai, os links anteriores são revogados e a fila segue o login novo; se o e-mail virou o
   login de outro cadastro antes, 409 `EMAIL_IN_USE` (e o pedido sai); `check` valida o login, só se ainda é ele. O mesmo
   link aberto de novo com o e-mail já validado responde igual (200). Histórico via "link" → `{email, kind}`.
+- `POST /auth/password-reset` e `POST /auth/verify-email` repetem uma vez quando o banco desfaz a gravação por causa
+  de outra ao mesmo tempo no cadastro (40P01 ou 40001: o link trava o token e depois o técnico; o app, a central e a
+  fila travam o técnico e depois os tokens), já com o que a outra deixou e sem contar de novo o limite do IP
+  (`auth._apply_link`); se acontecer de novo, 503 "Outra gravação ao mesmo tempo. Tente de novo".
 - `POST /auth/change-password` (a de sempre) também revoga os links de senha.
 - Na web, as páginas `/validar-email` e `/definir-senha` (fora do login, sem indexação) leem o `#token=`, tiram o
   fragmento da barra (`history.replaceState`) e chamam essas rotas: "Validando o e-mail…" e "E-mail validado"; "Definir
-  nova senha" (ou "Criar senha"), "Senha definida"; "Link vencido ou já usado" no 410; "Abrir o app" só com o
+  nova senha" (ou "Criar senha"), "Senha definida"; "Link vencido ou já usado" no 410 `LINK_GONE`; "Acesso ao app
+  desativado", com o texto do servidor, no 410 `ACCESS_CUT` (ao abrir ou ao salvar); "Abrir o app" só com o
   `app_url`. Nas duas, sem conexão, "Tentar de novo".
 
 **CEP** (`services/cep.py`, `api/routes/cep.py`).
@@ -2758,6 +2779,17 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   ficha do técnico, Clientes, Locais, Configurações › Empresa e o Endereço do app. O campo livre (vazio, igual ao que
   abriu ou preenchido pela busca anterior) recebe o valor; o digitado fica e, se difere, aparece "CEP de {resumo}." com
   "Usar este endereço"; sem o serviço, os campos ficam livres e nada trava.
+  - O que o CEP não traz (o CEP geral da cidade: logradouro e bairro null) não mexe no digitado nem no gravado: só se
+    esvazia o campo que ainda tem o valor da busca anterior (o `stale` de `cepFill`, também no "Usar este endereço"). Um
+    CEP geral digitado depois de um CEP de rua não deixa a rua e o bairro do outro lugar.
+  - Na ficha do técnico e no app, o número e o complemento que a pessoa não mexeu só saem quando o logradouro muda de
+    fato (`sameStreet`: sem diferença de acento, maiúscula ou espaços; "R. Exemplo" é outra rua).
+  - Clientes e Locais (`cepLineFill`, a linha "rua, número e complemento"): a linha só é livre vazia ou com o valor da
+    busca anterior. A gravada ou digitada que não começa pela rua do CEP fica como está, com o aviso "CEP de …", e
+    então bairro, cidade e UF só recebem o valor quando vazios ou da busca anterior; "Usar este endereço" troca tudo. Ao
+    gravar, a linha perde a vírgula, o ";", o "-" e os espaços do fim (`tidyLine`; também na busca do mapa do Local).
+  - Configurações › Empresa: o campo CEP acompanha o CEP escrito na linha (fica vazio quando ele sai de lá), e o CEP
+    incompleto mostra "CEP inválido: use os 8 números." e não salva.
 
 **Histórico do cadastro e tempo real** (`services/user_history.py`).
 - `via`: `app` (o técnico no app), `central`, `ficha` (a aprovação na Homologação; autor: quem aprovou) e `link` (o
