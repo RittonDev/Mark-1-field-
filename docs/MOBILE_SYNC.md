@@ -42,20 +42,46 @@ Aviso de privacidade: não há rota de ciência. A versão que o técnico abriu 
 Keychain/Keystore e por técnico; com versão nova, Hoje mostra o cartão "Aviso de privacidade atualizado" até ele abrir
 o aviso (vale offline e sobrevive ao Sair).
 
-**Cadastro (Configurações).** `GET /me/profile`, `PATCH /me/profile` (só o que mudou; e-mail e chave PIX com
-`current_password`) e `POST`/`DELETE /me/profile/photo` (docs/API.md, "Meu cadastro do técnico"): só online, fora do
-lote e da fila. Nada vai para o SQLite nem para o kv: o cadastro fica na memória do app (`lib/profile.ts`) e sai no
-Sair e na troca de técnico (nome, e-mail e celular vão também para o usuário da sessão). É lido ao entrar, ao abrir cada
-tela de Configurações, ao puxar a aba Faturamento e, quando falta ou passou de 6 h (o link da foto vale 12 h), ao voltar
-à tela inicial e ao abrir o Faturamento. As gravações (salvar, enviar a foto e removê-la) saem uma por vez: a seguinte
-espera a resposta da anterior e não sai se a sessão mudou na espera. Uma leitura durante a qual uma gravação saiu,
-voltou ou ficou no ar não é publicada: fica o que a gravação devolveu. O servidor também grava uma por vez por
-técnico (o `PATCH /me/profile` trava a linha dele até o fim da transação): a gravação seguinte que o app solta quando
-a anterior passou dos 20 s sem resposta, ou a de outro aparelho, espera a anterior terminar e não apaga o carimbo nem
-o histórico dela.
+**Cadastro (Configurações).** `GET /me/profile`, `PATCH /me/profile` (só o que mudou; e-mail e dados da empresa com
+`current_password`), `POST`/`DELETE /me/profile/photo`, as formas de recebimento e o link de validação do e-mail
+(abaixo) (docs/API.md, "Meu cadastro do técnico" e "Cadastro V2 (2026-11-25)"): só online, fora do lote e da fila.
+Toda rota do cadastro devolve o `MyProfile` inteiro, que passa a ser o cadastro das telas (`writeProfile`). Nada vai
+para o SQLite nem para o kv: o cadastro fica na memória do app (`lib/profile.ts`) e sai no Sair e na troca de técnico
+(nome, e-mail e celular vão também para o usuário da sessão). CPF, RG, nascimento, endereço, dados da empresa,
+veículo, chaves PIX, contas e o documento do titular existem só nessa memória, nunca no SQLite, no kv nem no
+SecureStore. É lido ao entrar, ao abrir cada tela de Configurações, ao puxar a aba Faturamento e, quando falta ou
+passou de 6 h (o link da foto vale 12 h), ao voltar à tela inicial e ao abrir o Faturamento. As gravações (salvar,
+enviar a foto e removê-la, as formas de recebimento e o link do e-mail) saem uma por vez: a seguinte espera a resposta
+da anterior e não sai se a sessão mudou na espera. Uma leitura durante a qual uma gravação saiu, voltou ou ficou no ar
+não é publicada: fica o que a gravação devolveu. O servidor também grava uma por vez por técnico (o `PATCH
+/me/profile`, as rotas do e-mail e as das formas de recebimento travam a linha dele até o fim da transação): a
+gravação seguinte que o app solta quando a anterior passou dos 20 s sem resposta, ou a de outro aparelho, espera a
+anterior terminar e não apaga o carimbo nem o histórico dela.
 
-**Perfil técnico** (Configurações › Atendimento; docs/API.md, "Perfil técnico"): `PATCH /me/profile` com uma parte
-inteira por vez (`tool_ids`, `availability`, `transport`, `skills` ou `education`), sem senha. A lista enviada substitui
+- **Formas de recebimento** (Configurações › Formas de recebimento): `POST /me/profile/payout-methods` (incluir; a
+  primeira é a preferencial, e `preferred: true` passa a preferência para a nova), `PUT …/{method_id}` (manda tudo; o
+  tipo não muda), `POST …/{method_id}/preferred` e `POST …/{method_id}/remove` (excluir é `POST` porque leva a senha no
+  corpo, e o `api.delete` do app não leva corpo; `lib/payoutMethods.ts`). Todas levam `current_password` e devolvem o
+  `MyProfile`. Uma ação por pedido: a lista nunca vai no `PATCH`, que assim não reenvia chaves e contas a cada mudança
+  nem traz de volta a que a central excluiu. Sempre há uma preferencial com a lista não vazia: excluir a preferencial
+  passa a preferência para a mais nova das que ficam. A forma que a central excluiu com a tela aberta volta 404
+  `PAYOUT_METHOD_NOT_FOUND`, e o app relê o cadastro.
+- **E-mail de login**: o e-mail novo no `PATCH` (com a senha) não troca o login. Ele fica em `email_pending` até o
+  técnico abrir o link que chega nele (página web `/validar-email`); só então vira o login, sem derrubar as sessões, e
+  a leitura seguinte do cadastro leva o novo para o usuário da sessão e para o e-mail do login (`mc_last_email`).
+  `POST /me/profile/email/verification` manda (de novo) o link para o pendente ou, sem ele, para o login ainda não
+  validado (409 já validado, 422 endereço que não recebe mensagens, 503 `MAIL_DISABLED`, 429 depois de 3 na hora);
+  `DELETE /me/profile/email/pending` cancela a troca, e o link dela deixa de valer. `email_verified_at`,
+  `email_pending` e `email_link_sent_at` dão o estado que Contato mostra. Com `mail_enabled` falso, o app não pede
+  troca nem link (o servidor recusaria, com 422 e 503) e não mostra o estado da validação; a troca já pedida só pode
+  ser cancelada.
+- **CEP** (Endereço): `GET /public/cep/{8 números}`, logado (o limite do servidor é por pessoa), devolve `CepAddress`.
+  O endereço achado e o 404 `CEP_NOT_FOUND` ficam na memória (`lib/cep.ts`) até a troca de sessão. Sem rede, 503
+  `CEP_UNAVAILABLE`, 429, 8 s sem resposta ou a API de antes (404 sem código), a busca fica indisponível (nada
+  guardado: o mesmo CEP busca de novo) e o técnico preenche à mão. A busca nunca trava o Salvar.
+
+**Perfil técnico** (Configurações › Perfil profissional; docs/API.md, "Perfil técnico"): `PATCH /me/profile` com uma
+parte inteira por vez (`tool_ids`, `availability`, `transport`, `skills` ou `education`), sem senha. A lista enviada substitui
 a anterior; o servidor normaliza e ordena, limpa os textos (sem caracteres de controle nem invisíveis, como espaço de
 largura zero e marcas de direção; o app confere do mesmo jeito, com `cleanText` e `foldName`), põe o "desde" das
 aptidões e o `id` das formações e devolve o cadastro como ficou, que a tela passa a mostrar. Como o cadastro: só
@@ -64,24 +90,39 @@ ferramentas ativas, em ordem alfabética) e as sugestões de aptidão, de `skill
 `GET /public/onboarding/catalog`. Os dois catálogos ficam só na memória (`lib/technicalProfile.ts`): valem 10 min
 (puxar a tela relê na hora) e somem na troca de sessão.
 
-- **Salvar ao tocar** (Disponibilidade, Transporte e Ferramental; `lib/autoSave.ts`): o toque muda a tela na hora e
+- **Salvar ao tocar** (os turnos de Dias e horários, os meios e a CNH do Transporte e o Ferramental;
+  `lib/autoSave.ts`): o toque muda a tela na hora e
   reinicia uma espera de 0,6 s; ao fim dela sai um `PATCH` só, com o valor final (os toques de perto viram uma linha no
   histórico da central). Uma gravação por vez: o que mudar durante o envio vai num segundo envio quando o primeiro
   volta, se ainda for diferente do gravado. Sem rede, o app avisa e não muda nada; se o envio falhar, a tela volta ao
   que está gravado e avisa. Sair da tela com o envio agendado manda na hora; o Sair ou outro técnico descarta o que
   estava pendente. No Transporte nunca informado, qualquer toque grava, mesmo voltando a tudo desmarcado antes do envio
   ("Nenhum · sem CNH"); o "Nenhum", no fim dos meios, grava sem meio e mantém a CNH.
-- **Aptidões e Formação** gravam a lista inteira (incluir e mudar pela folha, excluir pela lixeira). O corpo é montado
-  na hora em que a gravação sai da fila (`saveProfileWith`), com o cadastro que a anterior devolveu: duas exclusões
-  seguidas não devolvem o item apagado, e mudar um item que a anterior tirou mostra "Esta aptidão foi excluída." (ou
-  "Esta formação foi excluída.") sem enviar nada. Enquanto uma gravação está no ar, as outras ações da lista ficam
-  desligadas, também depois de sair e voltar à tela (o estado fica em `lib/technicalProfile.ts` e zera na troca de
-  sessão).
+- **Aptidões, Formação e Indisponibilidade** gravam a lista inteira (incluir e mudar pela folha, excluir pela
+  lixeira). O corpo é montado na hora em que a gravação sai da fila (`saveProfileWith`), com o cadastro que a anterior
+  devolveu: duas exclusões seguidas não devolvem o item apagado, e mudar um item que a anterior tirou mostra "Esta
+  aptidão foi excluída." (ou "Esta formação foi excluída.", "Este período não existe mais. Puxe a tela para
+  atualizar.") sem enviar nada. Enquanto uma gravação está no ar, as outras ações da lista ficam desligadas, também
+  depois de sair e voltar à tela (o estado fica em `lib/technicalProfile.ts` e zera na troca de sessão); as Formas de
+  recebimento usam a mesma trava, com as rotas próprias delas.
+- **Indisponibilidade** (Dias e horários; `unavailability`): os períodos de/até em que o técnico não atende, sem
+  motivo. O `PATCH` leva a lista inteira dos que não terminaram, o gravado com o `id` e o novo sem; o servidor tira os
+  que acabaram, mantém o `id` gravado, dá `id` aos novos e devolve só os que não terminaram, pelo início. O app confere
+  antes com o dia do aparelho (início a partir de hoje, até 365 dias à frente, sem dia em comum com outro período, até
+  10 períodos); o servidor confere de novo com o dia de Brasília e aceita o início com um dia de folga.
+- **Veículo** (Transporte; `vehicle_model` e `vehicle_plate`): campos próprios, fora do `transport` (o app de antes
+  grava o `transport` inteiro e não pode apagar o veículo); vão juntos, sem senha, pela folha do veículo.
 - **Ferramenta desativada pela central**: o servidor ignora a marcação (200) e o app relê o catálogo (ela some). Id que
   não existe no catálogo: 422 "Ferramenta não encontrada. Atualize a lista." (o app também relê).
 - **A API sobe antes do app.** A API antiga não tem essas partes: o `GET /me/profile` vem sem elas, e o app mostra
-  "Indisponível no momento" nas telas de Atendimento sem mandar o `PATCH` (que ela recusaria com 422 "campo não aceito":
-  `MyProfileUpdate` não aceita chave a mais). A API nova com o app antigo funciona.
+  "Indisponível no momento" nas telas do Perfil profissional sem mandar o `PATCH` (que ela recusaria com 422 "campo
+  não aceito": `MyProfileUpdate` não aceita chave a mais). O cadastro V2 (25/11/2026) segue a mesma regra: sem os campos
+  novos no `GET` (`hasCadastroV2`: `cpf`, `address_number`, `email_pending`, `mail_enabled`, `payout_methods` e
+  `unavailability`), Dados pessoais, Endereço, Contato, Mini biografia, Dados empresariais e Formas de recebimento
+  mostram "Indisponível no momento" sem gravar nada, Dias e horários fica só com os turnos e o Transporte, sem o
+  veículo. A API nova com o app antigo funciona: o `GET` ainda manda `pix` (a preferencial, quando é PIX); gravar `pix`
+  recebe 422 "Atualize o app: a chave PIX agora fica em Configurações › Formas de recebimento"; o e-mail novo fica
+  pendente até o link; e o `address_line` sem `address_number` vira o logradouro e limpa o número e o complemento.
 
 ## 2. Download (pull)
 
