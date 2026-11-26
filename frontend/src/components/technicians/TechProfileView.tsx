@@ -2,7 +2,6 @@
 
 import clsx from "clsx";
 import { CalendarDays, Check, Wrench } from "lucide-react";
-import { useMemo } from "react";
 import { EmptyState } from "@/components/ui";
 import {
   ALL_SLOTS,
@@ -21,22 +20,22 @@ import {
   WEEKDAY_ORDER,
 } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
-import { labelMap, useOnboardingCatalog } from "@/lib/onboarding";
-import type { Technician, TechProfilePart, TechProfileStamp, TechProfileStamps } from "@/lib/types";
+import type { AvailabilitySlot, Technician, TechProfilePart, TechProfileStamp, TechProfileStamps } from "@/lib/types";
 
-// O perfil técnico (o técnico mantém no app; a central só vê) em peças: a ficha do técnico (/tecnicos/[id]) mostra
-// cada uma na sua seção (Dias e horários, Transporte, Formação, Aptidões, Ferramental), com o carimbo de quando e por
-// onde chegou. As peças leem o detalhe (GET /technicians/{id}) que a ficha já tem.
+// O perfil técnico (o técnico mantém no app; a central também edita, com Técnicos Editar) em peças: a ficha do técnico
+// (/tecnicos/[id]) mostra cada uma na sua seção (Dias e horários, Transporte, Formação, Áreas de atuação, Aptidões,
+// Ferramental), com o carimbo de quando e por onde chegou. As peças leem o detalhe (GET /technicians/{id}) que a ficha
+// já tem; com a API de antes da Gestão (isPreGestao), as seções mostram só estas peças, como antes.
 
 /** Etiqueta neutra (ferramentas, meios de transporte, CNH e o nível da aptidão). */
 const CHIP = "rounded-full border border-line px-2.5 py-0.5 text-xs text-ink";
 
-/** Quando e por onde a parte chegou: o técnico no app ou a ficha da homologação (na aprovação). */
+/** Quando e por onde a parte chegou: o técnico no app, a ficha da homologação (na aprovação) ou a central. */
 export function stampText(stamp: TechProfileStamp | null | undefined): string {
   if (!stamp) return "Não informado";
-  return stamp.via === "app"
-    ? `Informado pelo técnico em ${formatDate(stamp.at)}`
-    : `Da ficha da homologação, ${formatDate(stamp.at)}`;
+  if (stamp.via === "app") return `Informado pelo técnico em ${formatDate(stamp.at)}`;
+  if (stamp.via === "central") return `Informado pela central em ${formatDate(stamp.at)}`;
+  return `Da ficha da homologação, ${formatDate(stamp.at)}`;
 }
 
 /**
@@ -56,6 +55,7 @@ export function profileInfo(
       transport: !!stamps.transport || !!tech.transport,
       skills: !!stamps.skills || (tech.skills ?? []).length > 0,
       education: !!stamps.education || (tech.education ?? []).length > 0,
+      areas: !!stamps.areas || (tech.area_ids ?? []).length > 0,
     },
   };
 }

@@ -19,6 +19,7 @@ import {
 import { CopyNowButton } from "@/components/operacao/CopyNowButton";
 import { InactiveChip, LiveStatus, RefreshFailed } from "@/components/operacao/status";
 import { TagChips } from "@/components/TagChips";
+import { TechnicianLink } from "@/components/technicians/TechnicianLink";
 import { FAR_FROM_STORE_M, km } from "@/components/ticket/geo";
 import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
@@ -31,6 +32,7 @@ import { useAuth, useIsClient } from "@/lib/auth";
 import { canManageTickets, STATUS } from "@/lib/constants";
 import { formatMinutes, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import { useDayActivities, useTeams } from "@/lib/queries";
 import type { Activity, ActivityState } from "@/lib/types";
 
@@ -289,6 +291,8 @@ function ActivityCard({
   /** Técnico filtrado: marca "vai junto" nas visitas em que ele não é o responsável. */
   focusId: string;
 }) {
+  // O nome do técnico leva à ficha dele (só com a tela Técnicos).
+  const canTechnicians = useCan("base.technicians");
   const t = a.ticket;
   const loc = t.location;
   const helpers = t.helpers ?? [];
@@ -344,7 +348,17 @@ function ActivityCard({
                 {t.assignee ? initials(t.assignee.name) : "?"}
               </span>
               <span className={clsx("font-medium", t.assignee ? "text-ink" : "text-amber-700 dark:text-amber-400")}>
-                {t.assignee?.name ?? "Sem técnico"}
+                {t.assignee && canTechnicians && t.assignee.role === "technician" ? (
+                  // A ficha do técnico (Ctrl/⌘+clique e o botão do meio abrem outra aba); o cartão em volta não é clicável.
+                  <TechnicianLink
+                    id={t.assignee.id}
+                    className="rounded underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                  >
+                    {t.assignee.name}
+                  </TechnicianLink>
+                ) : (
+                  (t.assignee?.name ?? "Sem técnico")
+                )}
               </span>
               {helpers.length ? (
                 <span className="text-xs text-ink-muted" title={`Vai junto: ${helpers.map((h) => h.name).join(", ")}`}>

@@ -34,6 +34,7 @@ import { LocationPicker } from "@/components/LocationPicker";
 import { NoAccess } from "@/components/NoAccess";
 import { fold, operationDay, replaceSearch } from "@/components/operacao/hooks";
 import { OperationalPill } from "@/components/technicians/ficha/OperationalPill";
+import { TechnicianLink } from "@/components/technicians/TechnicianLink";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import {
   Button,
@@ -817,6 +818,8 @@ function TechnicianDetail({
   agenda: Activity[] | undefined;
   agendaLoading: boolean;
 }) {
+  // O nome leva à ficha (só com a tela Técnicos): Ctrl/⌘+clique e o botão do meio abrem outra aba.
+  const canTechnicians = useCan("base.technicians");
   const pos = shiftPosition(tech);
   const stale = !!pos && (tech.state === "no_signal" || isStale(pos.recorded_at, now));
   const battery = pos?.battery_pct;
@@ -833,7 +836,16 @@ function TechnicianDetail({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-sm font-bold text-ink">{tech.name}</span>
+            {canTechnicians ? (
+              <TechnicianLink
+                id={tech.id}
+                className="truncate rounded text-sm font-bold text-ink underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+              >
+                {tech.name}
+              </TechnicianLink>
+            ) : (
+              <span className="truncate text-sm font-bold text-ink">{tech.name}</span>
+            )}
             <OperationalPill tech={tech} />
           </p>
           {tech.open_tickets ? (

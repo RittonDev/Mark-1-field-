@@ -301,18 +301,12 @@ export function skillsWith(
   byId: boolean,
 ): TechnicianSkillIn[] | null {
   if (!list.some((item) => hasKey(item, key))) return null;
-  return skillsBody(
-    list.map((item) => (hasKey(item, key) ? { ...item, level } : item)),
-    byId,
-  );
+  return skillsBody(list.map((item) => (hasKey(item, key) ? { ...item, level } : item)), byId);
 }
 
 /** Excluir a aptidão `key` (skillKey): o corpo com a lista gravada agora, sem ela (a que já saiu não muda nada). */
 export function skillsWithout(list: readonly (SkillRef & { level: SkillLevel })[], key: string, byId: boolean): TechnicianSkillIn[] {
-  return skillsBody(
-    list.filter((item) => !hasKey(item, key)),
-    byId,
-  );
+  return skillsBody(list.filter((item) => !hasKey(item, key)), byId);
 }
 
 /** A linha de baixo da aptidão: "Avançado · desde 11/2026". */
@@ -441,6 +435,20 @@ export function educationSpoken(item: EducationItem): string {
     ? `de ${competenceLabel(item.start)} a ${competenceLabel(item.end)}`
     : `desde ${competenceLabel(item.start)}, em andamento`;
   return `${item.course}, ${EDUCATION_LEVEL[item.level] ?? item.level}, ${item.institution}, ${period}`;
+}
+
+// --------------------------------------------------------------------------- carimbo da central
+
+/**
+ * O carimbo de uma parte do perfil profissional (tech_profile_updated): "Atualizado pela central em 20/11/2026" (o dia
+ * no fuso do aparelho) quando quem mudou a parte por último foi a central. Pelo app ou pela ficha da homologação, o
+ * próprio técnico: null (a tela não mostra nada).
+ */
+export function centralStampText(stamp: { at: string; via: string } | null | undefined): string | null {
+  if (stamp?.via !== "central") return null;
+  const at = new Date(stamp.at);
+  if (Number.isNaN(at.getTime())) return null;
+  return `Atualizado pela central em ${pad(at.getDate())}/${pad(at.getMonth() + 1)}/${at.getFullYear()}`;
 }
 
 // --------------------------------------------------------------------------- folha do mês

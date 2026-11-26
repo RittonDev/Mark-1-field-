@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Wallet } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { TechnicianLink } from "@/components/technicians/TechnicianLink";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Input, Pill } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -17,16 +18,34 @@ interface Person {
   id: UUID;
   name: string;
   role: "Responsável" | "Junto";
+  /** Técnico parceiro (a equipe interna não tem ficha em Técnicos). */
+  technician: boolean;
 }
 
 /** Quem está na OS (responsável e quem vai junto): cada um pode ter um valor. */
 function people(ticket: TicketDetail): Person[] {
   const list: Person[] = [];
-  if (ticket.assignee) list.push({ id: ticket.assignee.id, name: ticket.assignee.name, role: "Responsável" });
+  const { assignee } = ticket;
+  if (assignee) list.push({ id: assignee.id, name: assignee.name, role: "Responsável", technician: assignee.role === "technician" });
   for (const helper of ticket.helpers ?? []) {
-    if (helper.id !== ticket.assignee?.id) list.push({ id: helper.id, name: helper.name, role: "Junto" });
+    if (helper.id !== assignee?.id) {
+      list.push({ id: helper.id, name: helper.name, role: "Junto", technician: helper.role === "technician" });
+    }
   }
   return list;
+}
+
+/** O nome leva à ficha do técnico (Ctrl/⌘+clique e o botão do meio abrem outra aba); sem a tela Técnicos, texto. */
+function TechnicianName({ id, name, link }: { id: UUID; name: string; link: boolean }) {
+  if (!link) return <>{name}</>;
+  return (
+    <TechnicianLink
+      id={id}
+      className="rounded underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+    >
+      {name}
+    </TechnicianLink>
+  );
 }
 
 /**
@@ -254,6 +273,7 @@ export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
   const [open, setOpen] = useState(false);
   const canView = useCan("commercial.payouts");
   const canEdit = useCan("commercial.payouts", "edit");
+  const canTechnicians = useCan("base.technicians");
   if (!canView) return null;
   const team = people(ticket);
   const left = former(ticket, team);
@@ -279,7 +299,9 @@ export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
               return (
                 <li key={p.id} className="flex items-center gap-3 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
+                    <p className="truncate text-sm font-semibold text-ink">
+                      <TechnicianName id={p.id} name={p.name} link={canTechnicians && p.technician} />
+                    </p>
                     <p className="text-xs text-ink-muted">{p.role}</p>
                   </div>
                   {payout ? <StatusPill payout={payout} ticketStatus={ticket.status} /> : null}
@@ -292,7 +314,11 @@ export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
             {left.map((p) => (
               <li key={p.id} className="flex items-center gap-3 py-2.5">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-ink">{p.technician.name}</p>
+                  {/* A OS não traz o papel de quem saiu: com valor, é o parceiro pago por chamado (a equipe interna
+                      não recebe o valor padrão). */}
+                  <p className="truncate text-sm font-semibold text-ink">
+                    <TechnicianName id={p.technician.id} name={p.technician.name} link={canTechnicians} />
+                  </p>
                   <p className="text-xs text-ink-muted">Saiu da OS</p>
                 </div>
                 <StatusPill payout={p} ticketStatus={ticket.status} />

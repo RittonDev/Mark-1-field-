@@ -1687,8 +1687,18 @@ export function GeneralView({ ticket }: { ticket: TicketDetail }) {
           <ViewItem label="Colaborador">
             {ticket.assignee ? (
               <>
-                {ticket.assignee.name}
-                {helpers ? <span className="block text-xs text-ink-muted">Com {helpers}</span> : null}
+                <PersonName person={ticket.assignee} canTechnicians={canTechnicians} />
+                {helpers.length ? (
+                  <span className="block text-xs text-ink-muted">
+                    Com{" "}
+                    {helpers.map((h, i) => (
+                      <Fragment key={h.id}>
+                        {i ? ", " : null}
+                        <PersonName person={h} canTechnicians={canTechnicians} />
+                      </Fragment>
+                    ))}
+                  </span>
+                ) : null}
               </>
             ) : null}
           </ViewItem>
@@ -1733,6 +1743,7 @@ export function GeneralView({ ticket }: { ticket: TicketDetail }) {
           </ViewItem>
         </dl>
       </Card>
+      <RatingCard ticket={ticket} />
     </div>
   );
 }

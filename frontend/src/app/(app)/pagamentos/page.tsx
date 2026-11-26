@@ -899,7 +899,21 @@ function PayoutsView() {
                                 />
                               ) : null}
                               <div className="min-w-0 flex-1">
-                                <p className="truncate font-bold text-ink">{labelOf(group)}</p>
+                                <p className="truncate font-bold text-ink">
+                                  {canTechnicians ? (
+                                    // Em outra aba: o fechamento (filtros e seleção) continua aqui.
+                                    <TechnicianLink
+                                      id={group.id}
+                                      target="_blank"
+                                      title={`Abrir a ficha de ${group.name} em outra aba`}
+                                      className="rounded underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                                    >
+                                      {labelOf(group)}
+                                    </TechnicianLink>
+                                  ) : (
+                                    labelOf(group)
+                                  )}
+                                </p>
                                 <p className="text-xs text-ink-muted">
                                   {plural(group.lines.length, "OS", "OS")} · {parts.join(" · ")}
                                 </p>

@@ -16,6 +16,7 @@ import {
 } from "@/components/new-ticket/SuggestedTechnicians";
 import { isOpenStatus } from "@/components/operacao/hooks";
 import { LevelBadge } from "@/components/technicians/LevelBadge";
+import { TechnicianLink } from "@/components/technicians/TechnicianLink";
 import { useToast } from "@/components/Toaster";
 import { useNow } from "@/components/useNow";
 import { Button, buttonClassName, Dialog, ErrorBox, Field, Input, Pill, SectionTitle, Select, Skeleton, Textarea } from "@/components/ui";
@@ -886,6 +887,8 @@ function OfferRow({
   onCancel?: () => void;
   cancelling: boolean;
 }) {
+  // O nome leva à ficha do técnico (com acesso a Técnicos): Ctrl/⌘+clique e o botão do meio abrem outra aba.
+  const canTechnicians = useCan("base.technicians");
   const state = offerStateAt(offer, now);
   // Estado que esta tela ainda não conhece (API mais nova): etiqueta neutra com o nome que veio, sem quebrar a aba.
   const info = OFFER_STATE[state] ?? { label: state, color: OFFER_STATE.cancelled.color };
@@ -901,7 +904,18 @@ function OfferRow({
         {initials(offer.technician.name)}
       </span>
       <div className="min-w-[9rem] flex-1">
-        <p className="truncate text-sm font-semibold text-ink">{offer.technician.name}</p>
+        <p className="truncate text-sm font-semibold text-ink">
+          {canTechnicians ? (
+            <TechnicianLink
+              id={offer.technician.id}
+              className="rounded underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+            >
+              {offer.technician.name}
+            </TechnicianLink>
+          ) : (
+            offer.technician.name
+          )}
+        </p>
         <p className="truncate text-xs text-ink-muted" title={full}>
           {detail}
         </p>
