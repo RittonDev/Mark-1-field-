@@ -700,10 +700,9 @@ gravam nada.
   - **Data de nascimento**: o seletor vai de 90 a 18 anos atrás, sem o atalho "Hoje" (vazio, abre 30 anos atrás), com a
     dica "É preciso ter 18 anos ou mais."; fora disso, "O cadastro é para maiores de 18 anos: confira a data de
     nascimento." ou "Confira a data de nascimento.". No iPhone, abre nas rodas de dia, mês e ano
-    (`iosDisplay="spinner"`), e **OK** fecha (com o campo vazio, grava a data que o seletor mostra); no Android, o
-    diálogo do sistema. Nas outras telas, o campo de data (`components/forms/DateField.tsx`) usa o calendário, que no
-    iPhone grava cada mudança e fecha no toque num dia do mês à vista (`isDayTap`, em `lib/dateField.ts`) ou no **OK**:
-    trocar o mês ou o ano pelo cabeçalho não fecha.
+    (`iosDisplay="spinner"`): cada roda girada grava, e **OK** só fecha (com o campo vazio e as rodas paradas, nada é
+    gravado); no Android, o diálogo do sistema. Nas outras telas, o campo de data (`components/forms/DateField.tsx`)
+    usa o calendário, que no iPhone grava a mudança e fecha, como sempre.
 - **Endereço**: CEP, logradouro, número (até 10, em maiúsculas, "S/N" vale; "SN" e "S / N" viram "S/N", como o
   servidor grava, e "s/n" contra o "S/N" gravado não conta como mudança: `addressNumberOf`) e complemento (até 60),
   bairro, cidade e UF (obrigatórias só aqui) e a região que atende. Logradouro, número e complemento vão juntos quando
@@ -1127,7 +1126,6 @@ src/
     cep.ts             busca de CEP do Endereço (GET /public/cep, logado): achou e não achou na memória até a troca de sessão; nunca lança
     payoutMethods.ts   formas de recebimento: as rotas /me/profile/payout-methods, com a senha, na fila das gravações
     payoutForm.ts banks.ts  a folha da chave PIX e da conta, a próxima preferencial, os textos e quando reler a lista depois de uma falha (payoutListStale) (puro, com sonda); os 29 bancos sugeridos, com o código de compensação (conferir na lista do STR do Banco Central)
-    dateField.ts       o campo de data no iPhone: quando o calendário fecha (isDayTap; puro, com sonda)
     unavailability.ts  indisponibilidade: a folha do período, o corpo do PATCH e o resumo de Dias e horários (puro, com sonda)
     avatarFlow.ts      Foto do perfil: tirar, escolher, remover, o andamento e a recuperação no Android
     technicalProfile.ts  perfil profissional: o estado das telas, a trava das listas (Aptidões, Formação, Formas de recebimento e Indisponibilidade), o aviso UNAVAILABLE e os catálogos na memória (ferramental e sugestões de aptidão)
@@ -1192,7 +1190,7 @@ As **sondas** (`tests/*.test.mjs`) testam as regras puras com o `node:test` (Nod
 TypeScript): a chave PIX, as máscaras de documentos e contas e as regras de RG, órgão emissor e placa (`masks`), as
 telas do cadastro com o CEP, o e-mail, o veículo e os resumos do menu (`profile-form`), as formas de recebimento e os
 bancos (`payout-form`), a indisponibilidade (`unavailability`), o "Esqueci minha senha" (`forgot-password`), o
-calendário do iPhone (`date-field`), o perfil técnico e o salvar ao tocar, o gráfico das Estatísticas (com as caixas do
+perfil técnico e o salvar ao tocar, o gráfico das Estatísticas (com as caixas do
 eixo), as seções do Histórico e as datas e a área da oferta. A de indisponibilidade compara também as mensagens com as
 do servidor (`backend/app/services/unavailability.py`) e pula esse caso quando a pasta `backend` não está ao lado (num
 contêiner só com o `mobile`). O módulo testado não importa React nem React Native (só `import type`), e o gancho

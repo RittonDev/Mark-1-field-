@@ -1,7 +1,6 @@
 import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { useState } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
-import { isDayTap } from "../../lib/dateField";
 import { Text } from "../Text";
 import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Button } from "../ui";
@@ -15,9 +14,9 @@ const label = (s: string) => s.split("-").reverse().join("/");
  * Data sem hora ("YYYY-MM-DD"), para campos de formulário. Quase sempre é o dia da visita: o atalho "Hoje" preenche
  * com um toque (`todayShortcut`; só aparece com hoje entre `min` e `max`). `min` e `max` limitam o seletor; `initial` é
  * onde ele abre com o campo vazio (nascimento: 30 anos atrás). No iPhone o seletor abre abaixo do campo e cada mudança
- * grava: o calendário (`iosDisplay` "inline") fecha no toque num dia do mês à vista (trocar o mês ou o ano pelo
- * cabeçalho não fecha); as rodas ("spinner", o nascimento) ficam abertas. Os dois fecham no "OK" e tocando no campo. No
- * Android, o diálogo do sistema (com o OK dele). Na web: DateField.web.tsx.
+ * grava: o calendário (`iosDisplay` "inline", o de sempre) fecha na mudança; as rodas ("spinner", o nascimento, longe
+ * de hoje) ficam abertas até o "OK" ou um toque no campo. No Android, o diálogo do sistema (com o OK dele). Na web:
+ * DateField.web.tsx.
  */
 export function DateField({
   value,
@@ -75,18 +74,19 @@ export function DateField({
   }
 
   /**
-   * iPhone: cada mudança grava (o campo mostra o que o seletor mostra). O calendário manda mudança também ao trocar o
-   * mês ou o ano pelo cabeçalho: só o toque num dia do mês à vista fecha. As rodas mandam uma por roda: só o "OK" fecha.
+   * iPhone: cada mudança grava (o campo mostra o que o seletor mostra). O calendário fecha na mudança, como sempre. As
+   * rodas mandam uma mudança por roda, então ficam abertas até o "OK".
    */
   function pickIos(d: Date) {
-    const next = toIso(d);
-    onChange(next);
-    if (iosDisplay === "inline" && isDayTap(opensAt, next)) setIosOpen(false);
+    onChange(toIso(d));
+    if (iosDisplay === "inline") setIosOpen(false);
   }
 
-  /** "OK": fecha; com o campo vazio, fica a data que o seletor mostra. */
+  /**
+   * "OK" das rodas: só fecha. O que a pessoa girou já foi gravado; com o campo vazio e as rodas paradas, nada é gravado
+   * (a data em que elas abrem, 30 anos atrás no nascimento, seria uma data plausível e errada).
+   */
   function confirmIos() {
-    if (!isDay(value)) onChange(opensAt);
     setIosOpen(false);
   }
 
@@ -128,7 +128,7 @@ export function DateField({
             {...limits}
             onValueChange={(_e, d) => pickIos(d)}
           />
-          <Button compact title="OK" onPress={confirmIos} style={styles.ok} />
+          {iosDisplay === "spinner" ? <Button compact title="OK" onPress={confirmIos} style={styles.ok} /> : null}
         </>
       ) : null}
     </View>
