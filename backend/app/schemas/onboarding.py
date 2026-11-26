@@ -481,7 +481,8 @@ class ApplicationDetail(ApplicationSummary):
     review_note: str | None
     invite_label: str | None = None
     photo_url: str | None = None
-    # O candidato criou a senha na ficha (sem ela, a boas-vindas leva o link para criar).
+    # O candidato criou a senha na ficha. Sem ela, a boas-vindas leva o link para criar só com o
+    # e-mail validado; sem a validação, a central manda a senha provisória (password_link).
     has_password: bool = False
     reviews: list[ApplicationReview] = []
     reopened_by: Ref | None = None
