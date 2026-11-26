@@ -513,6 +513,29 @@ export function linkSentText(iso: string, now: Date = new Date()): string {
   return when ? `Link enviado ${when}` : "Link enviado";
 }
 
+/** O aviso depois de "Cancelar troca" (o tom do toast: "success" ou "info"). */
+export interface CancelChangeNotice {
+  title: string;
+  description?: string;
+  tone: "success" | "info";
+}
+
+/**
+ * O aviso de "Cancelar troca" pelo cadastro que o DELETE devolveu (`after`) e o da tela (`before`). A tela pode estar
+ * velha: com o link já aberto no navegador, o pendente virou o login e não havia o que cancelar ("Seu e-mail já foi
+ * validado"). Login trocado para outro endereço (pela central): a troca saiu e ele entra com o novo.
+ */
+export function cancelChangeNotice(
+  before: Pick<MyProfile, "email" | "email_pending">,
+  after: Pick<MyProfile, "email">,
+): CancelChangeNotice {
+  const login = after.email.trim().toLowerCase();
+  if (login === before.email.trim().toLowerCase()) return { title: "Troca de e-mail cancelada", tone: "success" };
+  const description = `Agora você entra com ${after.email}.`;
+  if (login === (before.email_pending ?? "").trim().toLowerCase()) return { title: "Seu e-mail já foi validado", description, tone: "info" };
+  return { title: "Troca de e-mail cancelada", description, tone: "info" };
+}
+
 /** A dica do campo E-mail: o estado do login ou, digitando um e-mail novo (`editing`), o que acontece ao salvar. */
 export function emailHint(status: EmailStatus, editing: boolean, now: Date = new Date()): string {
   if (editing) return "Você recebe um link para validar.";
@@ -540,12 +563,16 @@ export interface BioForm {
   bio: string;
 }
 
-/** Texto livre e opcional, gravado como o servidor (espaços e quebras juntados); até 500 caracteres; vazio limpa. */
+/**
+ * Texto livre e opcional, com os parágrafos, gravado como o servidor (normalizeBio: sem espaços no fim das linhas, no
+ * máximo uma linha em branco entre os parágrafos, sem quebras nas pontas); até 500 caracteres, contados depois disso;
+ * vazio limpa.
+ */
 export function reviewBio(form: BioForm, base: BioForm): SectionReview<"bio"> {
   const body: MyProfileUpdate = {};
   const errors: Partial<Record<"bio", string>> = {};
-  const bio = collapse(form.bio);
-  if (bio !== collapse(base.bio)) {
+  const bio = normalizeBio(form.bio);
+  if (bio !== normalizeBio(base.bio)) {
     body.bio = bio || null;
     if (charCount(bio) > PROFILE_LIMITS.bio) errors.bio = MSG.bioLong;
   }
@@ -559,8 +586,8 @@ export const BIO_SECTION: SectionSpec<BioForm, "bio"> = {
   saved: () => ({ title: "Mini biografia atualizada" }),
 };
 
-/** O contador do campo: "120/500". */
-export const bioCount = (text: string) => `${charCount(text)}/${PROFILE_LIMITS.bio}`;
+/** O contador do campo: "120/500", contado como o limite (depois de normalizeBio). */
+export const bioCount = (text: string) => `${charCount(normalizeBio(text))}/${PROFILE_LIMITS.bio}`;
 
 // --------------------------------------------------------------------------- Dados empresariais
 
@@ -650,6 +677,7 @@ export function vehicleText(model: string | null | undefined, plate: string | nu
 export const NO_PHONE = "Sem celular";
 export const NO_ADDRESS = "Não informado";
 export const EMAIL_PENDING = "E-mail pendente";
+export const EMAIL_UNVERIFIED = "E-mail não validado";
 
 /** "3 ferramentas", "1 ferramenta"; zero: "Nenhuma" (aptidão, formação e ferramenta são femininas). */
 export function countLabel(n: number, one: string, many: string): string {
@@ -664,12 +692,15 @@ export function contactSummary(phone: string | null | undefined): string | null 
 
 /**
  * A linha Contato: sem celular, "Sem celular" (âmbar: a central não fala com ele); com a troca de e-mail esperando o
- * link, "E-mail pendente" (âmbar: falta abrir o link); senão, o celular.
+ * link, "E-mail pendente" (âmbar: falta abrir o link); com o envio de e-mail ligado e o login que recebe e-mail ainda
+ * sem validação, "E-mail não validado" (neutro: sem validar, o "Esqueci minha senha" não chega a ele); senão, o celular.
  */
-export function contactRowSummary(p: Pick<MyProfile, "phone" | "email_pending">): { value: string; tone: "muted" | "warning" } {
+export function contactRowSummary(p: Pick<MyProfile, "phone"> & EmailFacts): { value: string; tone: "muted" | "warning" } {
   const phone = contactSummary(p.phone);
   if (!phone) return { value: NO_PHONE, tone: "warning" };
-  if (p.email_pending) return { value: EMAIL_PENDING, tone: "warning" };
+  const status = emailStatus(p).kind;
+  if (status === "pending") return { value: EMAIL_PENDING, tone: "warning" };
+  if (status === "unverified") return { value: EMAIL_UNVERIFIED, tone: "muted" };
   return { value: phone, tone: "muted" };
 }
 
