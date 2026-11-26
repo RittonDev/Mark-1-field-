@@ -115,6 +115,15 @@ Requisitos:
   `/auth/refresh` ao receber 401. Se o refresh for recusado por expiração, volta ao login sem apagar a
   fila (o mesmo técnico entra de novo e o que estava pendente é enviado). Se **outro** usuário entrar no
   aparelho, os dados locais são apagados.
+- **Esqueci minha senha** (`src/app/esqueci-senha.tsx`, sem login, aberta pelo link do login, que entrega o e-mail
+  digitado pela memória, nunca pelo endereço da rota): **Enviar link** pede `POST /auth/forgot-password`, e a resposta
+  é a mesma exista ou não o cadastro: "Confira seu e-mail" / "Se {e-mail} estiver cadastrado e validado, você recebe um
+  link para criar uma senha nova. O link vale por 2 horas." / "Não chegou? Veja o spam ou peça ajuda à central no
+  WhatsApp.", com **Voltar para o login** e **Enviar de novo**. O link só vai ao técnico com acesso ao app e e-mail de
+  login validado e abre a página web "Definir nova senha"; a senha nova encerra as sessões abertas. Com o envio de
+  e-mail desligado no servidor (503 `MAIL_DISABLED`) ou a API de antes (404), a tela manda pedir à central pelo
+  WhatsApp, como antes. Quem tem o e-mail ainda sem validação (os importados) valida em Configurações › Contato
+  (**Enviar link**) ou pede a senha provisória à central.
 - **Só técnicos**: o 403 do login aparece na tela. Ao abrir o app, uma sessão salva de quem não é técnico
   (por exemplo, de antes desta regra) é encerrada e o banco local apagado. Se o papel mudar no servidor
   (técnico promovido a analista), o refresh responde 401 com o motivo: o app encerra a sessão, apaga os
@@ -123,10 +132,12 @@ Requisitos:
 - **Primeiro acesso**: técnicos criados pelo analista ou importados recebem senha provisória
   (`must_change_password`); o app exige a troca (`POST /auth/change-password`) antes de liberar o resto e
   confere de novo em `/auth/me` a cada abertura. A troca encerra as outras sessões do usuário, então o app
-  grava os tokens novos devolvidos pela API. Quem se cadastra pela homologação já entra com a própria senha.
-- **Sessão encerrada pelo servidor** (senha redefinida pelo analista): a API, o refresh e
-  o WebSocket (4401) respondem "Sessão encerrada. Entre novamente."; o app volta ao login com esse texto e
-  para o rastreamento. A fila local fica guardada para quando o mesmo técnico entrar de novo.
+  grava os tokens novos devolvidos pela API. Quem se cadastra pela homologação já entra com a própria senha; a ficha
+  aprovada sem senha (a reaberta depois de reprovada, por exemplo) recebe no e-mail de boas-vindas o link para criar
+  uma, e sem o envio de e-mail a central gera a senha provisória.
+- **Sessão encerrada pelo servidor** (senha redefinida pelo analista ou criada pelo link do "Esqueci minha senha"): a
+  API, o refresh e o WebSocket (4401) respondem "Sessão encerrada. Entre novamente."; o app volta ao login com esse
+  texto e para o rastreamento. A fila local fica guardada para quando o mesmo técnico entrar de novo.
   - Vale também com o app fora da tela (tarefa periódica ou jornada): a limpeza (sync, notificações da bandeja e
     agendadas, jornada e tarefa em segundo plano) roda ali mesmo, em `sessionEnd.ts`.
   - O fim fica gravado no Keychain/Keystore (`mc_session_end`) antes de os tokens saírem: se o sistema matar o app no
@@ -135,7 +146,9 @@ Requisitos:
   Maxx."; o app sai, para o rastreamento e apaga do aparelho as OS, os dados de clientes, as fotos e a fila
   (LGPD), também com o app fechado (na rodada em segundo plano). Se apagar falhar, a tarefa periódica continua ligada
   e tenta de novo, e a abertura seguinte também tenta. Quem já tinha saído antes tem os dados apagados ao entrar com a
-  senha certa (o login dá o mesmo motivo).
+  senha certa (o login dá o mesmo motivo). A situação na operação (Ativo, Inativo ou Bloqueado, com o motivo) é só da
+  central e não aparece no app: inativo ou bloqueado continua entrando e só deixa de receber OS e ofertas novas; o app
+  sai apenas quando a central corta o acesso.
 - **Só as OS atribuídas ao técnico**: o cliente abre a OS, o analista escolhe o técnico, e o técnico vê só
   as OS em que é o responsável ou vai junto (sem fila de grupo e sem "assumir"). Tela inicial com quatro abas na barra
   inferior (pílula animada na aba ativa) e, no topo, o chip do elo e a foto, que abre o Perfil (os dois saem na aba
@@ -197,15 +210,18 @@ Requisitos:
   e permissão) e o estado do push.
 - **Ofertas de OS com preço** (detalhes abaixo): a central manda uma OS sem técnico com o valor; o técnico
   aceita pelo valor ou recusa, e quem aceitar primeiro fica com ela.
-- **Configurações** (detalhes abaixo; Perfil › Configurações): o técnico mantém a foto, o nome, o contato, o
-  endereço e a chave PIX em que recebe pelos chamados (e-mail e chave PIX pedem a senha atual) e o **perfil técnico**
-  que a central vê na ficha e usa para escolher quem convidar: disponibilidade, transporte e CNH, aptidões, formação e
-  ferramental. A central é avisada na hora quando mudam PIX, e-mail, nome ou celular.
+- **Configurações** (detalhes abaixo; Perfil › Configurações): o técnico mantém o próprio cadastro nos mesmos grupos
+  da ficha dele na central: **Dados pessoais e cadastrais** (foto, nome, CPF, RG, nascimento, endereço com a busca do
+  CEP, contato, senha e mini biografia), **Dados financeiros e empresariais** (a empresa e as formas de recebimento:
+  chaves PIX e contas, uma delas a preferencial, onde a central paga) e o **Perfil profissional**, que a central vê na
+  ficha e usa para escolher quem convidar (dias e horários com a indisponibilidade, transporte e CNH com o veículo,
+  formação, aptidões e ferramental). E-mail, dados da empresa e formas de recebimento pedem a senha atual. A central é
+  avisada na hora quando mudam as formas de recebimento, o e-mail, o CNPJ, o nome ou o celular.
 - **Aviso de privacidade** (detalhes abaixo): o texto da LGPD da homologação, só para leitura, com um cartão em Hoje
   quando o texto muda.
-- **Faturamento** (detalhes abaixo): o total pago e o que falta receber, a chave PIX e um cartão por mês com a situação
-  (sem nota, nota em conferência, a pagar, pago…); o mês abre pelo cartão ou pelo **Outro mês**, com as OS, os
-  reembolsos e as notas fiscais.
+- **Faturamento** (detalhes abaixo): o total pago e o que falta receber, a forma de recebimento preferencial e um
+  cartão por mês com a situação (sem nota, nota em conferência, a pagar, pago…); o mês abre pelo cartão ou pelo
+  **Outro mês**, com as OS, os reembolsos e as notas fiscais.
 - **Notas fiscais (aba Faturamento › mês)** (detalhes abaixo): o técnico envia a nota do mês (PDF, XML ou foto), marca
   as OS que ela cobre e acompanha a conferência da central; a nota é opcional e nunca trava o pagamento.
 - **Patente e Meu elo** (detalhes abaixo): o elo do técnico (Bronze, Prata, Ouro ou Diamante) pelos atendimentos dos
@@ -482,9 +498,12 @@ tela `src/app/faturamento/[mes].tsx`.
 - **Topo**: **Total pago** (com "Último pagamento em 18/11") e **A receber** (com "+ R$ 90,00 previsto" das OS em
   andamento e "Inclui R$ 30,00 de meses anteriores"); embaixo, só com reembolso, "Reembolsos · R$ 45,00 a receber ·
   R$ 120,00 pagos". Lado a lado; empilhados com a fonte grande ou em tela estreita.
-- **Recebe no PIX**: o tipo e a chave mascarada ("CPF •••.456.789-••"); sem chave, **Cadastrar chave PIX** e "Sem
-  chave PIX cadastrada". Tocar abre Configurações › Chave PIX. Só aparece com o cadastro na memória (a chave nunca fica
-  no aparelho), e o leitor de tela fala só o tipo.
+- **Recebe no PIX** / **Recebe na conta** ([src/components/billing/PixRow.tsx](src/components/billing/PixRow.tsx), o
+  nome de antes): a forma de recebimento preferencial, onde a central paga, mascarada ("CPF •••.456.789-••" ou "Banco
+  Exemplo ••••5678-9"); sem nenhuma, **Cadastrar chave ou conta** e "Sem forma de recebimento", com o ícone em âmbar.
+  Tocar abre Configurações › Formas de recebimento. Só aparece com o cadastro na memória (chave e conta nunca ficam no
+  aparelho), e o leitor de tela fala só o tipo da chave ou o banco. Com a API de antes do cadastro V2, mostra a chave
+  PIX de antes, e a tela que o toque abre diz "Indisponível no momento".
 - **Por mês**: um cartão por mês de conclusão das OS, o mais novo primeiro, com o ícone e o selo da situação (ao lado
   do valor, ou embaixo dele quando os dois não cabem na linha), o valor total, uma linha curta
   ("3 OS sem nota · R$ 300,00", "Nota nº 1234 recusada · ver motivo") e, no rodapé, "Novembro de 2026 · 12 OS". O mês
@@ -517,7 +536,7 @@ tela `src/app/faturamento/[mes].tsx`.
   competência) e, no mês, `GET /me/earnings?month=AAAA-MM`. Ficam no aparelho para abrir sem rede (kv
   `earnings:months`, com a hora e o técnico, e `earnings:AAAA-MM`); só leitura, nada entra na fila. Busca ao abrir a
   aba, ao voltar a ela e ao abrir o mês (a busca de até 30 s atrás vale), no "puxar para atualizar" (que relê também o
-  cadastro, pela chave PIX), em "Tentar de novo", quando uma nota entra ou sai neste aparelho e, depois de uma
+  cadastro, pela forma de recebimento), em "Tentar de novo", quando uma nota entra ou sai neste aparelho e, depois de uma
   sincronização, se a última busca tem 2 min ou mais (pagar marca a OS como alterada e a rodada traz).
 - **Sem internet ou erro**: com valores guardados, tudo aparece com "Sem internet · valores de …" ou "Não deu para
   atualizar · valores de …"; sem nada guardado, "Sem internet" / "O faturamento aparece quando a conexão voltar." ou a

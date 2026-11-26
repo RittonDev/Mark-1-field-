@@ -53,8 +53,8 @@ SecureStore. É lido ao entrar, ao abrir cada tela de Configurações, ao puxar 
 passou de 6 h (o link da foto vale 12 h), ao voltar à tela inicial e ao abrir o Faturamento. As gravações (salvar,
 enviar a foto e removê-la, as formas de recebimento e o link do e-mail) saem uma por vez: a seguinte espera a resposta
 da anterior e não sai se a sessão mudou na espera. Uma leitura durante a qual uma gravação saiu, voltou ou ficou no ar
-não é publicada: fica o que a gravação devolveu. O servidor também grava uma por vez por técnico (o `PATCH
-/me/profile`, as rotas do e-mail e as das formas de recebimento travam a linha dele até o fim da transação): a
+não é publicada: fica o que a gravação devolveu. O servidor também grava uma por vez por técnico (o
+`PATCH /me/profile`, as rotas do e-mail e as das formas de recebimento travam a linha dele até o fim da transação): a
 gravação seguinte que o app solta quando a anterior passou dos 20 s sem resposta, ou a de outro aparelho, espera a
 anterior terminar e não apaga o carimbo nem o histórico dela.
 
@@ -81,23 +81,22 @@ anterior terminar e não apaga o carimbo nem o histórico dela.
   guardado: o mesmo CEP busca de novo) e o técnico preenche à mão. A busca nunca trava o Salvar.
 
 **Perfil técnico** (Configurações › Perfil profissional; docs/API.md, "Perfil técnico"): `PATCH /me/profile` com uma
-parte inteira por vez (`tool_ids`, `availability`, `transport`, `skills` ou `education`), sem senha. A lista enviada substitui
-a anterior; o servidor normaliza e ordena, limpa os textos (sem caracteres de controle nem invisíveis, como espaço de
-largura zero e marcas de direção; o app confere do mesmo jeito, com `cleanText` e `foldName`), põe o "desde" das
-aptidões e o `id` das formações e devolve o cadastro como ficou, que a tela passa a mostrar. Como o cadastro: só
+parte inteira por vez (`tool_ids`, `availability`, `transport`, `skills` ou `education`), sem senha. A lista enviada
+substitui a anterior; o servidor normaliza e ordena, limpa os textos (sem caracteres de controle nem invisíveis, como
+espaço de largura zero e marcas de direção; o app confere do mesmo jeito, com `cleanText` e `foldName`), põe o "desde"
+das aptidões e o `id` das formações e devolve o cadastro como ficou, que a tela passa a mostrar. Como o cadastro: só
 online, fora da fila, nada no SQLite nem no kv. O ferramental vem de `GET /technician-tools` (o técnico recebe só as
 ferramentas ativas, em ordem alfabética) e as sugestões de aptidão, de `skill_suggestions` em
 `GET /public/onboarding/catalog`. Os dois catálogos ficam só na memória (`lib/technicalProfile.ts`): valem 10 min
 (puxar a tela relê na hora) e somem na troca de sessão.
 
-- **Salvar ao tocar** (os turnos de Dias e horários, os meios e a CNH do Transporte e o Ferramental;
-  `lib/autoSave.ts`): o toque muda a tela na hora e
-  reinicia uma espera de 0,6 s; ao fim dela sai um `PATCH` só, com o valor final (os toques de perto viram uma linha no
-  histórico da central). Uma gravação por vez: o que mudar durante o envio vai num segundo envio quando o primeiro
-  volta, se ainda for diferente do gravado. Sem rede, o app avisa e não muda nada; se o envio falhar, a tela volta ao
-  que está gravado e avisa. Sair da tela com o envio agendado manda na hora; o Sair ou outro técnico descarta o que
-  estava pendente. No Transporte nunca informado, qualquer toque grava, mesmo voltando a tudo desmarcado antes do envio
-  ("Nenhum · sem CNH"); o "Nenhum", no fim dos meios, grava sem meio e mantém a CNH.
+- **Salvar ao tocar** (os turnos de Dias e horários, os meios e a CNH do Transporte e o Ferramental; `lib/autoSave.ts`):
+  o toque muda a tela na hora e reinicia uma espera de 0,6 s; ao fim dela sai um `PATCH` só, com o valor final (os
+  toques de perto viram uma linha no histórico da central). Uma gravação por vez: o que mudar durante o envio vai num
+  segundo envio quando o primeiro volta, se ainda for diferente do gravado. Sem rede, o app avisa e não muda nada; se o
+  envio falhar, a tela volta ao que está gravado e avisa. Sair da tela com o envio agendado manda na hora; o Sair ou
+  outro técnico descarta o que estava pendente. No Transporte nunca informado, qualquer toque grava, mesmo voltando a
+  tudo desmarcado antes do envio ("Nenhum · sem CNH"); o "Nenhum", no fim dos meios, grava sem meio e mantém a CNH.
 - **Aptidões, Formação e Indisponibilidade** gravam a lista inteira (incluir e mudar pela folha, excluir pela
   lixeira). O corpo é montado na hora em que a gravação sai da fila (`saveProfileWith`), com o cadastro que a anterior
   devolveu: duas exclusões seguidas não devolvem o item apagado, e mudar um item que a anterior tirou mostra "Esta
@@ -225,7 +224,8 @@ Resultado por operação:
   versão antiga do app vai sem corpo. O servidor prende a hora entre a criação da oferta e o aceite, ignora valor
   inválido e só grava na passagem para aceita; a central vê "Aceitou às 14:50 · escopo lido às 14:45". A API antiga
   ignora o corpo.
-- Cadastro e perfil técnico (Configurações, §1): só online, fora do lote e da fila.
+- Cadastro, perfil técnico, formas de recebimento, link do e-mail, busca de CEP e "Esqueci minha senha" (§1): só online,
+  fora do lote e da fila.
 
 ## 4. Tempo real
 
