@@ -6,18 +6,20 @@ from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.enums import TicketStatus, UserRole
 from app.core.security import create_access_token
 from app.importers.fieldcontrol import (
     UNUSABLE_PASSWORD,
+    address_parts,
     fmt_phone,
     map_status,
     question_to_field,
     run_import,
     split_location_code,
+    technician_address,
     to_uf,
 )
 from app.models import (
@@ -103,6 +105,42 @@ def test_normalizers() -> None:
     assert to_uf("Atlântida") is None
     assert fmt_phone("55", "11987654321") == "(11) 98765-4321"
     assert fmt_phone("55", "551130001234") == "(11) 3000-1234"
+
+
+def test_technician_address_goes_in_parts() -> None:
+    """O técnico grava o logradouro, o número (como o app e a central: maiúsculas, "S/N") e o
+    complemento à parte; clientes e locais continuam com a linha inteira (address_parts)."""
+    full = {"street": " Rua  Exemplo ", "number": "123a", "complement": " Apto  4 "}
+    assert technician_address(full) == {
+        "address_line": "Rua Exemplo",
+        "address_number": "123A",
+        "address_complement": "Apto 4",
+    }
+    store = {"street": "Rua Exemplo", "number": "123", "complement": "Apto 4"}
+    assert address_parts(store)["line"] == "Rua Exemplo, 123 - Apto 4"
+    for raw in ("s / n", "SN"):
+        assert technician_address({"street": "Rua Exemplo", "number": raw})["address_number"] == (
+            "S/N"
+        )
+    # Número com mais de 10 caracteres fica junto da rua; complemento com mais de 60, na linha.
+    long_number = technician_address({"street": "Rodovia Exemplo", "number": "Km 12 Lote 4B"})
+    assert long_number == {
+        "address_line": "Rodovia Exemplo, Km 12 Lote 4B",
+        "address_number": None,
+        "address_complement": None,
+    }
+    long_complement = technician_address(
+        {"street": "Rua Exemplo", "number": 10, "complement": "x" * 61}
+    )
+    assert long_complement == {
+        "address_line": f"Rua Exemplo - {'x' * 61}",
+        "address_number": "10",
+        "address_complement": None,
+    }
+    # Sem endereço (ou o padrão do escritório, que chega vazio): os três vazios.
+    assert technician_address({}) == dict.fromkeys(
+        ("address_line", "address_number", "address_complement")
+    )
 
 
 def test_question_fallbacks_to_valid_fields() -> None:
@@ -819,3 +857,61 @@ async def test_import_is_idempotent(world: World, engine: AsyncEngine, export: P
     assert after == before
     assert report.counts["tickets"]["skipped_existing"] == 6
     assert report.counts["customers"]["updated"] == 3
+
+
+@requires_db
+async def test_technician_address_in_parts_on_every_import(
+    world: World, engine: AsyncEngine, export: Path
+) -> None:
+    """O técnico entra com o logradouro, o número e o complemento à parte (users.address_line é o
+    logradouro). Rodar a importação de novo não junta o número ao logradouro nem deixa número ou
+    complemento duplicados (o cadastro que a importação de antes deixava com a linha inteira)."""
+    staff = json.loads((export / "colaboradores.json").read_text(encoding="utf-8"))
+    staff[0]["address"] = {
+        "street": "Rua Exemplo",
+        "number": "123",
+        "complement": "Apto 4",
+        "neighborhood": "Centro",
+        "city": "São Paulo",
+        "state": "São Paulo",
+    }
+    staff[2]["address"] = {"street": "Avenida Exemplo", "number": "sn", "city": "Natal", "state": "RN"}
+    _write(export, "colaboradores.json", staff)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def parts(email: str) -> tuple[str | None, ...]:
+        async with maker() as db:
+            user = await db.scalar(select(User).where(User.email == email))
+            assert user is not None
+            return (
+                user.address_line,
+                user.address_number,
+                user.address_complement,
+                user.address_district,
+            )
+
+    one = ("Rua Exemplo", "123", "Apto 4", "Centro")
+    await _run(engine, export, wipe=True)
+    assert await parts("tec1@teste.dev") == one
+    assert await parts("tec3@teste.dev") == ("Avenida Exemplo", "S/N", None, None)
+    users = await _count(engine, User)
+
+    # De novo, com o mesmo export: as mesmas partes, sem usuário a mais.
+    await _run(engine, export, wipe=False)
+    assert await parts("tec1@teste.dev") == one
+    assert await _count(engine, User) == users
+
+    # O cadastro como a importação de antes deixava (a linha inteira no logradouro, com o número e
+    # o complemento que a migração copiou): a importação grava as três partes de novo.
+    async with engine.begin() as conn:
+        await conn.execute(
+            update(User)
+            .where(User.email == "tec1@teste.dev")
+            .values(
+                address_line="Rua Exemplo, 123 - Apto 4",
+                address_number="123",
+                address_complement="Apto 4",
+            )
+        )
+    await _run(engine, export, wipe=False)
+    assert await parts("tec1@teste.dev") == one

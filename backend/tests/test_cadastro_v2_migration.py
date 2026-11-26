@@ -56,11 +56,18 @@ def test_revision_follows_the_head() -> None:
 
 def test_copies_match_the_app() -> None:
     """As cópias da migração seguem o código (ela não importa app.*)."""
+    from app.schemas import personal
+    from app.services import user_history
     from app.services.onboarding import EXPIRED_NOTE
 
     assert M.EXPIRED_NOTE == EXPIRED_NOTE
     assert (M.ACCESS_OFF_BEFORE, M.ACCESS_OFF) == ("Bloqueado", "Sem acesso")
-    assert M.COMPLEMENT_MAX == 60
+    assert M.COMPLEMENT_MAX == personal.ADDRESS_COMPLEMENT_MAX == 60
+    assert M.PIX_HIDDEN == user_history.PIX_HIDDEN
+    assert {"payout_methods", "payout_preferred"} == M.PAYOUT_ITEMS
+    # A aprovação da ficha de antes separa o endereço com a cópia de personal (a mesma regra).
+    for line in ("Rua das Flores, 123 - Apto 4", "Rua Exemplo, s / n", "Rodovia SP-55, km 12"):
+        assert personal.split_address_line(line) == M.split_address_line(line), line
 
 
 # ------------------------------------------------------------------ endereço
@@ -246,6 +253,37 @@ def test_access_texts_are_renamed_both_ways() -> None:
     assert M._rename_access(after, "Sem acesso", "Bloqueado") == before
 
 
+def test_payout_history_goes_back_as_the_old_hidden_pix() -> None:
+    """Downgrade: as formas de recebimento do histórico (mascaradas, com o titular) viram um item
+    "pix" só, no lugar do primeiro, com "***" onde havia texto: o código de antes esconde "pix" de
+    quem não tem Pagamentos e lê "Chave PIX cadastrada/alterada/removida"."""
+    before = [
+        {"field": "payout_methods", "from": None, "to": "Banco Exemplo ****5678-9 · Tecnico Alfa"},
+        {"field": "name", "from": "Tecnico", "to": "Tecnico Alfa"},
+        {
+            "field": "payout_preferred",
+            "from": "PIX CPF ***.456.789-**",
+            "to": "Banco Exemplo ****5678-9",
+        },
+    ]
+    assert M._old_payout(before) == [
+        {"field": "pix", "from": "***", "to": "***"},
+        {"field": "name", "from": "Tecnico", "to": "Tecnico Alfa"},
+    ]
+    assert before[0]["field"] == "payout_methods"  # a lista de entrada não muda
+    # Incluiu ou removeu: o null continua null.
+    added = [{"field": "payout_methods", "from": None, "to": "PIX CPF ***.456.789-** · Tecnico"}]
+    assert M._old_payout(added) == [{"field": "pix", "from": None, "to": "***"}]
+    removed = [{"field": "payout_preferred", "from": "Banco Exemplo ****5678-9", "to": None}]
+    assert M._old_payout(removed) == [{"field": "pix", "from": "***", "to": None}]
+    # Sem formas de recebimento (e o "pix" de antes): como está.
+    plain = [
+        {"field": "is_active", "from": "Liberado", "to": "Bloqueado"},
+        {"field": "pix", "from": None, "to": "CPF ***.456.789-**"},
+    ]
+    assert M._old_payout(plain) == plain
+
+
 # ------------------------------------------------------------------ no banco
 
 
@@ -315,7 +353,7 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
     """Os passos de dados de verdade (asyncpg, como o alembic roda), com as colunas pix_* de antes
     recriadas numa transação desfeita no fim: endereços, PIX, fichas, análises e o histórico; rodar
     de novo não muda nada; e os passos do downgrade voltam o PIX, o endereço, o texto do acesso e o
-    "por onde"."""
+    "por onde", e escondem as formas de recebimento do histórico (o "pix" de antes, com "***")."""
     async with engine.connect() as conn:
         transaction = await conn.begin()
         try:
@@ -404,6 +442,32 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
                     ),
                     {"id": row_id, "user_id": alfa, "via": via},
                 )
+            # Uma linha que o código novo grava nas formas de recebimento (pelo app).
+            payout_change = uuid.uuid4()
+            await conn.execute(
+                text(
+                    "INSERT INTO user_changes (id, user_id, via, changes)"
+                    " VALUES (:id, :user_id, 'app', CAST(:changes AS jsonb))"
+                ),
+                {
+                    "id": payout_change,
+                    "user_id": alfa,
+                    "changes": json.dumps(
+                        [
+                            {
+                                "field": "payout_methods",
+                                "from": None,
+                                "to": "Banco Exemplo ****5678-9 · Tecnico Alfa",
+                            },
+                            {
+                                "field": "payout_preferred",
+                                "from": "PIX CPF ***.456.789-**",
+                                "to": "Banco Exemplo ****5678-9",
+                            },
+                        ]
+                    ),
+                },
+            )
 
             counts = await _on_driver(conn, *M.DATA_STEPS)
             # Endereços de alfa e gama; os 2 PIX; a ficha de alfa (a de delta não traz nada: o CPF
@@ -509,20 +573,32 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
             assert await _on_driver(conn, *M.DATA_STEPS) == [0, 0, 0, 0, 0]
 
             # Downgrade: o PIX volta das formas (com as colunas zeradas antes), o endereço é
-            # juntado de novo, o acesso volta a "Bloqueado" e "ficha"/"link" a "central"/"app".
+            # juntado de novo, o acesso volta a "Bloqueado", "ficha"/"link" a "central"/"app" e as
+            # formas de recebimento do histórico viram o "pix" de antes, com "***".
             await conn.execute(
                 text(
                     "UPDATE users SET pix_key_type = NULL, pix_key = NULL,"
                     " pix_holder_name = NULL, pix_updated_at = NULL"
                 )
             )
-            await _on_driver(
+            back = await _on_driver(
                 conn,
                 M._restore_pix,
                 M._join_addresses,
                 lambda: M._rename_access_texts(M.ACCESS_OFF, M.ACCESS_OFF_BEFORE),
                 M._old_via,
+                M._hide_payout_history,
             )
+            assert back[-1] == 1
+            hidden = await _row(
+                conn,
+                "SELECT via, changes::text AS changes FROM user_changes WHERE id = :id",
+                id=payout_change,
+            )
+            assert hidden["via"] == "app"
+            assert json.loads(hidden["changes"]) == [{"field": "pix", "from": "***", "to": "***"}]
+            # De novo: nada a mudar.
+            assert await _on_driver(conn, M._hide_payout_history) == [0]
             restored = await _row(
                 conn,
                 "SELECT pix_key_type, pix_key, pix_holder_name, pix_updated_at, address_line"

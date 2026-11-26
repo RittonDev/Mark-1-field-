@@ -484,6 +484,108 @@ async def test_edit_keeps_the_kind_and_marks_the_destination(
 
 
 @requires_db
+async def test_history_tells_what_changed_behind_the_same_mask(
+    client: AsyncClient, world: World
+) -> None:
+    """O destino muda sem mudar a máscara (só a agência, só o tipo de conta, só o código do banco,
+    outra conta com os mesmos 4 finais, outra chave e-mail ou celular com a mesma máscara): a linha
+    não sai com "de" igual a "para" e não abre a chave nem a conta (a agência e o tipo de conta vão
+    pelo rótulo; a conta e a chave, com a marca neutra no que entrou)."""
+    h = world.tech.headers
+
+    async def edit(method_id: str, payload: dict) -> dict:
+        r = await client.put(
+            f"{METHODS}/{method_id}", json={**payload, "current_password": PASSWORD}, headers=h
+        )
+        body(r)
+        [line] = (await history(client, world))[0]["changes"]
+        assert line["field"] == "payout_methods" and line["from"] != line["to"], line
+        return line
+
+    account = body(await add_method(client, h, ACCOUNT))["payout_methods"][0]
+    base = "Banco Exemplo ****5678-9 · Tecnico Alfa"
+    branch = {**ACCOUNT, "branch": "2"}
+    line = await edit(account["id"], branch)
+    assert (line["from"], line["to"]) == (f"{base} · Ag. 0001", f"{base} · Ag. 0002")
+    savings = {**branch, "account_type": "savings"}
+    line = await edit(account["id"], savings)
+    assert (line["from"], line["to"]) == (f"{base} · Conta corrente", f"{base} · Conta poupança")
+    code = {**savings, "bank_code": "998"}
+    line = await edit(account["id"], code)
+    assert (line["from"], line["to"]) == (f"{base} · banco 999", f"{base} · banco 998")
+    # Outra conta com os mesmos 4 últimos números (e o mesmo dígito).
+    line = await edit(account["id"], {**code, "account_number": "99995678"})
+    assert (line["from"], line["to"]) == (base, f"{base} · outra conta")
+    assert "99995678" not in str(line) and "12345678" not in str(line)
+
+    email = {
+        "kind": "pix",
+        "pix_key_type": "email",
+        "pix_key": "tecnico.alfa@exemplo.com",
+        "holder_name": "Tecnico Alfa",
+        "holder_document": CPF,
+    }
+    me = body(await add_method(client, h, email))
+    key = next(m for m in me["payout_methods"] if m["pix_key_type"] == "email")
+    line = await edit(key["id"], {**email, "pix_key": "tecnico.outro@exemplo.com"})
+    masked = "PIX E-mail t***@exemplo.com · Tecnico Alfa"
+    assert (line["from"], line["to"]) == (masked, f"{masked} · outra chave")
+    assert "tecnico.alfa" not in str(line) and "tecnico.outro" not in str(line)
+
+    phone = {**email, "pix_key_type": "phone", "pix_key": "(11) 91234-7777"}
+    me = body(await add_method(client, h, phone))
+    key = next(m for m in me["payout_methods"] if m["pix_key_type"] == "phone")
+    line = await edit(key["id"], {**phone, "pix_key": "(11) 98888-7777"})
+    masked = "PIX Celular +55 (11) *****-7777 · Tecnico Alfa"
+    assert (line["from"], line["to"]) == (masked, f"{masked} · outra chave")
+    assert "91234" not in str(line) and "98888" not in str(line)
+
+
+@requires_db
+async def test_preferred_history_with_the_same_mask(client: AsyncClient, world: World) -> None:
+    """Outra forma vira a preferencial com a mesma máscara: a linha leva o titular e o documento
+    dele mascarado; com o mesmo titular e documento, " (outra forma)" no "para"."""
+    h = world.tech.headers
+    alfa = {
+        "kind": "pix",
+        "pix_key_type": "email",
+        "pix_key": "tecnico.alfa@exemplo.com",
+        "holder_name": "Tecnico Alfa",
+        "holder_document": CPF,
+    }
+    other = {
+        **alfa,
+        "pix_key": "tecnico.beta@exemplo.com",
+        "holder_name": "Outra Pessoa Ficticia",
+        "holder_document": OTHER_CPF,
+    }
+    first = body(await add_method(client, h, alfa))["payout_methods"][0]
+    me = body(await add_method(client, h, other))
+    second = next(m for m in me["payout_methods"] if m["pix_key"] == other["pix_key"])
+    me = body(await add_method(client, h, {**alfa, "pix_key": "tecnico.gama@exemplo.com"}))
+    third = next(m for m in me["payout_methods"] if m["pix_key"] == "tecnico.gama@exemplo.com")
+
+    async def prefer(method_id: str) -> dict:
+        body(await action(client, world, method_id, "preferred"))
+        [line] = (await history(client, world))[0]["changes"]
+        assert line["field"] == "payout_preferred" and line["from"] != line["to"], line
+        for secret in ("tecnico.alfa", "tecnico.beta", "tecnico.gama", CPF, OTHER_CPF):
+            assert secret not in str(line), secret
+        return line
+
+    masked = "PIX E-mail t***@exemplo.com"
+    alfa_text = f"{masked} · Tecnico Alfa · CPF ***.456.789-**"
+    other_text = f"{masked} · Outra Pessoa Ficticia · CPF ***.{OTHER_CPF[3:6]}.{OTHER_CPF[6:9]}-**"
+    line = await prefer(second["id"])
+    assert (line["from"], line["to"]) == (alfa_text, other_text)
+    line = await prefer(third["id"])
+    assert (line["from"], line["to"]) == (other_text, alfa_text)
+    # O mesmo titular e o mesmo documento: nada do que se pode mostrar difere.
+    line = await prefer(first["id"])
+    assert (line["from"], line["to"]) == (alfa_text, f"{alfa_text} (outra forma)")
+
+
+@requires_db
 async def test_old_app_pix_patch_is_refused(client: AsyncClient, world: World) -> None:
     """O app de antes gravava a chave no PATCH: agora 422 com o aviso de atualizar o app (o GET
     continua com `pix` para ele ler)."""

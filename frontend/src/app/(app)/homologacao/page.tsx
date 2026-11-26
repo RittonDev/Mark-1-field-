@@ -692,8 +692,8 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
     if (!a) return;
     const sendable = isSendableEmail(a.email);
     const sends = mailEnabled === true && sendable;
-    // E-mail nunca validado (null; a API antiga nem manda o campo): pode ter sido digitado errado, e a boas-vindas não
-    // leva o link de criar senha (quem tem a caixa ficaria com a conta).
+    // E-mail nunca validado (null; sem o campo, a API antiga, não dá para saber): pode ter sido digitado errado, e a
+    // boas-vindas não leva o link de criar senha (quem tem a caixa ficaria com a conta).
     const unverified = a.email_verified_at === null;
     const parts = ["Entra na base técnica e já pode entrar no app."];
     if (sends) parts.push(`O e-mail de boas-vindas vai para ${a.email}.`);

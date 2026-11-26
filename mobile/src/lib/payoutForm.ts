@@ -2,8 +2,8 @@
 // corpo das rotas /me/profile/payout-methods, a próxima preferencial ao excluir, os erros depois dos quais a tela relê a
 // lista (payoutListStale) e os textos da forma (cartão, leitor de tela, linha de Configurações e Faturamento). Sem React
 // nem React Native: entra na sonda tests/payout-form.test.mjs (imports de valor só ./banks, ./constants, ./masks e
-// ./pix). As regras são as do servidor (contrato §6.4), que confere
-// de novo; as mensagens daqui terminam com ponto. O técnico nunca vê nada interno (titular diferente, "Nova").
+// ./pix). As regras são as do servidor (contrato §6.4), que confere de novo; as mensagens daqui terminam com ponto. O
+// técnico nunca vê nada interno (titular diferente, "Nova").
 
 import { bankByCode, bankByName } from "./banks";
 import { BANK_ACCOUNT_TYPE, isSendableEmail, maskAccount, maskPixKey, PAYOUT_LIMITS, payoutMethodText } from "./constants";
