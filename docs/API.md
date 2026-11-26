@@ -1685,84 +1685,110 @@ Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisór
 **Central.**
 - `GET /technicians/{id}` (Técnicos, ver) → `TechnicianOut`; 404 "Técnico não encontrado" (também para quem não é
   técnico). Declarada depois das rotas fixas (`/regions`, `/nearby`, `/suggest`).
-- `GET /technicians/{id}/changes?limit=50&before=` (`limit` de 1 a 200; Técnicos, ver) → `UserChange[]`, do mais novo
-  para o mais antigo (`created_at DESC, id DESC`).
+- `GET /technicians/{id}/changes?limit=50&before=&field=` (`limit` de 1 a 200; Técnicos, ver) → `UserChange[]`, do mais
+  novo para o mais antigo (`created_at DESC, id DESC`). `field` (desde 25/11/2026; `^[a-z_]{1,40}$`, senão 422): só as
+  linhas que mexeram nesse campo (a ficha usa `operational_status` para o histórico da situação).
   - Páginas: `before` = `"{created_at}|{id}"` da última linha recebida (o `created_at` como veio, ISO com fuso) traz
     as `limit` linhas seguintes, mais antigas, sem repetir nem pular (o id desempata as do mesmo instante). Sem
     `before`, ou vazio, as mais novas. Estragado (mais de 100 caracteres, separador errado, data sem fuso ou fora da
     faixa, id que não é UUID): 422 `{"detail": "Página do histórico inválida. Recarregue a ficha."}`. Desde 24/11/2026; a API
     de antes não tem o parâmetro: ignora e devolve as mais novas de novo.
   - Com Pagamentos (Visualizar ou Editar), como acima.
-  - Com Técnicos e sem Pagamentos (`commercial.payouts` Sem acesso): os itens `pix_holder` não vêm e o `from`/`to` de
-    `pix` vira `"***"` (null continua null). A troca só do titular aparece como
-    `{"field": "pix", "from": "***", "to": "***"}`. Na web, a chave aparece como "Chave PIX cadastrada", "Chave PIX
-    alterada" ou "Chave PIX removida", sem valor e sem titular. A máscara vale em todas as páginas.
-  - Na web (aba Histórico da ficha), páginas de 50: a vista começa com 10 linhas e cada "Ver mais" mostra mais 20,
+  - Com Técnicos e sem Pagamentos (`commercial.payouts` Sem acesso; `user_history.hide_payout`, até 24/11/2026
+    `hide_pix`): o `from`/`to` de `pix`, `payout_methods` e `payout_preferred` vira `"***"` (null continua null) e os
+    itens `pix_holder` das linhas antigas não vêm (a troca só do titular aparece como
+    `{"field": "pix", "from": "***", "to": "***"}`). Na web, "Formas de recebimento alteradas", "Forma preferencial
+    alterada" e, nas linhas antigas, "Chave PIX cadastrada", "Chave PIX alterada" ou "Chave PIX removida", sem valor e
+    sem titular. A máscara vale em todas as páginas.
+  - Na web (seção Histórico da ficha do técnico), páginas de 50: a vista começa com 10 linhas e cada "Ver mais" mostra mais 20,
     buscando a página seguinte quando as carregadas acabam, até a primeira linha (a troca antiga de PIX ou de e-mail
     continua ao alcance, mesmo com muitas linhas do salvar ao tocar). As páginas se juntam sem repetir linha, e o "Ver
     mais" some quando a página vem incompleta ou sem linha nova (com a API sem o `before`, nas 50 mais novas). Com a
     página seguinte em erro, o aviso com "Tentar de novo" fica no lugar do botão. O tempo real e o salvar da ficha
     releem as páginas já abertas.
-- `DELETE /technicians/{id}/pix` (Pagamentos, editar) → 204: tira tipo, chave, titular e data, com o histórico via
-  central e o aviso `["pix"]`; sem chave, 204 sem histórico.
-- `TechnicianOut` ganha `has_pix` e `pix_updated_at` (a chave não vai na base técnica).
-- `GET /payouts?with_pix=true` → `PayoutBoard = PayoutList + pix: {technician_id: PixInfo}`: os técnicos das linhas e o
-  do `technician_id`, só os que têm chave. Sem `with_pix`, `pix: {}`. `GET /me/earnings` não muda.
-- Na web (Pagamentos), o extrato do WhatsApp (botão WhatsApp e "Copiar extrato") passa pelo endereço do wa.me: leva a
-  chave com CPF e CNPJ mascarados como `core/pix.mask` (`CPF ***.456.789-**`, `CNPJ 12.345.678/****-**`); e-mail,
-  celular e chave aleatória vão inteiros. "Copiar PIX" copia a chave crua.
-- Na web, os textos que mandam o técnico cadastrar a chave citam o caminho do app, Perfil › Configurações › Chave PIX: a
-  mensagem de "Pedir a chave" (Pagamentos) e de "Pedir no WhatsApp" (ficha do técnico), a linha "Chave PIX: não
-  cadastrada (cadastre no app, em Perfil › Configurações › Chave PIX)" do extrato, a dica do filtro "Sem chave PIX" em
-  Técnicos e a confirmação de "Remover chave".
-- `POST /payouts/pay`: o `payout_set` do pagamento (`data.action: "paid"`) ganha `data.pix`, a chave mascarada daquele
-  momento (`"CPF ***.456.789-**"`), quando o técnico tem chave.
+- Formas de recebimento (desde 25/11/2026, no lugar da chave PIX única): `GET /technicians/{id}/payout-methods`
+  (Pagamentos, ver) e `DELETE /technicians/{id}/payout-methods/{method_id}` (Pagamentos, editar), com o histórico via
+  central e o aviso `["payout_methods"]`; `TechnicianOut.payout_methods_count` e `payout_changed_at`. Saíram
+  `DELETE /technicians/{id}/pix` e `TechnicianOut.has_pix`/`pix_updated_at`. Ver [Cadastro V2](#cadastro-v2-2026-11-25).
+- `GET /payouts?with_payout_methods=true` → `PayoutBoard = PayoutList + payout_methods: {technician_id:
+  PayoutMethodSummary}` (a preferencial inteira e quantas formas): os técnicos das linhas e o do `technician_id`, só os
+  que têm forma. Sem o parâmetro, `payout_methods: {}`. Até 24/11/2026 eram `with_pix` e `pix: {technician_id: PixInfo}`.
+  `GET /me/earnings` não muda.
+- Na web (Pagamentos), o extrato do WhatsApp (botão WhatsApp e "Copiar extrato") passa pelo endereço do wa.me e leva a
+  linha "Forma de recebimento: {payoutMethodText}" ("PIX CPF •••.456.789-••", "Banco Exemplo ••••5678-9"), mascarada
+  para todos os tipos de chave e para as contas, ou "Forma de recebimento: não cadastrada (cadastre no app, em Perfil ›
+  Configurações › Formas de recebimento)". "Copiar PIX" copia a chave crua; "Copiar dados" copia a conta inteira com o
+  titular.
+- Na web, os textos que mandam o técnico cadastrar onde recebe citam o caminho do app, Perfil › Configurações › Formas
+  de recebimento: o "Pedir no WhatsApp" de Pagamentos e da ficha do técnico ("Olá, {primeiro nome}! Cadastre onde quer
+  receber no app Maxx Field, em Perfil › Configurações › Formas de recebimento, para receber pelos chamados.") e a linha
+  do extrato.
+- `POST /payouts/pay`: o `payout_set` do pagamento (`data.action: "paid"`) ganha `data.payout_method`, a forma
+  preferencial mascarada daquele momento (`"PIX CPF ***.456.789-**"`, `"Banco Exemplo ****5678-9"`), quando o técnico
+  tem forma; os eventos de antes de 25/11/2026 têm `data.pix`, e a web lê os dois.
 - Rótulos dos erros de validação (`main.py`): `pix` "Chave PIX", `key_type` "Tipo da chave PIX", `holder_name`
   "Titular da conta", `home_city` "Cidade", `home_state` "UF", `coverage_area` "Região que atende",
   `address_district` "Bairro" e `address_zip` "CEP" (os do perfil técnico: ver
-  [Perfil técnico](#perfil-técnico-2026-11-19)).
+  [Perfil técnico](#perfil-técnico-2026-11-19); os do cadastro V2: ver [Cadastro V2](#cadastro-v2-2026-11-25)).
 
 **Tempo real.** Depois do commit sai `{"type": "profile.changed", "user_id", "name", "actor_id", "actor_name",
-"occurred_at", "data": {"fields": [...], "via": "app" | "central", "after_reset"?: {"by", "at"}}}`
-(`audience.managers_only`). Vai só para quem tem Técnicos ou Pagamentos; o técnico e o cliente não recebem. `fields` usa
-os nomes da API (o titular conta como "pix"). O nome não começa com "technician." (a web mandaria o evento para o mapa).
-- `after_reset` vai só na troca de e-mail ou PIX pelo app quando houve redefinição de senha pela central (linha do
-  histórico via central com `password`) nas últimas 72 h: `by` é o nome de quem redefiniu ("Sistema" sem autor) e `at`,
-  a hora (ISO). É só sinal: não bloqueia (quem redefiniu também soube a senha).
-- Na web, o sino avisa a troca pelo app de chave PIX, e-mail, nome ou celular (foto, endereço, senha e o perfil
-  técnico só atualizam as listas). Com `after_reset`, o título termina em "logo depois de a senha ser redefinida por
-  {by}" e o aviso fica vermelho, também na troca só de e-mail.
+"occurred_at", "data": {"fields": [...], "via": "app" | "central" | "ficha" | "link", "after_reset"?: {"by", "at"}}}`
+(`audience.managers_only`; `ficha` e `link` desde 25/11/2026). Vai só para quem tem Técnicos ou Pagamentos; o técnico e
+o cliente não recebem. `fields` usa os nomes crus do histórico (o titular das linhas antigas conta como "pix"). O nome
+não começa com "technician." (a web mandaria o evento para o mapa).
+- `after_reset` vai só na troca de e-mail (ou do pedido de troca), de forma de recebimento (`payout_methods`,
+  `payout_preferred`, e o `pix` de antes) ou do CNPJ pelo app ou pelo link do e-mail, quando houve redefinição de senha
+  pela central (linha do histórico via central com `password`) nas últimas 72 h: `by` é o nome de quem redefiniu
+  ("Sistema" sem autor) e `at`, a hora (ISO). É só sinal: não bloqueia (quem redefiniu também soube a senha). O link
+  de senha mandado pela central (`password_link`) não conta como redefinição.
+- Na web, o sino avisa a troca pelo app das formas de recebimento, do e-mail (o pedido de troca), do CNPJ, do nome ou
+  do celular (foto, endereço, senha, o resto do cadastro e o perfil técnico só atualizam as listas). A troca do destino
+  do pagamento sai vermelha, com "Confirme com ele no grupo antes do próximo pagamento.", e "Ver" abre a ficha do
+  técnico na seção do que mudou (Formas de recebimento só com Pagamentos). Com `after_reset`, o título termina em "logo
+  depois de a senha ser redefinida por {by}" e o aviso fica vermelho, também na troca só de e-mail.
 - `fields` traz também as partes do perfil técnico (`tools`, `availability`, `transport`, `skills`, `education`): ver
   [Perfil técnico](#perfil-técnico-2026-11-19).
 
-**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-20" (o `GET /public/onboarding/catalog` devolve a versão nova
-e a ficha grava a do servidor no aceite).
+**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-25" (era "2026-11-20"; o `GET /public/onboarding/catalog`
+devolve a versão nova e a ficha grava a do servidor no aceite). Na publicação, vale a data do dia, igual nos três
+lugares.
 - O texto (`PRIVACY_NOTICE`) e a versão (`PRIVACY_VERSION`) ficam em `frontend/src/lib/constants.ts` e
   `mobile/src/lib/constants.ts`, cópias idênticas; `frontend/src/lib/onboarding.ts` só reexporta. Mudar o texto pede
   mudar a versão nos dois lados (as duas cópias e `backend/app/schemas/onboarding.py`), no mesmo dia.
 - Formato "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" ("AAAA-MM-DD.N"). As versões se comparam como texto.
-  Para mostrar, `PRIVACY_DATE` = os 10 primeiros caracteres em "DD/MM/AAAA" ("20/11/2026"; um ".2" não aparece).
+  Para mostrar, `PRIVACY_DATE` = os 10 primeiros caracteres em "DD/MM/AAAA" ("25/11/2026"; um ".2" não aparece).
 - A ficha da web compara a versão do servidor com a do pacote ao abrir, na última etapa e no envio: se a do servidor
   for mais nova, a página está velha, mostra "O aviso de privacidade mudou" com **Recarregar** e não envia. Por isso,
   publique a web antes da API, ou junto: com a API na frente, nenhuma ficha envia até a web nova entrar.
-- O aviso cita a chave PIX que o técnico cadastrar no app e o pagamento dos chamados por PIX; as notas fiscais (número,
-  valor, datas e o arquivo, que pode trazer CPF ou CNPJ e endereço, guardadas pelo prazo da legislação fiscal); o Elo
-  (atendimentos dos últimos 12 meses: quantidade, chegada no horário, retornos e visitas perdidas, visto em Meu elo, com
-  revisão de uma ocorrência pela central); e, desde a "2026-11-20", o perfil técnico, informado na ficha ou no app
-  (aptidões, formação, ferramental, meios de transporte e CNH, e os dias e turnos disponíveis), que ajuda a central a
-  escolher quem convidar para cada OS e que o técnico atualiza no app, em Configurações, e os registros das ofertas de
-  OS no app (quando o técnico vê a oferta, abre o escopo e aceita ou recusa: `viewed_at`, `scope_read_at`,
-  `responded_at`).
+- O aviso cita as notas fiscais (número, valor, datas e o arquivo, que pode trazer CPF ou CNPJ e endereço, guardadas
+  pelo prazo da legislação fiscal); o Elo (atendimentos dos últimos 12 meses: quantidade, chegada no horário, retornos
+  e visitas perdidas, visto em Meu elo, com revisão de uma ocorrência pela central); desde a "2026-11-20", o perfil
+  técnico, informado na ficha ou no app (aptidões, formação, ferramental, meios de transporte e CNH, e os dias e turnos
+  disponíveis), que ajuda a central a escolher quem convidar para cada OS e que o técnico atualiza no app, em
+  Configurações, e os registros das ofertas de OS no app (quando o técnico vê a oferta, abre o escopo e aceita ou
+  recusa: `viewed_at`, `scope_read_at`, `responded_at`); e, desde a "2026-11-25", 11 seções na ordem: Quem trata seus
+  dados, Quais dados (CPF, RG com órgão emissor e UF, nascimento, telefone secundário, a validação de que o e-mail é
+  dele, mini biografia, veículo com modelo e placa, os dados da empresa, as formas de recebimento, chaves PIX e contas
+  bancárias com o nome e o CPF ou CNPJ do titular, e os períodos de indisponibilidade), Para quê (o pagamento na forma
+  marcada como preferencial), **Situação na operação** (ativo, inativo ou bloqueado, com o motivo, quem e quando; só
+  quem está ativo recebe OS; a situação sozinha não tira o acesso ao app), Com quem compartilhamos (o envio dos e-mails
+  e a consulta de CEP, que leva só o CEP; a instituição financeira no pagamento), **E-mails** (só mensagens do
+  cadastro, automáticas e sem resposta), Localização (GPS), Notas fiscais, Elo, Por quanto tempo (a ficha reprovada
+  fica 180 dias contados da última análise e pode ser reaberta nesse prazo; o registro dos e-mails, 180 dias) e Seus
+  direitos (o CPF, depois de informado, só a central corrige). O texto final pede a revisão do dono ou do jurídico antes
+  de publicar.
 - No app (Perfil › Aviso de privacidade), a tela mostra o mesmo texto, só para leitura, com "Atualizado em
-  {PRIVACY_DATE}": não grava ciência nem pede aceite de novo. Na versão nova, o cartão de Hoje avisa "Agora ele fala do
-  seu perfil técnico e dos registros das ofertas de OS."
+  {PRIVACY_DATE}": não grava ciência nem pede aceite de novo. Na versão nova, o cartão de Hoje avisa "Agora ele inclui
+  RG, veículo, empresa e formas de recebimento." (na "2026-11-20": "Agora ele fala do seu perfil técnico e dos registros
+  das ofertas de OS.").
 
 ## Perfil técnico (2026-11-19)
 
-**Por quê.** O técnico informa no app (Perfil › Configurações, grupo Atendimento) o que ajuda a central a escolher quem
-chamar: o ferramental que tem, os dias e turnos em que está disponível, o transporte e a CNH, as aptidões e a formação.
-Só ele muda; a central vê na aba **Perfil técnico** da ficha em Técnicos, filtra a base e mantém o catálogo de
-ferramentas. Código: `services/tech_profile.py` (regras, textos e o sinal da sugestão), `schemas/tech_profile.py` (os
+**Por quê.** O técnico informa no app (Perfil › Configurações, grupo Perfil profissional; até 24/11/2026, Atendimento) o
+que ajuda a central a escolher quem chamar: o ferramental que tem, os dias e turnos em que está disponível, o
+transporte e a CNH, as aptidões e a formação. Só ele muda; a central vê na ficha do técnico em Técnicos (desde
+25/11/2026, nas seções do grupo Perfil profissional da página `/tecnicos/{id}`; antes, na aba **Perfil técnico**),
+filtra a base e mantém o catálogo de ferramentas. Código: `services/tech_profile.py` (regras, textos e o sinal da sugestão), `schemas/tech_profile.py` (os
 itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my_profile.py`, `services/user_history.py`,
 `api/routes/catalog.py` (seção "ferramental dos técnicos"), `services/technicians.py`, `services/suggestions.py` e
 `services/onboarding.py`.
@@ -1854,7 +1880,8 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
 ```
 
 **`PATCH /me/profile`** com `tool_ids`, `availability`, `transport`, `skills` ou `education` (`MyProfileUpdate`):
-- Nenhuma parte pede `current_password`, e a senha provisória não trava (só e-mail e PIX, como antes).
+- Nenhuma parte pede `current_password`, e a senha provisória não trava (só e-mail, dados da empresa e formas de
+  recebimento; até 24/11/2026, e-mail e PIX).
 - Cada parte vem **inteira** e substitui a gravada: `[]` ou null limpa (menos `transport`). Só conta o que veio no
   corpo; o app manda uma parte por vez.
 - A resposta é o `MyProfile` normalizado. Sem nada novo: 200, sem histórico, sem carimbo e sem aviso. A parte que muda

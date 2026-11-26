@@ -536,8 +536,8 @@ tela `src/app/faturamento/[mes].tsx`.
   competência) e, no mês, `GET /me/earnings?month=AAAA-MM`. Ficam no aparelho para abrir sem rede (kv
   `earnings:months`, com a hora e o técnico, e `earnings:AAAA-MM`); só leitura, nada entra na fila. Busca ao abrir a
   aba, ao voltar a ela e ao abrir o mês (a busca de até 30 s atrás vale), no "puxar para atualizar" (que relê também o
-  cadastro, pela forma de recebimento), em "Tentar de novo", quando uma nota entra ou sai neste aparelho e, depois de uma
-  sincronização, se a última busca tem 2 min ou mais (pagar marca a OS como alterada e a rodada traz).
+  cadastro, pela forma de recebimento), em "Tentar de novo", quando uma nota entra ou sai neste aparelho e, depois de
+  uma sincronização, se a última busca tem 2 min ou mais (pagar marca a OS como alterada e a rodada traz).
 - **Sem internet ou erro**: com valores guardados, tudo aparece com "Sem internet · valores de …" ou "Não deu para
   atualizar · valores de …"; sem nada guardado, "Sem internet" / "O faturamento aparece quando a conexão voltar." ou a
   mensagem do servidor com **Tentar de novo**. Com a API antiga (sem a rota dos meses): "Não foi possível carregar o
@@ -731,11 +731,12 @@ tarde." com **Tentar de novo**
   regras puras de [src/lib/payoutForm.ts](src/lib/payoutForm.ts)): as chaves PIX e as contas bancárias em que o técnico
   recebe pelos chamados, até 10, uma delas a **Preferencial**, onde a central paga (a primeira cadastrada já é). Cada
   ação sai pela rota própria, com a senha ([docs/MOBILE_SYNC.md](../docs/MOBILE_SYNC.md) §1).
-  - **Lista**: a preferencial primeiro, depois as mais novas; cada cartão com o ícone de chave ou de banco, "Chave PIX ·
-    CPF" e a chave mascarada ("•••.456.789-••") ou o banco e "Conta corrente · Ag. 0001 · ••••5678-9", o titular e a
-    ficha neutra "Preferencial". Tocar abre **Editar**, **Tornar preferencial** e **Excluir**. Vazio: "Nenhuma forma de
-    recebimento" / "Adicione uma chave PIX ou uma conta bancária.". No rodapé, **Adicionar chave ou conta** (no limite,
-    "Limite de 10 formas de recebimento. Exclua uma para incluir outra."); no fim, o link **Aviso de privacidade**.
+  - **Lista**: a preferencial primeiro, depois as mais novas; cada cartão com o ícone de chave ou de banco,
+    "Chave PIX · CPF" e a chave mascarada ("•••.456.789-••") ou o banco e "Conta corrente · Ag. 0001 · ••••5678-9", o
+    titular e a ficha neutra "Preferencial". Tocar abre **Editar**, **Tornar preferencial** e **Excluir**. Vazio:
+    "Nenhuma forma de recebimento" / "Adicione uma chave PIX ou uma conta bancária.". No rodapé, **Adicionar chave ou
+    conta** (no limite, "Limite de 10 formas de recebimento. Exclua uma para incluir outra."); no fim, o link **Aviso de
+    privacidade**.
   - **A folha** (adicionar e editar; editar não muda o tipo): Chave PIX ou Conta bancária. Na chave, o tipo (CPF, CNPJ,
     E-mail, Celular ou Chave aleatória, com o teclado e a máscara do tipo e **Colar** na aleatória) e a chave, que começa
     com o dado do cadastro (o CPF, o CNPJ da empresa, o e-mail que recebe mensagens ou o celular); celular do PIX com
@@ -796,12 +797,12 @@ estado das telas e os catálogos), [src/lib/autoSave.ts](src/lib/autoSave.ts) e 
   - **Indisponibilidade**: os períodos em que o técnico não atende (de/até, os dois dias inclusive, sem motivo), até 10
     e até 365 dias à frente. Cada cartão mostra o período ("20/12/2026 a 05/01/2027"; um dia só, "20/12/2026"), a
     ficha "Agora" no de hoje, o lápis e a lixeira (com a pergunta "Excluir o período?"); vazio, "Nenhum período.".
-    **Adicionar período** e o lápis abrem a folha com **De** e **Até** ([PeriodSheet](src/components/settings/PeriodSheet.tsx)):
-    "O início não pode ser antes de hoje.", "O fim não pode ser antes do início.", "Até 365 dias a partir de hoje." e
-    "Já há um período nessas datas."; no limite, "Limite de 10 períodos. Exclua um para incluir outro.". O período que
-    acabou sai da lista (o servidor tira). A central vê os períodos na ficha, e o técnico fica fora das sugestões e das
-    ofertas de OS nesses dias. Com a API de antes do cadastro V2, a seção mostra só o aviso de indisponível, e os turnos
-    seguem.
+    **Adicionar período** e o lápis abrem a folha com **De** e **Até**
+    ([src/components/settings/PeriodSheet.tsx](src/components/settings/PeriodSheet.tsx)): "O início não pode ser antes
+    de hoje.", "O fim não pode ser antes do início.", "Até 365 dias a partir de hoje." e "Já há um período nessas
+    datas."; no limite, "Limite de 10 períodos. Exclua um para incluir outro.". O período que acabou sai da lista (o
+    servidor tira). A central vê os períodos na ficha, e o técnico fica fora das sugestões e das ofertas de OS nesses
+    dias. Com a API de antes do cadastro V2, a seção mostra só o aviso de indisponível, e os turnos seguem.
 - **Transporte**: os meios (Carro, Moto, Bicicleta, Transporte público, Carro de aplicativo, A pé), **Nenhum** no fim
   dos meios e **Tenho CNH**, que vão juntos. "Nenhum" fica marcado quando o transporte foi informado sem meio; tocar
   nele grava sem meio e mantém a CNH ("Nenhum · sem CNH" ou "Nenhum · com CNH"), tocar num meio o desmarca, e tocar
@@ -809,9 +810,9 @@ estado das telas e os catálogos), [src/lib/autoSave.ts](src/lib/autoSave.ts) e 
   antes do primeiro toque, e qualquer toque grava, mesmo voltando a tudo desmarcado antes do envio.
   - **Veículo**: com Carro ou Moto marcados (ou o veículo já informado), a linha Veículo ("Modelo Exemplo · ABC1D23" ou
     "Não informado") abre a folha com o modelo e a placa
-    ([VehicleSheet](src/components/settings/VehicleSheet.tsx)), opcionais e gravados juntos; vazio limpa. Placa antiga
-    ou Mercosul ("Placa inválida: confira as letras e os números."). São campos próprios, à parte dos meios: gravar os
-    meios não apaga o veículo. Só com a API do cadastro V2.
+    ([src/components/settings/VehicleSheet.tsx](src/components/settings/VehicleSheet.tsx)), opcionais e gravados
+    juntos; vazio limpa. Placa antiga ou Mercosul ("Placa inválida: confira as letras e os números."). São campos
+    próprios, à parte dos meios: gravar os meios não apaga o veículo. Só com a API do cadastro V2.
 - **Ferramental**: o catálogo que a central mantém (Configurações › Técnicos, na central), em ordem alfabética, com
   caixa de marcar; com mais de 15 ferramentas, aparece a busca. Ferramenta desativada pela central some da lista e do
   cadastro (fica guardada no servidor e volta se for reativada).
@@ -1003,9 +1004,9 @@ Tela `/privacidade` ([src/app/privacidade.tsx](src/app/privacidade.tsx)), só de
 - **Cartão em Hoje** ([src/components/PrivacyUpdateCard.tsx](src/components/PrivacyUpdateCard.tsx)): quando o texto
   muda (`PRIVACY_VERSION` diferente da versão que este técnico abriu), a aba Hoje mostra, depois da jornada e das
   ofertas, "Aviso de privacidade atualizado" · "Agora ele inclui RG, veículo, empresa e formas de recebimento." com
-  **Ler aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer
-  caminho grava a versão como vista quando a tela termina de entrar (evento `transitionEnd` da pilha; sem ele, como na
-  web, 600 ms depois de abrir): o cartão some com Hoje já coberto, sem mexer na tela durante a transição.
+  **Ler aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer caminho grava a versão como vista quando a
+  tela termina de entrar (evento `transitionEnd` da pilha; sem ele, como na web, 600 ms depois de abrir): o cartão some
+  com Hoje já coberto, sem mexer na tela durante a transição.
 - **Versão vista** ([src/lib/privacySeen.ts](src/lib/privacySeen.ts)): só no aparelho, por técnico, no
   Keychain/Keystore (`mc_privacy_seen_<id do técnico>`, como a preferência de tema). Vale offline e sobrevive ao
   Sair e à troca de técnico. O cartão só lê a memória desse módulo, carregado com o `_layout.tsx`. A abertura do
@@ -1085,7 +1086,7 @@ src/
     offer/OfferHero.tsx  topo da oferta: o desenho de mapa da área com o chip bairro · cidade
     RoundBackButton.tsx  voltar redondo das telas sem o cabeçalho nativo (a oferta)
     billing/           aba Faturamento: BillingView (a aba), BillingTotals, PixRow (a forma de recebimento preferencial), BillingMonthCard, StateIcon, SituationBox, OtherMonth ("Outro mês"), MonthEarnings (o mês) e HideValuesButton (o olho)
-    settings/          peças de Configurações: ChoiceChips, CheckCard, Checkbox, DayCard, SkillSheet, EducationSheet, MonthField, FormSheet, FixedFooter, OfflineNotice, ProfileGate, ProfileFormScreen, PasswordSheet e PasswordField (a senha atual, com título e botão por ação), PayoutMethodSheet (chave PIX e conta), PeriodSheet (indisponibilidade), VehicleSheet (veículo), EmailPendingBox (troca de e-mail esperando o link), CadastroUnavailable (o aviso com a API de antes do cadastro V2) e SavingStatus
+    settings/          peças de Configurações: ChoiceChips, CheckCard, Checkbox, DayCard, SkillSheet, EducationSheet, MonthField, FormSheet, FixedFooter, OfflineNotice, ProfileGate, ProfileFormScreen, PasswordSheet (a folha da senha atual, com título e botão por ação), PasswordField (o campo Senha atual), PayoutMethodSheet (chave PIX e conta), PeriodSheet (indisponibilidade), VehicleSheet (veículo), EmailPendingBox (troca de e-mail esperando o link), CadastroUnavailable (o aviso com a API de antes do cadastro V2) e SavingStatus
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico (viz1 e vizGrid: os gráficos)
   theme/fonts.ts       Manrope (pesos 400–700) e o mapeamento de fontWeight para a família
   lib/
@@ -1166,11 +1167,12 @@ técnico e o salvar ao tocar, o gráfico das Estatísticas (com as caixas do eix
 área da oferta. A de indisponibilidade compara também as mensagens com as do servidor
 (`backend/app/services/unavailability.py`) e pula esse caso quando a pasta `backend` não está ao lado (num contêiner
 só com o `mobile`). O módulo testado não importa React nem React Native (só `import type`), e o gancho
-`tests/resolve-ts.mjs` resolve os imports relativos sem extensão (`./masks` → `./masks.ts`). Duas fogem disso: `ticket-hold.test.mjs` roda o `db.ts` de verdade (a OS segura na tela e o
-`pruneOld`) sobre o `node:sqlite` (Node 22.13 ou mais), com dublês de `expo-sqlite`, `react-native`, `./changes` e
-`./ops` registrados nela mesma; e `billing-offer.test.mjs` lê o código das telas do Faturamento e da oferta (que
-importam o React Native) e confere as regras que não podem voltar (o mês com nota, o Outro mês, a nota noutra
-competência, o selo que desce e o foco do leitor de tela no voltar):
+`tests/resolve-ts.mjs` resolve os imports relativos sem extensão (`./masks` → `./masks.ts`). Duas fogem disso:
+`ticket-hold.test.mjs` roda o `db.ts` de verdade (a OS segura na tela e o `pruneOld`) sobre o `node:sqlite` (Node
+22.13 ou mais), com dublês de `expo-sqlite`, `react-native`, `./changes` e `./ops` registrados nela mesma; e
+`billing-offer.test.mjs` lê o código das telas do Faturamento e da oferta (que importam o React Native) e confere as
+regras que não podem voltar (o mês com nota, o Outro mês, a nota noutra competência, o selo que desce e o foco do
+leitor de tela no voltar):
 
 ```bash
 node --experimental-strip-types --import ./tests/resolve-ts.mjs --test "tests/*.test.mjs"
