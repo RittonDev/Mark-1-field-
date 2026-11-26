@@ -46,8 +46,8 @@ const availabilitySaver = createAutoSave<AvailabilitySlot[]>({
   select: (profile) => profile.availability,
   equals: sameSlots,
   body: (slots) => ({ availability: sortSlots(slots) }),
-  offlineHint: "Conecte o aparelho para mudar a disponibilidade.",
-  errorTitle: "Não foi possível salvar a disponibilidade",
+  offlineHint: "Conecte o aparelho para mudar os turnos.",
+  errorTitle: "Não foi possível salvar os turnos",
 });
 
 interface SheetState {
