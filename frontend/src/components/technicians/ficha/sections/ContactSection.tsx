@@ -61,8 +61,9 @@ export function ContactSection({ tech, canEdit }: { tech: Technician; canEdit: b
         ? Promise.resolve(true)
         : confirm({
             title: "Trocar o e-mail de login?",
+            // A validação só sai com o envio ligado e para um e-mail que recebe.
             description: `${tech.name} passa a entrar no app com ${changed.email}.${
-              mailEnabled === false ? "" : " A validação vai para o e-mail novo."
+              mailEnabled !== false && isSendableEmail(changed.email) ? " A validação vai para o e-mail novo." : ""
             }`,
             confirmLabel: "Trocar e-mail",
           }),

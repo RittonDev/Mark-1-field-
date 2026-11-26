@@ -1,9 +1,12 @@
-"""Base técnica: analistas e gestores cuidam do acesso dos técnicos ao app.
+"""Base técnica: analistas e gestores cuidam do cadastro e do acesso dos técnicos ao app.
 
 Só mexe em usuários técnicos (analistas e clientes do portal ficam em Usuários). O perfil técnico
-(ferramental, disponibilidade, transporte, aptidões e formação) o técnico mantém no app: aqui a
-central só lê (to_out) e filtra a base por ferramenta e por dia/turno (list_technicians); o
-PATCH da ficha não mexe nele.
+(ferramental, disponibilidade, transporte, aptidões e formação) e o veículo o técnico mantém no
+app: aqui a central só lê (to_out) e filtra a base por ferramenta e por dia/turno
+(list_technicians); o PATCH da ficha não mexe neles. Dados pessoais, endereço em partes e empresa a
+central muda (sem senha); o CPF ela muda e limpa. Trocar o e-mail troca o login na hora e manda o
+link de validação (services/account.central_email_changed). As formas de recebimento ficam com
+Pagamentos (services/payout_methods.py): aqui só a contagem.
 """
 
 import asyncio
@@ -18,10 +21,20 @@ from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.enums import ApplicationStatus, UserRole
+from app.core.enums import (
+    AccountTokenPurpose,
+    ApplicationStatus,
+    EmailStatus,
+    EmailTemplate,
+    UserRole,
+)
 from app.core.security import create_token, hash_password_async
 from app.db.base import utcnow
-from app.models import ServiceType, Team, TechnicianApplication, Ticket, User
+from app.models import EmailOutbox, ServiceType, Team, TechnicianApplication, Ticket, User
+from app.models.user_change import VIA_CENTRAL
+from app.schemas import personal
+from app.schemas.account import EmailLogOut, EmailQueuedStatus
+from app.schemas.common import Ref
 from app.schemas.tech_profile import DayPeriod, Weekday
 from app.schemas.technician import (
     Credential,
@@ -32,18 +45,31 @@ from app.schemas.technician import (
     TechnicianUpdate,
 )
 from app.services import (
+    account,
     cities,
+    mail,
+    payout_methods,
     search,
     storage,
     tech_profile,
     technician_levels,
     technician_regions,
+    unavailability,
     user_history,
 )
-from app.services.errors import NotFound, WorkflowError
+from app.services.errors import CodedError, NotFound, WorkflowError
 from app.services.spreadsheet import read_table
 from app.services.technician_regions import fold_text
 from app.services.workflow import OPEN_STATUSES
+
+CPF_TAKEN = "Este CPF já está em outro cadastro"
+CPF_TAKEN_CODE = "CPF_TAKEN"
+# E-mails pela central (Credenciais da ficha).
+EMAIL_ALREADY_VERIFIED = "O e-mail deste técnico já está validado"
+EMAIL_ALREADY_VERIFIED_CODE = "EMAIL_ALREADY_VERIFIED"
+NO_VALID_EMAIL = "Este técnico não tem e-mail válido. Corrija em Contato ou use a senha provisória"
+LINK_NEEDS_ACCESS = "Libere o acesso ao app antes de enviar o link"
+LINK_NEEDS_ACCESS_CODE = "APP_ACCESS_REQUIRED"
 
 # Sem letras e números que se confundem (O/0, l/1/I) para ditar por telefone.
 _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
@@ -86,18 +112,6 @@ def avatar_url(user: User) -> str | None:
 
 def has_photo(user: User) -> bool:
     return bool(user.avatar_key or user.avatar_external_url)
-
-
-def has_pix(user: User) -> bool:
-    return bool(user.pix_key and user.pix_key_type)
-
-
-def clear_pix(user: User) -> None:
-    """Tira a chave PIX (a central só remove; quem cadastra é o técnico, no app)."""
-    user.pix_key_type = None
-    user.pix_key = None
-    user.pix_holder_name = None
-    user.pix_updated_at = None
 
 
 def normalize_zip(value: str | None) -> str | None:
@@ -146,12 +160,39 @@ async def _check_team(db: AsyncSession, team_id: uuid.UUID | None) -> None:
         raise WorkflowError("Grupo não encontrado")
 
 
+def _detail_fields(user: User) -> dict[str, Any]:
+    """Só no detalhe: dados pessoais, endereço em partes, empresa e veículo."""
+    return {
+        "cpf": user.cpf,
+        "rg_number": user.rg_number,
+        "rg_issuer": user.rg_issuer,
+        "rg_state": user.rg_state,
+        "birth_date": user.birth_date,
+        "phone_secondary": user.phone_secondary,
+        "bio": user.bio,
+        "address_number": user.address_number,
+        "address_complement": user.address_complement,
+        "company_document": user.company_document,
+        "company_name": user.company_name,
+        "company_trade_name": user.company_trade_name,
+        "vehicle_model": user.vehicle_model,
+        "vehicle_plate": user.vehicle_plate,
+    }
+
+
+async def _names(db: AsyncSession, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    rows = await db.execute(select(User.id, User.name).where(User.id.in_(ids)))
+    return {user_id: name for user_id, name in rows.all()}
+
+
 async def to_out(
     db: AsyncSession, users: list[User], *, detail: bool = False
 ) -> list[TechnicianOut]:
     """A ficha dos técnicos para a central. `detail` (um técnico: GET /technicians/{id} e as
-    respostas do cadastro) traz também os nomes das ferramentas, a formação e a data de cada
-    parte do perfil técnico; na lista esses três vão null."""
+    respostas do cadastro) traz também os nomes das ferramentas, a formação, a data de cada parte
+    do perfil técnico, os dados pessoais, a empresa e o veículo; na lista esses vão null."""
     from app.services import tracking  # import tardio, como nas sugestões (tracking puxa tickets)
 
     ids = [u.id for u in users]
@@ -169,7 +210,8 @@ async def to_out(
             )
         ).all()
     )
-    # Da ficha aprovada, só as áreas e o link (as aptidões agora são do perfil técnico).
+    # Da ficha aprovada, o link e as áreas de reserva: as áreas são do cadastro (copiadas da ficha
+    # na aprovação e pela migração); a da ficha só vale com o cadastro vazio.
     profiles = {
         user_id: (application_id, areas)
         for user_id, application_id, areas in await db.execute(
@@ -204,10 +246,19 @@ async def to_out(
             }
     # Elo: a conta guardada (a rotina refaz a cada 6 h; o cadastro recalcula na hora).
     levels = await technician_levels.summaries(db, ids)
+    # Quem mudou a situação por último (o nome) e as formas de recebimento (quantas e a última
+    # troca do destino).
+    changers = await _names(
+        db, {u.operational_changed_by_id for u in users if u.operational_changed_by_id}
+    )
+    payouts = await payout_methods.counts(db, ids)
+    today = personal.local_today()
     out = []
     for u in users:
         application_id, areas = profiles.get(u.id, (None, None))
         education = tech_profile.education_of(u)
+        changer = u.operational_changed_by_id
+        methods, payout_changed_at = payouts.get(u.id, (0, None))
         out.append(
             TechnicianOut(
                 id=u.id,
@@ -227,7 +278,7 @@ async def to_out(
                 avatar_url=avatar_url(u),
                 on_shift=u.id in on_shift,
                 open_tickets=open_counts.get(u.id, 0),
-                service_areas=list(areas or []),
+                service_areas=list(u.service_areas or areas or []),
                 skills=tech_profile.skills_of(u),
                 application_id=application_id,
                 base_city=u.base_city,
@@ -245,8 +296,6 @@ async def to_out(
                     if str(sid) in service_names
                 ],
                 legacy=u.legacy,
-                has_pix=has_pix(u),
-                pix_updated_at=u.pix_updated_at if has_pix(u) else None,
                 level=technician_levels.summary_of(levels, u.id),
                 tool_ids=tech_profile.active_tool_ids(u, catalog),
                 availability=tech_profile.sort_slots(u.availability or []),
@@ -256,6 +305,18 @@ async def to_out(
                 tools=tech_profile.tool_refs(u, catalog) if detail else None,
                 education=education if detail else None,
                 tech_profile_updated=tech_profile.stamps_of(u) if detail else None,
+                operational_status=u.operational_status,
+                operational_reason=u.operational_reason,
+                operational_changed_at=u.operational_changed_at,
+                operational_changed_by=(
+                    Ref(id=changer, name=changers[changer]) if changer in changers else None
+                ),
+                unavailability=unavailability.current(u.unavailability, today),
+                email_verified_at=u.email_verified_at,
+                email_pending=u.email_pending,
+                payout_methods_count=methods,
+                payout_changed_at=payout_changed_at if methods else None,
+                **(_detail_fields(u) if detail else {}),
             )
         )
     return out
@@ -340,11 +401,41 @@ async def create(db: AsyncSession, data: TechnicianCreate) -> tuple[User, str]:
     return user, password
 
 
+async def cpf_in_use(db: AsyncSession, cpf: str, exclude: uuid.UUID | None = None) -> bool:
+    """O CPF (11 números) já é de outro usuário."""
+    stmt = select(User.id).where(User.cpf == cpf)
+    if exclude is not None:
+        stmt = stmt.where(User.id != exclude)
+    return (await db.scalar(stmt.limit(1))) is not None
+
+
+def _group(fields: dict[str, Any], user: User, keys: tuple[str, str, str], check: Any) -> None:
+    """RG e empresa vão em grupo: o enviado com o que está gravado, conferido junto (o grupo
+    inteiro entra em `fields`)."""
+    if not fields.keys() & set(keys):
+        return
+    try:
+        values = check(*(fields.get(key, getattr(user, key)) for key in keys))
+    except ValueError as exc:
+        raise WorkflowError(str(exc)) from None
+    fields.update(zip(keys, values, strict=True))
+
+
 async def update(
     db: AsyncSession, user: User, data: TechnicianUpdate, actor: User | None = None
 ) -> User:
-    """`actor`: quem alterou (autor do fechamento das ofertas do técnico desativado)."""
+    """`actor`: quem alterou (autor do fechamento das ofertas do técnico desativado e do link de
+    validação do e-mail novo). O histórico é da rota (user_history.track)."""
     fields = data.model_dump(exclude_unset=True)
+    if fields.get("cpf") and fields["cpf"] != user.cpf and await cpf_in_use(db, fields["cpf"], user.id):
+        raise CodedError(CPF_TAKEN, CPF_TAKEN_CODE, 409)
+    _group(fields, user, ("rg_number", "rg_issuer", "rg_state"), personal.rg_group)
+    _group(
+        fields,
+        user,
+        ("company_document", "company_name", "company_trade_name"),
+        personal.company_group,
+    )
     if fields.get("service_type_ids") is not None:
         wanted = list(dict.fromkeys(fields["service_type_ids"]))
         found = set(await db.scalars(select(ServiceType.id).where(ServiceType.id.in_(wanted))))
@@ -360,6 +451,7 @@ async def update(
         fields["address_zip"] = normalize_zip(fields["address_zip"])
     if fields.get("email") and await _email_in_use(db, fields["email"], exclude=user.id):
         raise WorkflowError("E-mail já cadastrado")
+    email_changed = bool(fields.get("email")) and fields["email"] != (user.email or "").lower()
     if "team_id" in fields:
         await _check_team(db, fields["team_id"])
     home = None
@@ -395,18 +487,109 @@ async def update(
         set_home(user, *home)
     if fields.get("is_active") is False:
         user.sessions_revoked_at = utcnow()  # desativado: sai do app na hora
+        # Sem acesso, os links de senha mandados por e-mail deixam de valer.
+        await account.revoke(db, user_id=user.id, purpose=AccountTokenPurpose.RESET_PASSWORD)
+    if email_changed:
+        # O login muda na hora: a validação recomeça e o link vai para o e-mail novo (sai depois
+        # do commit; nada quando o endereço não recebe mensagens).
+        await account.central_email_changed(db, user, actor)
     await db.flush()
     return user
 
 
 async def reset_password(db: AsyncSession, user: User) -> str:
-    """Senha provisória nova; o técnico troca no próximo acesso e as sessões abertas caem."""
+    """Senha provisória nova; o técnico troca no próximo acesso, as sessões abertas caem e os
+    links de senha mandados por e-mail deixam de valer."""
     password = temporary_password()
     user.password_hash = await hash_password_async(password)
     user.must_change_password = True
     user.sessions_revoked_at = utcnow()
+    await account.revoke(db, user_id=user.id, purpose=AccountTokenPurpose.RESET_PASSWORD)
     await db.flush()
     return password
+
+
+# ------------------------------------------------------------------ e-mails pela central
+
+
+def verification_target(user: User) -> tuple[str, str]:
+    """Para onde vai a validação pedida pela central: o e-mail novo pedido no app ("change") ou,
+    sem ele, o login ainda não validado ("check"). Já validado e sem pedido: 409; endereço que não
+    recebe mensagens: 422."""
+    if user.email_pending:
+        return user.email_pending, "change"
+    if user.email_verified_at is not None:
+        raise CodedError(EMAIL_ALREADY_VERIFIED, EMAIL_ALREADY_VERIFIED_CODE, 409)
+    if not mail.sendable(user.email):
+        raise WorkflowError(NO_VALID_EMAIL)
+    return user.email, "check"
+
+
+def check_password_link(user: User) -> None:
+    """O link de senha pede o acesso liberado (409) e um login que recebe mensagens (422)."""
+    if not user.is_active:
+        raise CodedError(LINK_NEEDS_ACCESS, LINK_NEEDS_ACCESS_CODE, 409)
+    if not mail.sendable(user.email):
+        raise WorkflowError(NO_VALID_EMAIL)
+
+
+async def queue_verification(
+    db: AsyncSession, user: User, actor: User
+) -> tuple[EmailOutbox | None, EmailQueuedStatus]:
+    """A validação do e-mail na fila (o commit e o `deliver_soon` são da rota)."""
+    address, reason = verification_target(user)
+    if not mail.sendable(address):
+        raise WorkflowError(NO_VALID_EMAIL)
+    return await mail.enqueue(
+        db,
+        template=EmailTemplate.VERIFY_EMAIL,
+        to_email=address,
+        user=user,
+        context={"name": user.name, "reason": reason},
+        created_by=actor,
+    )
+
+
+async def queue_password_link(
+    db: AsyncSession, user: User, actor: User
+) -> tuple[EmailOutbox | None, EmailQueuedStatus, list[dict[str, Any]]]:
+    """O link para criar uma senha nova, na fila, e a linha do histórico ("enviado para {e-mail}",
+    via central) quando ele vai sair. Não mexe na senha nem nas sessões (isso acontece quando o
+    técnico cria a senha pelo link) e não conta como redefinição da central para o aviso de 72 h
+    (o campo é `password_link`, não `password`)."""
+    check_password_link(user)
+    row, status = await mail.enqueue(
+        db,
+        template=EmailTemplate.PASSWORD_RESET,
+        to_email=user.email,
+        user=user,
+        context={"name": user.name, "origin": "central"},
+        created_by=actor,
+    )
+    changes: list[dict[str, Any]] = []
+    if row is not None and status == "queued":
+        changes = [{"field": "password_link", "from": None, "to": f"enviado para {row.to_email}"}]
+        user_history.record(db, user, changes, via=VIA_CENTRAL, actor=actor)
+    return row, status, changes
+
+
+async def email_log(db: AsyncSession, user: User, limit: int = 20) -> list[EmailLogOut]:
+    """Os e-mails pedidos para o técnico, o mais novo primeiro. O pendente que passou do prazo de
+    envio sai como "expired" (a fila vence na próxima rodada)."""
+    rows = await db.scalars(
+        select(EmailOutbox)
+        .where(EmailOutbox.user_id == user.id)
+        .order_by(EmailOutbox.created_at.desc(), EmailOutbox.id.desc())
+        .limit(limit)
+    )
+    now = utcnow()
+    out: list[EmailLogOut] = []
+    for row in rows:
+        item = EmailLogOut.model_validate(row)
+        if item.status == EmailStatus.PENDING and row.send_by < now:
+            item.status = EmailStatus.EXPIRED
+        out.append(item)
+    return out
 
 
 async def set_photo(

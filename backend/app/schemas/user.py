@@ -1,12 +1,21 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.core.enums import UserRole
+from app.core.enums import OperationalStatus, UserRole
 from app.schemas.access import EffectiveAccessOut, UserAccessIn
 from app.schemas.common import ORMModel, Ref
+
+
+class UnavailabilityPeriodOut(BaseModel):
+    """Um período de indisponibilidade do técnico (services/unavailability.py): os dois dias
+    inclusive, sem motivo (LGPD)."""
+
+    id: str
+    start: date
+    end: date
 
 
 class UserRef(ORMModel):
@@ -73,7 +82,9 @@ class UserUpdate(BaseModel):
 
 
 class AssignableUser(BaseModel):
-    """Analista disponível para atribuição, com carga atual."""
+    """Quem pode ser escolhido na OS (só com acesso ao app), com a carga atual. Técnico Inativo ou
+    Bloqueado vem com a situação e o motivo (a web mostra e não deixa escolher); os períodos de
+    indisponibilidade que não terminaram vêm para a web avisar quando a visita cai num deles."""
 
     id: uuid.UUID
     name: str
@@ -81,6 +92,10 @@ class AssignableUser(BaseModel):
     team_id: uuid.UUID | None
     team_name: str | None
     open_tickets: int
+    operational_status: OperationalStatus = OperationalStatus.ACTIVE
+    # Só fora de Ativo.
+    operational_reason: str | None = None
+    unavailability: list[UnavailabilityPeriodOut] = []
 
 
 class TeamOut(ORMModel):

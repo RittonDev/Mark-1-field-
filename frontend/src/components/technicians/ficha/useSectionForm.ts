@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useLeaveGuard } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { api } from "@/lib/api";
@@ -63,8 +63,13 @@ export function useSectionForm<V extends object>(o: SectionFormOptions<V>): Sect
   if (incomingKey !== state.key) {
     // O cadastro mudou no servidor: a tela acompanha só sem alteração pendente.
     setState(dirty ? { ...state, key: incomingKey } : { base: incoming, value: incoming, key: incomingKey });
+  } else if (!dirty && JSON.stringify(state.base) !== incomingKey) {
+    // Mudou no servidor com alteração pendente e a pessoa desfez a alteração à mão: a tela volta a acompanhar.
+    setState({ base: incoming, value: incoming, key: incomingKey });
   }
   useLeaveGuard(dirty && canEdit, `As mudanças de ${o.label} ainda não foram salvas.`);
+  // Os valores enviados no Salvar: o que for digitado enquanto grava não some quando a resposta chega.
+  const sent = useRef<V | null>(null);
 
   const save = useMutation({
     mutationFn: (changed: Record<string, unknown>) => api.patch<Technician>(`/technicians/${o.tech.id}`, changed),
@@ -72,9 +77,18 @@ export function useSectionForm<V extends object>(o: SectionFormOptions<V>): Sect
       queryClient.setQueryData(["technicians", "one", saved.id], saved);
       refreshTechnicianViews(queryClient);
       const next = o.read(saved);
-      setState({ base: next, value: next, key: JSON.stringify(next) });
+      const submitted = sent.current;
+      sent.current = null;
+      setState((s) => ({
+        base: next,
+        value: submitted && !same(o.body(s.value), o.body(submitted)) ? s.value : next,
+        key: JSON.stringify(next),
+      }));
       setTried(false);
       toast({ title: o.savedTitle, description: o.savedDescription?.(changed, saved), tone: "success" });
+    },
+    onError: () => {
+      sent.current = null;
     },
   });
 
@@ -88,6 +102,7 @@ export function useSectionForm<V extends object>(o: SectionFormOptions<V>): Sect
     const changed = Object.fromEntries(Object.entries(now).filter(([key, value]) => !same(value, before[key])));
     if (!Object.keys(changed).length) return true;
     if (o.confirm && !(await o.confirm(changed))) return true;
+    sent.current = state.value;
     save.mutate(changed);
     return true;
   };

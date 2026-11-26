@@ -59,6 +59,9 @@ LOG_RETENTION_DAYS = 180
 TOKEN_RETENTION_DAYS = 30
 ERROR_MAX = 500
 
+# O `code` do 503 de quem pede um e-mail com o envio desligado (settings.mail_enabled falso).
+MAIL_DISABLED = "MAIL_DISABLED"
+
 # Recebe e-mail: "@", domínio com ponto e sem os finais dos endereços de mentira (importados).
 _SENDABLE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 _UNDELIVERABLE = re.compile(r"\.(invalid|local)$")
@@ -437,10 +440,12 @@ async def _render(db: AsyncSession, row: EmailOutbox) -> Rendered:
             created_by=row.created_by_id,
         )
         verify_link = mail_templates.verify_url(raw)
+    # "Como entrar" mostra o login de agora: a central pode ter trocado o e-mail depois da
+    # aprovação (a fila passa a seguir o endereço novo).
     return mail_templates.welcome(
         name=name or user.name,
         company=company_name,
-        email=str(ctx.get("email") or row.to_email),
+        email=user.email or str(ctx.get("email") or row.to_email),
         password_link=password_link,
         verify_link=verify_link,
         app_url=settings.tech_app_url,

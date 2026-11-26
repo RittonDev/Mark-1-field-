@@ -183,7 +183,9 @@ function TechnicianFicha() {
           active={paymentsDenied ? null : section}
           blockedLabel={paymentsDenied ? { key: "recebimento", label: fichaLabel("recebimento") } : null}
         />
-        <div className="min-w-0">
+        {/* Por técnico: indo de uma ficha para outra (Ctrl+K, aviso), a seção recomeça com os dados do novo, sem levar o
+            que estava digitado no anterior. */}
+        <div key={tech.id} className="min-w-0">
           {paymentsDenied ? (
             <SectionCard title={fichaLabel("recebimento")}>
               <p className="text-sm text-ink-muted">Formas de recebimento: só com acesso a Pagamentos.</p>

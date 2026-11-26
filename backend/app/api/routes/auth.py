@@ -10,7 +10,7 @@ from app.api.deps import DB, SESSION_ENDED, CurrentUser
 from app.core import sessions
 from app.core.access import CHANNEL_DENIED_MESSAGE, channel_allows, home_channel
 from app.core.config import settings
-from app.core.enums import UserRole
+from app.core.enums import AccountTokenPurpose, UserRole
 from app.core.security import (
     InvalidToken,
     create_access_token,
@@ -23,7 +23,15 @@ from app.core.security import (
 )
 from app.db.base import utcnow
 from app.models.user import TICKET_MANAGER_ROLES, User
-from app.models.user_change import VIA_APP
+from app.models.user_change import VIA_APP, VIA_LINK
+from app.schemas.account import (
+    ForgotPasswordIn,
+    PasswordResetCheck,
+    PasswordResetDone,
+    PasswordResetIn,
+    TokenIn,
+    VerifyEmailResult,
+)
 from app.schemas.auth import (
     AuthProviders,
     ChangePasswordRequest,
@@ -33,9 +41,11 @@ from app.schemas.auth import (
     SsoExchange,
     TokenResponse,
 )
+from app.schemas.common import Message
 from app.schemas.user import UserOut
 from app.services import access as access_svc
-from app.services import entra, login_guard, user_history
+from app.services import account, entra, login_guard, mail, user_history
+from app.services.errors import CodedError
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +58,20 @@ MICROSOFT_REQUIRED = "Analistas e gestores entram com a conta Microsoft da empre
 INACTIVE = "Seu acesso está desativado. Fale com a central da Maxx."
 SESSION_EXPIRED = "Sessão expirada. Entre novamente."
 SESSION_COPIED = "Sessão encerrada por segurança. Entre novamente."
+
+# Esqueci minha senha e os links do e-mail (validar o e-mail, definir a senha).
+FORGOT_SENT = (
+    "Se o e-mail estiver cadastrado e validado, enviamos um link para criar uma nova senha. "
+    "Confira também o spam."
+)
+FORGOT_MAIL_OFF = (
+    "O envio de e-mail está desligado. Peça à central pelo WhatsApp para redefinir sua senha"
+)
+# Pedidos de "Esqueci minha senha" por IP por hora (o limite por e-mail fica em services/account).
+FORGOT_PER_IP = 10
+# Aberturas de link (as três rotas de token somadas) por IP a cada 10 minutos.
+LINKS_PER_IP = 30
+LINKS_WINDOW_SECONDS = 600
 
 
 def _tokens(
@@ -65,10 +89,15 @@ def _tokens(
     )
 
 
-def _blocked(exc: login_guard.LoginBlocked) -> HTTPException:
+def _blocked(exc: login_guard.LoginBlocked | login_guard.RateLimited) -> HTTPException:
     return HTTPException(
         status.HTTP_429_TOO_MANY_REQUESTS, str(exc), headers={"Retry-After": str(exc.retry_after)}
     )
+
+
+def _ip(request: Request) -> str:
+    # IP já resolvido pelo uvicorn (--proxy-headers só confia no proxy configurado).
+    return request.client.host if request.client else "sem-ip"
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -196,6 +225,8 @@ async def change_password(body: ChangePasswordRequest, db: DB, user: CurrentUser
     user.password_hash = await hash_password_async(body.new_password)
     user.must_change_password = False
     user.sessions_revoked_at = utcnow()
+    # Os links de nova senha ainda não usados ("Esqueci minha senha", central, boas-vindas) caem.
+    await account.revoke(db, user_id=user.id, purpose=AccountTokenPurpose.RESET_PASSWORD)
     changes: list[dict] = []
     if user.role == UserRole.TECHNICIAN:
         line = user_history.PASSWORD_CREATED if was_temporary else user_history.PASSWORD_CHANGED
@@ -204,6 +235,88 @@ async def change_password(body: ChangePasswordRequest, db: DB, user: CurrentUser
     await db.commit()
     await user_history.publish_changed(user, changes, via=VIA_APP, actor=user)
     return _tokens(user, home_channel(user.role))
+
+
+# ------------------------------------------------- esqueci minha senha e links do e-mail
+# Sem login. As regras e o histórico ficam em services/account.py; aqui, os limites, o commit e
+# os avisos. O token do link chega no corpo (a página o lê do fragmento #token=).
+
+
+async def _link_attempt(request: Request) -> None:
+    """Conta uma abertura de link (validar o e-mail, conferir ou gravar a senha) do IP."""
+    try:
+        await login_guard.hit("account-link-ip", _ip(request), LINKS_PER_IP, LINKS_WINDOW_SECONDS)
+    except login_guard.RateLimited as exc:
+        raise _blocked(exc) from exc
+
+
+@router.post("/forgot-password", response_model=Message, status_code=status.HTTP_202_ACCEPTED)
+async def forgot_password(body: ForgotPasswordIn, db: DB, request: Request) -> Message:
+    """Esqueci minha senha (app, sem login): 202 com o mesmo texto, exista ou não o e-mail. O link
+    (2 h) só vai para o técnico com acesso ao app e o e-mail de login validado. 429 depois de
+    FORGOT_PER_IP pedidos do IP na hora; 503 MAIL_DISABLED com o envio de e-mail desligado (a
+    central redefine pelo WhatsApp, com a senha provisória)."""
+    try:
+        await login_guard.hit("forgot-ip", _ip(request), FORGOT_PER_IP, 3600)
+    except login_guard.RateLimited as exc:
+        raise _blocked(exc) from exc
+    if not settings.mail_enabled:
+        raise CodedError(FORGOT_MAIL_OFF, mail.MAIL_DISABLED, status.HTTP_503_SERVICE_UNAVAILABLE)
+    row = await account.forgot_password(db, body.email)
+    if row is not None:
+        await db.commit()
+        mail.deliver_soon([row.id])
+    return Message(detail=FORGOT_SENT)
+
+
+@router.post("/password-reset/check", response_model=PasswordResetCheck)
+async def password_reset_check(body: TokenIn, db: DB, request: Request) -> PasswordResetCheck:
+    """A página "Definir nova senha" ao abrir: confere o link sem gastá-lo e mostra a conta
+    (e-mail mascarado, primeiro nome), o tipo ("create": a primeira senha, pela boas-vindas) e o
+    link do app. 410 LINK_GONE: vencido, usado ou sem acesso ao app."""
+    await _link_attempt(request)
+    return await account.check_reset(db, body.token)
+
+
+@router.post("/password-reset", response_model=PasswordResetDone)
+async def password_reset(body: PasswordResetIn, db: DB, request: Request) -> PasswordResetDone:
+    """Grava a senha nova pelo link (uso único): encerra os acessos abertos, revoga os outros
+    links de senha e valida o e-mail de login (o link chegou nele). 410 LINK_GONE: vencido, usado
+    ou sem acesso ao app (nada muda e o link continua como estava)."""
+    await _link_attempt(request)
+    outcome = await account.reset_password(db, body.token, body.password)
+    await db.commit()
+    user = outcome.user
+    if user is not None:
+        # A senha nova destrava o login e a senha pedida no app (as erradas de antes não contam).
+        await login_guard.succeeded(user.email, _ip(request))
+        await login_guard.password_change_succeeded(str(user.id))
+        await user_history.publish_changed(user, outcome.changes, via=VIA_LINK, actor=user)
+    return PasswordResetDone(email=outcome.email, app_url=settings.tech_app_url)
+
+
+@router.post("/verify-email", response_model=VerifyEmailResult)
+async def verify_email(body: TokenIn, db: DB, request: Request) -> VerifyEmailResult:
+    """A página /validar-email ao abrir: valida o e-mail da ficha ("signup"), o e-mail novo
+    pedido no app, que passa a ser o login ("change"), ou o login de sempre ("check"). O mesmo
+    link aberto de novo com o e-mail já validado responde igual. 410 LINK_GONE; 409 EMAIL_IN_USE
+    quando o e-mail pedido virou o login de outro cadastro (o pedido sai)."""
+    await _link_attempt(request)
+    outcome = await account.verify_email(db, body.token)
+    await db.commit()
+    if outcome.user is not None and outcome.changes:
+        await user_history.publish_changed(
+            outcome.user,
+            outcome.changes,
+            via=VIA_LINK,
+            actor=outcome.user,
+            after_reset=outcome.after_reset,
+        )
+    if outcome.application is not None:
+        await account.publish_onboarding_updated(outcome.application, "email_verified")
+    if outcome.error is not None:
+        raise outcome.error
+    return VerifyEmailResult(email=outcome.email, kind=outcome.kind)
 
 
 # ------------------------------------------------------------ login Microsoft
