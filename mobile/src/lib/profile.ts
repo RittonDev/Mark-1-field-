@@ -115,6 +115,15 @@ export function hasCadastroV2(p: MyProfile | null | undefined): boolean {
   );
 }
 
+/**
+ * O servidor já tem a gestão (Entrega 2): documentos, currículo, áreas de atuação e aptidões do catálogo (com o id).
+ * Sem ela, Documentos, Currículo e Áreas de atuação mostram UNAVAILABLE e as Aptidões seguem pelo nome (`{name,
+ * level}`). Não estreita o tipo, como hasCadastroV2.
+ */
+export function hasCadastroE2(p: MyProfile | null | undefined): boolean {
+  return hasCadastroV2(p) && hasTechnicalProfile(p) && Array.isArray(p.documents) && Array.isArray(p.area_ids);
+}
+
 /** Sobe quando uma gravação sai e quando ela volta (com ou sem erro): ímpar = gravação no ar. */
 let writes = 0;
 /** A última gravação da fila (nunca rejeita: a falha de uma não trava a seguinte). */

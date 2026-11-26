@@ -116,6 +116,9 @@ export default function RootLayout() {
             <Stack.Screen name="configuracoes/dados-pessoais" options={{ title: "Dados pessoais" }} />
             <Stack.Screen name="configuracoes/contato" options={{ title: "Contato" }} />
             <Stack.Screen name="configuracoes/endereco" options={{ title: "Endereço" }} />
+            <Stack.Screen name="configuracoes/documentos" options={{ title: "Documentos" }} />
+            {/* Incluir e editar: a tela troca o título ("Novo documento", "Editar certificação"...). */}
+            <Stack.Screen name="configuracoes/documento" options={{ title: "Documento" }} />
             <Stack.Screen name="configuracoes/biografia" options={{ title: "Mini biografia" }} />
             <Stack.Screen name="configuracoes/empresa" options={{ title: "Dados empresariais" }} />
             <Stack.Screen name="configuracoes/recebimento" options={{ title: "Formas de recebimento" }} />
@@ -124,8 +127,10 @@ export default function RootLayout() {
             <Stack.Screen name="configuracoes/notificacoes" options={{ title: "Notificações" }} />
             <Stack.Screen name="configuracoes/disponibilidade" options={{ title: "Dias e horários" }} />
             <Stack.Screen name="configuracoes/transporte" options={{ title: "Transporte" }} />
-            <Stack.Screen name="configuracoes/aptidoes" options={{ title: "Aptidões" }} />
+            <Stack.Screen name="configuracoes/curriculo" options={{ title: "Currículo" }} />
             <Stack.Screen name="configuracoes/formacao" options={{ title: "Formação" }} />
+            <Stack.Screen name="configuracoes/areas" options={{ title: "Áreas de atuação" }} />
+            <Stack.Screen name="configuracoes/aptidoes" options={{ title: "Aptidões" }} />
             <Stack.Screen name="configuracoes/ferramental" options={{ title: "Ferramental" }} />
             {/* Links antigos do Meu cadastro: a tela só redireciona para Configurações. */}
             <Stack.Screen name="meu-cadastro" options={{ headerShown: false }} />

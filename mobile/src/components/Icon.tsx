@@ -66,7 +66,11 @@ export type IconName =
   | "map"
   | "timer"
   | "pie"
-  | "message";
+  | "message"
+  // Cadastro: Documentos, Currículo e Áreas de atuação.
+  | "idCard"
+  | "fileText"
+  | "grid";
 
 /** `color` só serve às partes cheias (a metade pintada do "pie"); o traço vem do Svg. */
 function Shape({ name, color }: { name: IconName; color: string }) {
@@ -383,6 +387,30 @@ function Shape({ name, color }: { name: IconName; color: string }) {
       );
     case "message": // link do WhatsApp na oferta
       return <Path d="M5 5h14a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 5 5z" />;
+    case "idCard": // Documentos: cartão com a foto e duas linhas
+      return (
+        <>
+          <Rect x={3} y={5} width={18} height={14} rx={2.5} />
+          <Circle cx={8.5} cy={11} r={2} />
+          <Path d="M5.8 16.2a3 3 0 0 1 5.4 0M14 10h4.5M14 13.5h3" />
+        </>
+      );
+    case "fileText": // Currículo: folha com a ponta dobrada e linhas
+      return (
+        <>
+          <Path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z" />
+          <Path d="M14 3.5V8h4.5M8.5 12.5h7M8.5 16h5" />
+        </>
+      );
+    case "grid": // Áreas de atuação: quatro quadrados
+      return (
+        <>
+          <Rect x={4} y={4} width={7} height={7} rx={1.5} />
+          <Rect x={13} y={4} width={7} height={7} rx={1.5} />
+          <Rect x={4} y={13} width={7} height={7} rx={1.5} />
+          <Rect x={13} y={13} width={7} height={7} rx={1.5} />
+        </>
+      );
   }
 }
 

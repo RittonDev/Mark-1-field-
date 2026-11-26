@@ -45,8 +45,12 @@ export interface TechProfileScreen {
   refreshing: boolean;
 }
 
-/** Abre com o cadastro da memória e relê do servidor (a leitura em andamento é compartilhada com as outras telas). */
-export function useTechProfileScreen(): TechProfileScreen {
+/**
+ * Abre com o cadastro da memória e relê do servidor (a leitura em andamento é compartilhada com as outras telas).
+ * `requires`: o que a tela pede a mais do cadastro (hasCadastroE2 nas telas da gestão); com a leitura feita e ele falso
+ * (o servidor de antes), "unavailable".
+ */
+export function useTechProfileScreen(requires?: (profile: MyProfile) => boolean): TechProfileScreen {
   const profile = useProfile();
   const [load, setLoad] = useState<ProfileLoad>({ status: "loading" });
   const [round, setRound] = useState(0);
@@ -83,7 +87,7 @@ export function useTechProfileScreen(): TechProfileScreen {
   }, []);
 
   let gate: TechProfileGate;
-  if (hasTechnicalProfile(profile)) gate = { status: "ready", profile };
+  if (hasTechnicalProfile(profile) && (!requires || requires(profile))) gate = { status: "ready", profile };
   else if (load.status === "error") gate = load;
   else if (profile && load.status === "ok") gate = { status: "unavailable" };
   else gate = { status: "loading" };
@@ -96,9 +100,10 @@ export function useTechProfileScreen(): TechProfileScreen {
 
 /**
  * As listas que gravam pela folha e pela lixeira, na fila das gravações: Aptidões, Formação e Indisponibilidade montam
- * o corpo do PATCH em saveProfileWith; Formas de recebimento ("payout") têm rotas próprias (writeProfile).
+ * o corpo do PATCH em saveProfileWith; Formas de recebimento ("payout") e Documentos ("documents") têm rotas próprias
+ * (writeProfile).
  */
-export type ListPart = "skills" | "education" | "payout" | "unavailability";
+export type ListPart = "skills" | "education" | "payout" | "unavailability" | "documents";
 
 /**
  * A gravação de uma lista: enquanto está no ar, incluir, editar e excluir ficam desligados e o item que sai mostra o
@@ -107,8 +112,8 @@ export type ListPart = "skills" | "education" | "payout" | "unavailability";
 export interface ListWrite {
   busy: boolean;
   /**
-   * Os itens saindo: a aptidão pelo nome sem acento e maiúsculas (foldName); a formação, a forma de recebimento e o
-   * período pelo id.
+   * Os itens saindo: a aptidão pela chave (skillKey: o id do catálogo ou, no formato de antes, o nome sem acento e
+   * maiúsculas); a formação, a forma de recebimento, o período e o documento pelo id.
    */
   removing: readonly string[];
 }
@@ -119,10 +124,11 @@ const ALL_IDLE: Record<ListPart, ListWrite> = {
   education: LIST_IDLE,
   payout: LIST_IDLE,
   unavailability: LIST_IDLE,
+  documents: LIST_IDLE,
 };
 let listWrites: Record<ListPart, ListWrite> = ALL_IDLE;
 /** Gravações no ar por lista (mais de uma só quando um toque passou antes de a tela desligar as ações). */
-const listCount: Record<ListPart, number> = { skills: 0, education: 0, payout: 0, unavailability: 0 };
+const listCount: Record<ListPart, number> = { skills: 0, education: 0, payout: 0, unavailability: 0, documents: 0 };
 /** Quem gravou: a troca de sessão apaga, e o fim de uma gravação de antes dela não mexe mais em nada. */
 let listOwner: string | null = null;
 let listGeneration = 0;
