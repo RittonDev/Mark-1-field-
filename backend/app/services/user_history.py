@@ -106,6 +106,16 @@ DELTA_FIELDS = frozenset(
 # Ferramenta marcada que não está mais no catálogo (a API não exclui; só apagando no banco).
 TOOL_GONE = "Ferramenta removida"
 
+# O destino do pagamento mudou sem mudar a máscara: as marcas neutras do "to" (o dado não aparece)
+# e o último recurso, quando nada do que se pode mostrar difere.
+OTHER_ACCOUNT, OTHER_KEY, OTHER_DOCUMENT = "outra conta", "outra chave", "outro documento"
+PAYOUT_DATA_CHANGED = "dados alterados"
+OTHER_PREFERRED = " (outra forma)"
+# Chaves auxiliares do snapshot (começam com "_"): o que o texto detalhado precisa e o diff não
+# lista. Aqui, a forma preferencial inteira (payout_preferred compara só o id).
+_AUX = "_"
+_PREFERRED_METHOD = "_payout_preferred_method"
+
 # Acesso ao app (users.is_active) e situação na operação (= OPERATIONAL_STATUS e APP_ACCESS de
 # lib/constants.ts).
 ACCESS_ON, ACCESS_OFF = "Liberado", "Sem acesso"
@@ -263,24 +273,90 @@ def _methods_text(items: Iterable[_Method]) -> str | None:
     return tech_profile.items_text(sorted(payout.describe_with_holder(m) for m in items), "; ")
 
 
+def _method_detail(method: _Method) -> str:
+    """A forma com o titular e o documento dele mascarado ("PIX E-mail t***@exemplo.com · Tecnico
+    Alfa · CPF ***.456.789-**")."""
+    text = payout.describe_with_holder(method)
+    document = _masked_document(method.holder_document)
+    return f"{text} · {document}" if document else text
+
+
 def _methods_text_with_document(items: Iterable[_Method]) -> str | None:
-    """Quando só o documento do titular mudou, o texto de sempre sairia igual dos dois lados: aí
-    vai também o documento mascarado."""
-    labels = []
-    for method in items:
-        text = payout.describe_with_holder(method)
-        document = _masked_document(method.holder_document)
-        labels.append(f"{text} · {document}" if document else text)
-    return tech_profile.items_text(sorted(labels), "; ")
+    return tech_profile.items_text(sorted(_method_detail(m) for m in items), "; ")
+
+
+def _account_type(value: str | None) -> str:
+    return payout.ACCOUNT_TYPE_LABELS.get(value or "", value or "")
+
+
+def _method_marks(old: _Method, new: _Method) -> tuple[list[str], list[str]]:
+    """O que mudou de uma forma para a outra (do mesmo tipo) e a máscara não mostra, sem abrir o
+    dado: o código do banco, a agência e o tipo de conta pelo rótulo, dos dois lados; a conta, a
+    chave e o documento do titular só com a marca neutra no que entrou."""
+    gone: list[str] = []
+    came: list[str] = []
+    if new.kind == "bank":
+        if old.bank_code != new.bank_code:
+            gone.append(f"banco {old.bank_code}")
+            came.append(f"banco {new.bank_code}")
+        if old.branch != new.branch:
+            gone.append(f"Ag. {old.branch}")
+            came.append(f"Ag. {new.branch}")
+        if old.account_type != new.account_type:
+            gone.append(_account_type(old.account_type))
+            came.append(_account_type(new.account_type))
+        if (old.account_number, old.account_digit) != (new.account_number, new.account_digit):
+            came.append(OTHER_ACCOUNT)
+    elif (old.pix_key_type, old.pix_key) != (new.pix_key_type, new.pix_key):
+        came.append(OTHER_KEY)
+    if old.holder_document != new.holder_document:
+        came.append(OTHER_DOCUMENT)
+    return gone, came
+
+
+def _with_marks(text: str | None, marks: list[str]) -> str | None:
+    return " · ".join([text, *marks]) if text is not None and marks else text
+
+
+def _methods_delta(
+    gone: frozenset[_Method], came: frozenset[_Method]
+) -> tuple[str | None, str | None]:
+    """O texto de uma mudança nas formas de recebimento: o que saiu ("from") e o que entrou ("to").
+    Quando o texto de sempre sai igual dos dois lados (o destino mudou sem mudar a máscara), vai
+    também o documento do titular mascarado; ainda igual, numa forma trocada por outra do mesmo
+    tipo (a edição troca uma por uma), o que mudou (_method_marks); e, se nada do que se pode
+    mostrar difere, "dados alterados" no que entrou. Nunca a chave ou a conta inteira."""
+    frm, to = _methods_text(gone), _methods_text(came)
+    if frm != to:
+        return frm, to
+    detailed = _methods_text_with_document(gone), _methods_text_with_document(came)
+    if detailed[0] != detailed[1]:
+        return detailed
+    if len(gone) == 1 and len(came) == 1:
+        [old], [new] = gone, came
+        if old.kind == new.kind:
+            marks_gone, marks_came = _method_marks(old, new)
+            frm, to = _with_marks(frm, marks_gone), _with_marks(to, marks_came)
+    if frm == to:
+        to = _with_marks(to, [PAYOUT_DATA_CHANGED])
+    return frm, to
+
+
+def _preferred_texts(
+    old: _Method | None, new: _Method | None, frm: str | None, to: str | None
+) -> tuple[str | None, str | None]:
+    """payout_preferred com a mesma máscara dos dois lados (outra forma virou a preferencial):
+    com o titular e o documento dele mascarado; se ainda sair igual, " (outra forma)" no "to"."""
+    if old is not None and new is not None:
+        frm, to = _method_detail(old), _method_detail(new)
+    if frm == to and to is not None:
+        to = f"{to}{OTHER_PREFERRED}"
+    return frm, to
 
 
 def _periods_text(items: Iterable[tuple[str, str]]) -> str | None:
     labels = [unavailability.period_text({"start": s, "end": e}) for s, e in sorted(items)]
     return tech_profile.items_text(labels, "; ")
-
-
-# Nos DELTA_FIELDS em que o texto de sempre pode não mostrar a diferença.
-_DETAILED_TEXT: dict[str, ItemsText] = {"payout_methods": _methods_text_with_document}
 
 
 async def _payout_rows(db: AsyncSession, user_id: uuid.UUID) -> list[TechnicianPayoutMethod]:
@@ -339,6 +415,7 @@ async def snapshot(db: AsyncSession, user: User) -> Snapshot:
             preferred.id if preferred else None,
             payout.describe(preferred) if preferred else None,
         ),
+        _PREFERRED_METHOD: (_method(preferred) if preferred else None, None),
         "unavailability": (frozenset((p["start"], p["end"]) for p in periods), _periods_text),
         "tools": _tools(user, tools),
         "availability": (tech_profile.slot_set(user), _slots_text),
@@ -351,20 +428,28 @@ async def snapshot(db: AsyncSession, user: User) -> Snapshot:
 
 def diff(before: Snapshot, after: Snapshot) -> list[dict[str, Any]]:
     """As mudanças entre duas fotos do cadastro, na ordem dos campos. Nos DELTA_FIELDS, "from" é
-    o que saiu e "to" o que entrou."""
+    o que saiu e "to" o que entrou. Nas formas de recebimento, a linha não sai com "from" igual a
+    "to": com a mesma máscara, o texto diz o que mudou (_methods_delta e _preferred_texts). As
+    chaves auxiliares ("_…") não entram."""
     changes: list[dict[str, Any]] = []
     for key, (value, text) in after.items():
-        if key not in before or before[key][0] == value:
+        if key.startswith(_AUX) or key not in before or before[key][0] == value:
             continue
         old, old_text = before[key]
-        if key in DELTA_FIELDS:
-            gone, came = old - value, value - old
-            frm, to = old_text(gone), text(came)
-            if frm == to and key in _DETAILED_TEXT:
-                frm, to = _DETAILED_TEXT[key](gone), _DETAILED_TEXT[key](came)
-            changes.append({"field": key, "from": frm, "to": to})
+        if key == "payout_methods":
+            frm, to = _methods_delta(old - value, value - old)
+        elif key in DELTA_FIELDS:
+            frm, to = old_text(old - value), text(value - old)
+        elif key == "payout_preferred" and old_text == text:
+            frm, to = _preferred_texts(
+                before.get(_PREFERRED_METHOD, (None, None))[0],
+                after.get(_PREFERRED_METHOD, (None, None))[0],
+                old_text,
+                text,
+            )
         else:
-            changes.append({"field": key, "from": old_text, "to": text})
+            frm, to = old_text, text
+        changes.append({"field": key, "from": frm, "to": to})
     return changes
 
 
