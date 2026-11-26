@@ -92,9 +92,8 @@ describe("documentos", () => {
   it("DOCUMENT_ACCEPT: PDF, JPG, PNG e WebP; GIF, HEIC, XML e HTML ficam de fora", () => {
     const accepted = C.DOCUMENT_ACCEPT.split(",");
     assert.deepEqual(accepted, ["application/pdf", "image/jpeg", "image/png", "image/webp"]);
-    for (const type of ["image/gif", "image/heic", "image/heif", "text/xml", "application/xml", "text/html", "image/svg+xml"]) {
-      assert.ok(!accepted.includes(type), type);
-    }
+    const refused = ["image/gif", "image/heic", "image/heif", "text/xml", "application/xml", "text/html", "image/svg+xml"];
+    for (const type of refused) assert.ok(!accepted.includes(type), type);
   });
 
   it("documentFileKind: PDF ou Foto", () => {
@@ -152,7 +151,8 @@ describe("catálogos e tempo real", () => {
       const items = /^MAX_ITEMS[^=\n]*=\s*\{([^}]*)\}/m.exec(text);
       assert.ok(items, "MAX_ITEMS não encontrado em backend/app/services/technician_catalogs.py");
       const limits = Object.fromEntries([...items[1].matchAll(/"(\w+)":\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
-      assert.deepEqual(limits, { tool: C.CATALOG_LIMITS.tools, area: C.CATALOG_LIMITS.areas, skill: C.CATALOG_LIMITS.skills });
+      const { tools, areas, skills } = C.CATALOG_LIMITS;
+      assert.deepEqual(limits, { tool: tools, area: areas, skill: skills });
       assert.equal(Number(/^NAME_MAX[^=\n]*=\s*(\d+)/m.exec(text)?.[1]), C.CATALOG_LIMITS.name);
       assert.equal(Number(/^MAX_AREAS[^=\n]*=\s*(\d+)/m.exec(text)?.[1]), C.TECH_PROFILE_LIMITS.areas);
     },

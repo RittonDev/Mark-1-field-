@@ -218,9 +218,8 @@ describe("aviso de privacidade", () => {
   it("o aviso cita o perfil técnico", () => {
     const body = (title) => PRIVACY_NOTICE.find((item) => item.title === title)?.body ?? "";
     assert.ok(unique(PRIVACY_NOTICE.map((item) => item.title)));
-    for (const word of ["perfil técnico", "áreas de atuação", "aptidões", "formação", "ferramental", "transporte", "CNH", "turnos"]) {
-      assert.ok(body("Quais dados").includes(word), word);
-    }
+    const words = ["perfil técnico", "áreas de atuação", "aptidões", "formação", "ferramental", "transporte", "CNH", "turnos"];
+    for (const word of words) assert.ok(body("Quais dados").includes(word), word);
     assert.ok(body("Quais dados").includes("O seu perfil técnico, informado na ficha, no app ou pela central:"));
     assert.ok(body("Para quê").includes("perfil técnico"));
     assert.ok(body("Seus direitos").includes("Configurações"));
