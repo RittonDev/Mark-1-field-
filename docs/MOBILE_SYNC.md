@@ -49,8 +49,10 @@ Toda rota do cadastro devolve o `MyProfile` inteiro, que passa a ser o cadastro 
 para o SQLite nem para o kv: o cadastro fica na memória do app (`lib/profile.ts`) e sai no Sair e na troca de técnico
 (nome, e-mail e celular vão também para o usuário da sessão). CPF, RG, nascimento, endereço, dados da empresa,
 veículo, chaves PIX, contas e o documento do titular existem só nessa memória, nunca no SQLite, no kv nem no
-SecureStore. É lido ao entrar, ao abrir cada tela de Configurações, ao puxar a aba Faturamento e, quando falta ou
-passou de 6 h (o link da foto vale 12 h), ao voltar à tela inicial e ao abrir o Faturamento. As gravações (salvar,
+SecureStore. É lido ao entrar, ao abrir cada tela de Configurações, ao puxar a aba Faturamento e as telas do cadastro,
+ao voltar para o app com uma tela do cadastro aberta (`AppState` "active", em `useProfileLoad`: o link do e-mail abre
+no navegador; a releitura não esconde a tela, e o que foi digitado fica) e, quando falta ou passou de 6 h (o link da
+foto vale 12 h), ao voltar à tela inicial e ao abrir o Faturamento. As gravações (salvar,
 enviar a foto e removê-la, as formas de recebimento e o link do e-mail) saem uma por vez: a seguinte espera a resposta
 da anterior e não sai se a sessão mudou na espera. Uma leitura durante a qual uma gravação saiu, voltou ou ficou no ar
 não é publicada: fica o que a gravação devolveu. O servidor também grava uma por vez por técnico (o
@@ -64,14 +66,21 @@ anterior terminar e não apaga o carimbo nem o histórico dela.
   corpo, e o `api.delete` do app não leva corpo; `lib/payoutMethods.ts`). Todas levam `current_password` e devolvem o
   `MyProfile`. Uma ação por pedido: a lista nunca vai no `PATCH`, que assim não reenvia chaves e contas a cada mudança
   nem traz de volta a que a central excluiu. Sempre há uma preferencial com a lista não vazia: excluir a preferencial
-  passa a preferência para a mais nova das que ficam. A forma que a central excluiu com a tela aberta volta 404
-  `PAYOUT_METHOD_NOT_FOUND`, e o app relê o cadastro.
+  passa a preferência para a mais nova das que ficam. O app relê o cadastro quando a lista da tela pode estar velha
+  (`payoutListStale`, em `lib/payoutForm.ts`): a falha sem resposta (status 0: o servidor pode ter gravado, e repetir
+  a inclusão daria 409), o 404 `PAYOUT_METHOD_NOT_FOUND` (a central excluiu com a tela aberta), o 409
+  `PAYOUT_METHOD_DUPLICATE` e o 422 `PAYOUT_METHODS_LIMIT`. Com a lista nova, a folha aberta acusa a repetida no
+  próprio campo.
 - **E-mail de login**: o e-mail novo no `PATCH` (com a senha) não troca o login. Ele fica em `email_pending` até o
   técnico abrir o link que chega nele (página web `/validar-email`); só então vira o login, sem derrubar as sessões, e
-  a leitura seguinte do cadastro leva o novo para o usuário da sessão e para o e-mail do login (`mc_last_email`).
-  `POST /me/profile/email/verification` manda (de novo) o link para o pendente ou, sem ele, para o login ainda não
-  validado (409 já validado, 422 endereço que não recebe mensagens, 503 `MAIL_DISABLED`, 429 depois de 3 na hora);
-  `DELETE /me/profile/email/pending` cancela a troca, e o link dela deixa de valer. `email_verified_at`,
+  a primeira resposta que traz o login novo, a renovação do token (`session.setTokens`) ou a leitura do cadastro, leva
+  o novo para o usuário da sessão e para o e-mail do login (`mc_last_email`): se a sessão acabar antes de o app abrir
+  de novo, o login não vem com o endereço antigo. `POST /me/profile/email/verification` manda (de novo) o link para o
+  pendente ou, sem ele, para o login ainda não validado (409 `EMAIL_ALREADY_VERIFIED`: o app relê o cadastro e avisa
+  "Seu e-mail já está validado"; 422 endereço que não recebe mensagens, 503 `MAIL_DISABLED`, 429 depois de 3 na hora);
+  `DELETE /me/profile/email/pending` cancela a troca, e o link dela deixa de valer. Sem pedido (o link já foi aberto),
+  ele responde 200 com o cadastro, e o app compara o login devolvido com o da tela: "Seu e-mail já foi validado" /
+  "Agora você entra com {e-mail}." no lugar de "Troca de e-mail cancelada". `email_verified_at`,
   `email_pending` e `email_link_sent_at` dão o estado que Contato mostra. Com `mail_enabled` falso, o app não pede
   troca nem link (o servidor recusaria, com 422 e 503) e não mostra o estado da validação; a troca já pedida só pode
   ser cancelada.

@@ -2885,29 +2885,62 @@ ficam em `deploy/`).
 Os links dos e-mails usam o `WEB_URL` de sempre. Configure SPF e DKIM do domínio no provedor.
 
 **Publicação.**
-1. A migração `b7e2d4f6a8c1` roda antes de a API nova atender (`alembic upgrade head`; a API aplica ao subir).
-2. A web e a API sobem juntas, a web segundos antes (o `PRIVACY_VERSION`). A web nova com a API velha: os campos novos
-   vêm vazios, as rotas novas dão 404 (a tela mostra o erro com "Tentar de novo"), a busca de CEP fica "indisponível"
-   (campos livres), e o `PATCH` da central e a ficha pública mandam campos que a API velha ignora calada: depois de
-   publicar, confira a gravação campo a campo.
-3. O app sobe depois da API (`MyProfileUpdate` recusa campo desconhecido). O app novo com a API velha (sem os campos
+1. **Backup antes.** A `b7e2d4f6a8c1` é a primeira migração que apaga colunas (`users.pix_*` e `ck_users_pix_pair`,
+   depois da cópia para as formas de recebimento): a API de antes não roda com o banco migrado (o `User` dela lê essas
+   colunas, e o login e toda tela que carrega usuário dão 500). Antes de publicar, `pg_dump -Fc` do banco real direto
+   para o host, conferido com `pg_restore -l` (a lista sai sem erro). Por exemplo, com o `docker compose` daqui:
+   `docker compose exec -T db pg_dump -U chamados -Fc -f /tmp/antes-v2.dump chamados`, depois
+   `docker compose exec -T db pg_restore -l /tmp/antes-v2.dump` e `docker compose cp db:/tmp/antes-v2.dump .` (o
+   `-f` e o `cp` evitam o `>` do PowerShell, que estraga arquivo binário).
+2. **A migração roda só no start da API nova, com a antiga parada** (o comando do contêiner é
+   `alembic upgrade head && uvicorn …`, e há uma instância só). Não rode `alembic upgrade head` à parte com a API antiga
+   no ar, nem o comando de checagem do README (`docker compose run --rm api sh -c "alembic upgrade head && alembic
+   check"`), que neste ambiente usa o banco real.
+3. **Para voltar** (a API nova não sobe ou dá um erro grave):
+   1. com o código **novo** ainda no contêiner da API (nele mesmo, com `docker exec`; um contêiner novo da imagem pode
+      ter o código antigo), `alembic downgrade f5a7c9e1b3d6`. Perde as contas, as chaves PIX não preferenciais, a
+      situação e o motivo, a indisponibilidade, os dados pessoais novos, as análises das fichas, os links e a fila de
+      e-mails (ver Downgrade, em Dados);
+   2. recoloque o código antigo **e** apague do contêiner
+      `/app/alembic/versions/20261125_b7e2d4f6a8c1_cadastro_v2_dos_tecnicos.py`: o `docker cp` por cima não apaga
+      arquivo, e com ele lá o `alembic upgrade head` do start aplica a migração de novo e derruba a API;
+   3. reinicie e confira o `/health`, um login e o log.
+
+   Sem o downgrade, o código antigo não sobe (o alembic dele não conhece a revisão gravada no banco). A outra saída é
+   restaurar o dump, com a API parada e num banco recriado (o `pg_restore --clean` sozinho deixa as tabelas que a
+   migração criou, e a próxima publicação falharia ao criá-las de novo), e seguir com os passos 2 e 3; perde tudo o que
+   foi gravado depois da publicação.
+4. **A web e o app deste ambiente ficam à frente da API durante a construção** (a prévia ao vivo,
+   `scripts/dev-preview.ps1`: o código novo chega ao `mc-web-dev` e ao `mc-expo` em segundos, e a API real continua a
+   de antes até a publicação), e não "segundos antes". A web nova com a API de antes: os campos novos vêm vazios, as
+   rotas novas dão 404 (a tela mostra o erro com "Tentar de novo"), a busca de CEP fica "indisponível" (campos
+   livres), a ficha do técnico deixa só de leitura as partes que a API de antes descartaria ("Indisponível no
+   momento."), aprovar devolve só o técnico (sem `password_link`, o painel oferece a senha provisória) e a ficha
+   pública grava só o logradouro: o número, o complemento, o bairro e os outros campos novos se perdem, e o aceite fica
+   com a versão do servidor ("2026-11-20"). Publique a API logo depois da rodada de correção e, até lá, não mande
+   fichas de verdade pela prévia. Na ordem inversa (a API na frente da web), a ficha pública pede para recarregar e não
+   envia até a web nova entrar. Depois de publicar, confira a gravação campo a campo.
+5. O app sobe depois da API (`MyProfileUpdate` recusa campo desconhecido). O app novo com a API velha (sem os campos
    novos no `MyProfile`): Dados pessoais, Endereço, Contato, Mini biografia, Dados empresariais e Formas de recebimento
    mostram "Indisponível no momento" e não gravam nada (Foto, Senha e o perfil profissional seguem como antes, sem o
    veículo e a indisponibilidade), e o "Esqueci minha senha" cai no texto de pedir à central (404). O app de antes com
    a API nova: lê `pix` (a preferencial PIX); gravar `pix` recebe "Atualize o app…"; trocar o e-mail fica pendente até
    o link; `address_line` grava o logradouro e limpa número e complemento.
-4. `PRIVACY_VERSION` = a data do dia da publicação, igual em `backend/app/schemas/onboarding.py` e nas duas cópias de
-   `constants.ts` (hoje "2026-11-25").
-5. Sem SMTP tudo funciona: `mail_enabled` falso, os e-mails ficam "Não enviado", o "Esqueci minha senha" manda falar com
+6. `PRIVACY_VERSION` = a data do dia da publicação, igual em `backend/app/schemas/onboarding.py` e nas duas cópias de
+   `constants.ts` (hoje "2026-11-26").
+7. Sem SMTP tudo funciona: `mail_enabled` falso, os e-mails ficam "Não enviado", o "Esqueci minha senha" manda falar com
    a central, e a central segue com o WhatsApp e a senha provisória. O provedor, o remetente, SPF e DKIM são do dono.
-6. As fichas enviadas antes da publicação têm o endereço numa linha só: aprovadas depois, a linha inteira vai para o
-   logradouro (a migração separou só os endereços dos técnicos).
+8. **Fichas de antes da publicação.** As enviadas pela ficha de antes têm o endereço numa linha só ("Rua Exemplo, 123 -
+   Apto 4"): aprovadas depois, a aprovação separa a linha em logradouro, número e complemento quando a ficha não tem
+   número (a regra da migração; o que não separa com segurança fica inteiro no logradouro). As enviadas pela ficha nova
+   à API de antes (item 4) chegaram só com o logradouro: antes de aprovar, confira o endereço com o candidato pelo
+   WhatsApp.
 
 **Privacidade (LGPD).** CPF, RG, nascimento, empresa e veículo: só o próprio técnico (`/me/profile`) e a gestão com
 Técnicos (no detalhe; a lista não traz). Formas de recebimento: só o técnico e quem tem Pagamentos (o histórico vem
 mascarado e, sem Pagamentos, "***"). A situação e o motivo: só a central. A indisponibilidade não tem motivo. O registro
 dos e-mails fica 180 dias e os links, até 30 dias depois de vencer; a ficha reprovada, 180 dias depois da última
-análise. O aviso de privacidade "2026-11-25" cita tudo isso: ver "Aviso de privacidade" em
+análise. O aviso de privacidade "2026-11-26" cita tudo isso: ver "Aviso de privacidade" em
 [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
 
 ## Acesso: perfis por tela e visibilidade de filas

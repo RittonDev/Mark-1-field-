@@ -422,8 +422,9 @@ async def test_import_fills_full_records(
 
         tec = await db.scalar(select(User).where(User.email == "tec1@teste.dev"))
         assert tec is not None
+        assert (tec.address_number, tec.address_complement) == ("100", "Casa 2")
         assert (tec.address_line, tec.address_district, tec.address_zip) == (
-            "Rua das Flores, 100 - Casa 2",
+            "Rua das Flores",
             "Vila Nova",
             "01001-000",
         )
