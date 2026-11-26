@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
-from sqlalchemy import Select, delete, func, or_, select, union_all
+from sqlalchemy import Select, delete, func, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
@@ -279,6 +279,49 @@ async def test_inactive_favorite_stays_out_of_suggestions(
     assert ids["J"] not in rows and ids["K"] not in rows
     assert rows[ids["L"]]["favorite"] == "auto"
     assert rows[ids["L"]]["reasons"][0] == "Favorito em Campinas-SP"
+
+
+@requires_db
+async def test_not_active_leaves_the_automatic_but_a_pinned_one_stays(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    """Inativo e Bloqueado (situação na operação) ficam no ranking, mas fora do automático, e o
+    próximo sobe; fixado pela central, continua, com a situação (a web mostra o selo). Nas
+    sugestões não entram."""
+    ids = await _seed(engine, world)
+    an = world.analyst.headers
+    async with engine.begin() as conn:
+        for letter, status in (("A", "inactive"), ("B", "blocked")):
+            await conn.execute(
+                update(User)
+                .where(User.id == uuid.UUID(ids[letter]))
+                .values(operational_status=status, operational_reason="Motivo de exemplo")
+            )
+
+    r = await client.get(f"{FAV}/city", params=SANTOS, headers=an)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert _ids(body["favorites"]) == [ids["H"], ids["C"], ids["D"]]
+    assert all(f["operational_status"] == "active" for f in body["favorites"])
+    others = {o["id"]: o for o in body["others"]}
+    assert _ids(body["others"]) == [ids["A"], ids["B"], ids["I"], ids["E"]]
+    assert (others[ids["A"]]["rank"], others[ids["A"]]["operational_status"]) == (1, "inactive")
+    assert others[ids["B"]]["operational_status"] == "blocked"
+
+    r = await client.put(f"{FAV}/{ids['A']}", json=SANTOS, headers=an)
+    assert r.status_code == 200, r.text
+    favorites = r.json()["favorites"]
+    assert _ids(favorites) == [ids["A"], ids["H"], ids["C"], ids["D"]]
+    assert (favorites[0]["pinned"], favorites[0]["operational_status"]) == (True, "inactive")
+    listed = (await client.get(FAV, params={"state": "SP"}, headers=an)).json()
+    santos = next(c for c in listed["cities"] if c["key"] == "santos")
+    assert santos["favorites"][0]["operational_status"] == "inactive"
+
+    r = await client.get(
+        f"{API}/technicians/suggest", params={"location_id": ids["centro"], "limit": 10}, headers=an
+    )
+    assert r.status_code == 200, r.text
+    assert not {ids["A"], ids["B"]} & {row["id"] for row in r.json()}
 
 
 @requires_db

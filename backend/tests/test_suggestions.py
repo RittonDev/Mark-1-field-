@@ -320,6 +320,23 @@ async def test_availability_is_a_small_signal(
         assert row["reasons"] == plain_before[user_id]["reasons"]
 
 
+async def test_service_areas_come_from_the_technician(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    """As áreas de atuação são as do cadastro do técnico (copiadas da ficha na aprovação)."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            update(User).where(User.id == world.tech.user.id).values(service_areas=["cftv"])
+        )
+    rows = await _ranking(
+        client,
+        world,
+        {"city": "Cidade Exemplo", "state": "SP", "title": "Câmera sem imagem", "limit": 10},
+    )
+    assert "Atende CFTV" in rows[str(world.tech.user.id)]["reasons"]
+    assert "Atende CFTV" not in rows[str(world.tech_other.user.id)]["reasons"]
+
+
 async def test_availability_across_midnight(
     client: AsyncClient, engine: AsyncEngine, world: World
 ) -> None:

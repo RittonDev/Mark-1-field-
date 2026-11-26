@@ -93,9 +93,10 @@ def test_personal_validators() -> None:
         with pytest.raises(ValueError, match=personal.RG_INVALID):
             personal.rg_number(bad)
     assert personal.rg_issuer(" ssp ") == "SSP"
-    assert personal.rg_issuer("Secretaria de Segurança") == "SECRETARIA DE SEGURANCA"
-    with pytest.raises(ValueError, match=personal.ISSUER_INVALID):
-        personal.rg_issuer("S")
+    assert personal.rg_issuer("Polícia  Civil") == "POLICIA CIVIL"
+    for bad in ("S", "Secretaria de Segurança"):  # 2 a 20 letras
+        with pytest.raises(ValueError, match=personal.ISSUER_INVALID):
+            personal.rg_issuer(bad)
     assert personal.uf("sp") == "SP"
     with pytest.raises(ValueError, match=personal.UF_INVALID):
         personal.uf("XX")

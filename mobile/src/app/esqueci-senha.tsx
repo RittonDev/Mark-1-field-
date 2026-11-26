@@ -19,6 +19,7 @@ import { FORGOT_MSG, forgotHandoff, forgotOutcome, forgotProblem, forgotSentText
 import { haptic } from "../lib/haptics";
 import { noNetwork } from "../lib/net";
 import { canEditServer, session } from "../lib/session";
+import { showToast } from "../lib/toast";
 import { useStyles, useTheme, type Palette } from "../theme/theme";
 
 /** O pedido (o formulário), o link enviado, ou o caminho pela central (a API de antes ou o envio desligado). */
@@ -73,6 +74,8 @@ export default function ForgotPasswordScreen() {
       }
       await requestPasswordReset(target, server.url);
       haptic.success();
+      // "Enviar de novo": a tela não muda, o aviso confirma o pedido.
+      if (phase === "sent") showToast("Pedido enviado de novo", { tone: "success" });
       setSentTo(target);
       setPhase("sent");
     } catch (e) {

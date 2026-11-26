@@ -82,8 +82,10 @@ async def test_access_management(client: AsyncClient, world: World) -> None:
     )
     assert fake.status_code == 422
 
-    # Desativado: não entra mais. Com a senha certa, o aviso diz o motivo (test_b2_auth).
-    await client.patch(f"{API}/technicians/{tech_id}", json={"is_active": False}, headers=an)
+    # Desativado: não entra mais. Com a senha certa, o aviso diz o motivo (test_b2_auth). O acesso
+    # ao app é separado da situação na operação, que continua Ativo.
+    r = await client.patch(f"{API}/technicians/{tech_id}", json={"is_active": False}, headers=an)
+    assert (r.json()["is_active"], r.json()["operational_status"]) == (False, "active")
     blocked = await client.post(
         f"{API}/auth/login",
         json={"email": "paula.campos@campo.com", "password": new_temp, "channel": "mobile"},

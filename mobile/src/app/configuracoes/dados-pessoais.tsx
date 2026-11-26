@@ -27,7 +27,7 @@ export default function PersonalDataScreen() {
   const cpfRef = useRef<TextInputInstance>(null);
   const rgRef = useRef<TextInputInstance>(null);
   const issuerRef = useRef<TextInputInstance>(null);
-  const stateRef = useRef<TextInputInstance>(null);
+  const rgStateRef = useRef<TextInputInstance>(null);
 
   if (state.profile && !hasCadastroV2(state.profile)) return <CadastroUnavailable onRetry={state.retry} />;
 
@@ -96,14 +96,14 @@ export default function PersonalDataScreen() {
                     autoComplete="off"
                     returnKeyType="next"
                     submitBehavior="submit"
-                    onSubmitEditing={() => stateRef.current?.focus()}
+                    onSubmitEditing={() => rgStateRef.current?.focus()}
                   />
                 </Field>
               </View>
               <View style={styles.uf}>
                 <Field label="UF" error={errors.rgState}>
                   <Input
-                    ref={stateRef}
+                    ref={rgStateRef}
                     value={form.rgState}
                     onChangeText={(text) => update({ rgState: text.replace(/[^A-Za-z]/g, "").toUpperCase() })}
                     accessibilityLabel="UF do RG"
