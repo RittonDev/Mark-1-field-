@@ -71,6 +71,7 @@ from app.models import (
     User,
     ViolationReason,
 )
+from app.schemas import personal
 from app.schemas.forms import FormField, field_dump
 from app.schemas.records import dedupe_contacts, primary_contact
 from app.services import access as access_svc
@@ -352,7 +353,8 @@ def contacts_of(raw: Any) -> list[dict[str, Any]]:
 
 
 def address_parts(address: dict[str, Any]) -> dict[str, Any]:
-    """Endereço do Field Control nos nossos campos (rua, número - complemento; bairro; CEP)."""
+    """Endereço do Field Control nos campos de clientes e locais (a linha inteira: rua, número -
+    complemento; bairro; CEP). O do técnico vai em partes (technician_address)."""
     street = ", ".join(p for p in (address.get("street"), address.get("number")) if p)
     line = " - ".join(p for p in (street, address.get("complement")) if p)
     return {
@@ -361,6 +363,31 @@ def address_parts(address: dict[str, Any]) -> dict[str, Any]:
         "city": clip(address.get("city"), 120),
         "state": to_uf(address.get("state")),
         "zip": fmt_zip(address.get("zipCode") or address.get("postalCode")),
+    }
+
+
+def _words(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def technician_address(address: dict[str, Any]) -> dict[str, str | None]:
+    """Endereço do técnico do Field Control nas partes do cadastro (users.address_line é o
+    logradouro): a rua, o número como o app e a central gravam (personal.address_number: em
+    maiúsculas, "SN" e "S / N" viram "S/N") e o complemento. Número com mais de 10 caracteres fica
+    junto da rua ("rua, número"); complemento com mais de 60, na linha ("rua - complemento")."""
+    street = _words(address.get("street"))
+    number = personal.normalize_address_number(_words(address.get("number")))
+    complement = _words(address.get("complement"))
+    if len(number) > personal.ADDRESS_NUMBER_MAX:
+        street = ", ".join(p for p in (street, _words(address.get("number"))) if p)
+        number = ""
+    if len(complement) > personal.ADDRESS_COMPLEMENT_MAX:
+        street = " - ".join(p for p in (street, complement) if p)
+        complement = ""
+    return {
+        "address_line": clip(street, 255),
+        "address_number": number or None,
+        "address_complement": complement or None,
     }
 
 
@@ -824,10 +851,13 @@ class Importer:
             home = home_of(address, placeholders)
             if home["placeholder"]:
                 self.report.add("technicians", "home_placeholder_cleared")
-            # Ficha completa: endereço (menos o padrão do escritório), jornada, foto e origem.
+            # Ficha completa: endereço em partes (menos o padrão do escritório), jornada, foto e
+            # origem. Logradouro, número e complemento vão sempre os três (None limpa): rodar de
+            # novo não deixa o número da migração nem o junta de novo ao logradouro.
             parts = address_parts(address)
+            street = technician_address({} if home["placeholder"] else address)
             profile = {
-                "address_line": None if home["placeholder"] else parts["line"],
+                **street,
                 "address_district": None if home["placeholder"] else parts["district"],
                 "address_zip": None if home["placeholder"] else parts["zip"],
                 "work_schedule": work_schedule_of(e.get("workSchedule")),

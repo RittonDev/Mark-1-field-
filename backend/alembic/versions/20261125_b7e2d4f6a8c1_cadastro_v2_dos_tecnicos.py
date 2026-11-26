@@ -29,8 +29,11 @@ Só então saem ck_users_pix_pair e as colunas pix_* de users.
 O downgrade volta a preferencial que é PIX para as colunas pix_* (o "desde" é o mais novo de
 changed_at e preferred_since), junta o endereço ("rua, número - complemento"; na ficha, também o
 bairro), devolve "Bloqueado" ao histórico e as linhas "ficha"/"link" a "central"/"app" (o código de
-antes só conhece esses dois), e apaga o resto: contas e chaves não preferenciais, situação,
-indisponibilidade, dados pessoais novos, análises, links e a fila de e-mails.
+antes só conhece esses dois), troca no histórico as formas de recebimento (payout_methods e
+payout_preferred, com a chave ou a conta mascarada e o titular) por um item "pix" com "***" (o
+código de antes só esconde "pix" de quem não tem Pagamentos), e apaga o resto: contas e chaves não
+preferenciais, situação, indisponibilidade, dados pessoais novos, análises, links e a fila de
+e-mails.
 
 Revision ID: b7e2d4f6a8c1
 Revises: f5a7c9e1b3d6
@@ -62,6 +65,10 @@ EXPIRED_NOTE = "Expirada sem análise"
 ACCESS_OFF_BEFORE = "Bloqueado"
 ACCESS_OFF = "Sem acesso"
 COMPLEMENT_MAX = 60
+# O histórico das formas de recebimento no código de antes (services/user_history.PIX_HIDDEN e os
+# campos que o código novo grava).
+PIX_HIDDEN = "***"
+PAYOUT_ITEMS = frozenset({"payout_methods", "payout_preferred"})
 
 # Colunas novas, todas nulas (as NOT NULL com default vêm à parte).
 USER_COLUMNS: tuple[tuple[str, Any], ...] = (
@@ -220,6 +227,28 @@ def _rename_access(changes: list[Any], old: str, new: str) -> list[Any]:
     return out
 
 
+def _old_payout(changes: list[Any]) -> list[Any]:
+    """Downgrade: as mudanças de uma linha do histórico com as formas de recebimento
+    (payout_methods, payout_preferred) trocadas por um item "pix" só, no lugar do primeiro, com
+    "***" onde havia texto (null continua null: "cadastrada", "alterada", "removida"). O código de
+    antes não conhece esses campos e só esconde "pix" (e "pix_holder") de quem não tem Pagamentos.
+    A lista de entrada não muda."""
+    out: list[Any] = []
+    merged: dict[str, Any] | None = None
+    for item in changes:
+        if not (isinstance(item, Mapping) and item.get("field") in PAYOUT_ITEMS):
+            out.append(item)
+            continue
+        hidden = {key: PIX_HIDDEN if item.get(key) is not None else None for key in ("from", "to")}
+        if merged is None:
+            merged = {"field": "pix", **hidden}
+            out.append(merged)
+        else:
+            for key, value in hidden.items():
+                merged[key] = merged[key] or value
+    return out
+
+
 # ------------------------------------------------------------------ passos de dados
 
 ADDRESSES = sa.text(
@@ -277,6 +306,10 @@ SET_REVIEWS = sa.text(
 ACCESS_ROWS = sa.text(
     "SELECT id, changes::text AS changes FROM user_changes"
     " WHERE changes @> CAST(:probe AS jsonb)"
+)
+PAYOUT_ROWS = sa.text(
+    "SELECT id, changes::text AS changes FROM user_changes"
+    " WHERE changes @> CAST(:methods AS jsonb) OR changes @> CAST(:preferred AS jsonb)"
 )
 SET_CHANGES = sa.text("UPDATE user_changes SET changes = CAST(:changes AS jsonb) WHERE id = :id")
 
@@ -415,6 +448,26 @@ def _old_via() -> None:
     """Downgrade: o histórico de antes só conhece "app" e "central"."""
     op.execute("UPDATE user_changes SET via = 'central' WHERE via = 'ficha'")
     op.execute("UPDATE user_changes SET via = 'app' WHERE via = 'link'")
+
+
+def _hide_payout_history() -> int:
+    """Downgrade: as formas de recebimento no histórico viram o item "pix" de antes, com "***"
+    (_old_payout): quem não tem Pagamentos não as vê pelo código de antes."""
+    conn = op.get_bind()
+    count = 0
+    params = {
+        "methods": json.dumps([{"field": "payout_methods"}]),
+        "preferred": json.dumps([{"field": "payout_preferred"}]),
+    }
+    for row in conn.execute(PAYOUT_ROWS, params).mappings().all():
+        changes = _loaded(row["changes"])
+        if not isinstance(changes, list):
+            continue
+        hidden = _old_payout(changes)
+        if hidden != changes:
+            conn.execute(SET_CHANGES, {"id": row["id"], "changes": json.dumps(hidden)})
+            count += 1
+    return count
 
 
 DATA_STEPS: tuple[Callable[[], int], ...] = (
@@ -616,6 +669,7 @@ def downgrade() -> None:
     _join_addresses()
     _rename_access_texts(ACCESS_OFF, ACCESS_OFF_BEFORE)
     _old_via()
+    _hide_payout_history()
 
     op.drop_index("ix_email_outbox_status_next", table_name="email_outbox")
     op.drop_index("ix_email_outbox_application_id", table_name="email_outbox")
