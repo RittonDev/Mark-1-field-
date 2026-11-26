@@ -33,7 +33,7 @@ const unique = (list) => new Set(list).size === list.length;
 
 /** Os 4 grupos do menu da ficha, como a central monta: os 3 do cadastro e a Gestão. */
 const GROUPS = [...TECH_SECTION_GROUPS, GESTAO_GROUP];
-/** As seções no menu da Entrega 1. */
+/** As seções no menu da entrega no ar (com Pagamentos e Técnicos Editar). */
 const AVAILABLE = GROUPS.flatMap((g) => g.sections.filter((s) => s.delivery <= CADASTRO_DELIVERY).map((s) => s.key));
 
 describe("link e seção da ficha", () => {
@@ -56,7 +56,10 @@ describe("link e seção da ficha", () => {
     assert.equal(sectionFromParam(null, AVAILABLE), FICHA_DEFAULT);
     assert.equal(sectionFromParam("", AVAILABLE), FICHA_DEFAULT);
     assert.equal(sectionFromParam("xyz", AVAILABLE), FICHA_DEFAULT);
-    assert.equal(sectionFromParam("documentos", AVAILABLE), FICHA_DEFAULT);
+    // Entrega 2 no ar: as seções dela valem; Desempenho é da 3.
+    for (const key of ["documentos", "curriculo", "areas-de-atuacao", "avaliacoes", "anexos"]) {
+      assert.equal(sectionFromParam(key, AVAILABLE), key);
+    }
     assert.equal(sectionFromParam("desempenho", AVAILABLE), FICHA_DEFAULT);
     // Sem Pagamentos, a tela tira Formas de recebimento do menu.
     assert.equal(sectionFromParam("recebimento", AVAILABLE.filter((key) => key !== "recebimento")), FICHA_DEFAULT);
@@ -87,6 +90,7 @@ describe("menu da ficha (os 4 grupos)", () => {
           "transporte:Transporte:1",
           "curriculo:Currículo:2",
           "formacao:Formação:1",
+          "areas-de-atuacao:Áreas de atuação:2",
           "aptidoes:Aptidões:1",
           "ferramental:Ferramental:1",
         ],
@@ -115,13 +119,14 @@ describe("menu da ficha (os 4 grupos)", () => {
     assert.ok(unique(GROUPS.map((g) => g.label)));
   });
 
-  it("na Entrega 1, o menu esconde Documentos, Currículo, Avaliações, Desempenho e Anexos internos", () => {
+  it("na Entrega 2, o menu esconde só Desempenho (da Entrega 3): 23 seções com Pagamentos e Técnicos Editar", () => {
+    assert.equal(CADASTRO_DELIVERY, 2);
     const hidden = GROUPS.flatMap((g) => g.sections)
       .filter((s) => s.delivery > CADASTRO_DELIVERY)
       .map((s) => s.key);
-    assert.deepEqual(hidden, ["documentos", "curriculo", "avaliacoes", "desempenho", "anexos"]);
+    assert.deepEqual(hidden, ["desempenho"]);
     assert.ok(AVAILABLE.includes(FICHA_DEFAULT));
-    assert.equal(AVAILABLE.length, 18);
+    assert.equal(AVAILABLE.length, 23);
   });
 });
 

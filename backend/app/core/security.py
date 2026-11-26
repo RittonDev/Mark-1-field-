@@ -8,7 +8,9 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 
-TokenKind = Literal["access", "refresh", "download", "sso_state", "sso_handoff"]
+# "ficha_upload": o envio de arquivos da ficha de homologação já enviada (2 h; contrato da Entrega 2
+# §6.4, services/technician_documents.py).
+TokenKind = Literal["access", "refresh", "download", "sso_state", "sso_handoff", "ficha_upload"]
 
 
 class InvalidToken(Exception):

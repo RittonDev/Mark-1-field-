@@ -1,10 +1,21 @@
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.core.enums import Responsibility, TicketPriority, ViolationScope
+from app.core.text import fold
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 from app.models._types import str_enum
 from app.models.customer import Customer
@@ -112,18 +123,75 @@ class UnproductiveReason(UUIDPrimaryKey, Timestamps, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
 
-class TechnicianTool(UUIDPrimaryKey, Timestamps, Base):
-    """Ferramenta do catálogo do ferramental dos técnicos (Configurações › Técnicos).
+# ------------------------------------------- catálogos de Configurações › Técnicos (Entrega 2)
+# Ferramental, Áreas de atuação e Aptidões: uma regra só (services/technician_catalogs.py). A central
+# inclui, renomeia e desativa; exclui só o que nunca foi usado. Sem ordem manual: as listas saem em
+# ordem alfabética (name_key). Desativado, o item some das escolhas (app, ficha, filtros) e fica
+# guardado com quem já tinha; reativado, volta. `name_key` = core.text.fold(name), gravado sozinho
+# quando o nome muda (@validates): o banco recusa o nome repetido sem acento e sem maiúsculas
+# (uq_*_name_key), de reserva para a trava do serviço. `used_at`: o 1º uso (o item entrou no perfil
+# de alguém pelo app, pela central ou pela ficha); com ele, o item não sai mais (desativa).
 
-    O técnico marca no app as que tem (users.tool_ids guarda os ids). A central inclui, renomeia e
-    desativa, sem excluir e sem ordem manual: a lista sai em ordem alfabética. Desativada, some do
-    app, da ficha e do filtro, e volta para quem tinha quando reativada (services/tech_profile.py).
-    O banco recusa o nome exato repetido; o serviço também recusa o repetido sem acento e sem
-    maiúsculas.
-    """
+
+class TechnicianTool(UUIDPrimaryKey, Timestamps, Base):
+    """Ferramenta do ferramental dos técnicos. O técnico marca no app as que tem (users.tool_ids
+    guarda os ids, em texto). O banco recusa também o nome exato repetido (uq_tool_catalog_name, de
+    antes do name_key)."""
 
     __tablename__ = "tool_catalog"
-    __table_args__ = (UniqueConstraint("name", name="uq_tool_catalog_name"),)
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_tool_catalog_name"),
+        UniqueConstraint("name_key", name="uq_tool_catalog_name_key"),
+    )
 
     name: Mapped[str] = mapped_column(String(80))
+    name_key: Mapped[str] = mapped_column(String(160))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @validates("name")
+    def _name_key(self, _: str, name: str) -> str:
+        self.name_key = fold(name)
+        return name
+
+
+class ServiceArea(UUIDPrimaryKey, Timestamps, Base):
+    """Área de atuação (users.service_areas e technician_applications.service_areas guardam os
+    ids, em texto). `code`: o código das 10 áreas fixas de antes ("redes"): a ficha aberta antes da
+    Entrega 2 ainda manda o código, e a sugestão de técnicos (services/suggestions.py) segue por ele;
+    as áreas novas ficam sem código."""
+
+    __tablename__ = "area_catalog"
+    __table_args__ = (
+        UniqueConstraint("name_key", name="uq_area_catalog_name_key"),
+        UniqueConstraint("code", name="uq_area_catalog_code"),
+    )
+
+    name: Mapped[str] = mapped_column(String(80))
+    name_key: Mapped[str] = mapped_column(String(160))
+    code: Mapped[str | None] = mapped_column(String(32))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @validates("name")
+    def _name_key(self, _: str, name: str) -> str:
+        self.name_key = fold(name)
+        return name
+
+
+class Skill(UUIDPrimaryKey, Timestamps, Base):
+    """Aptidão do catálogo. O técnico guarda [{skill_id, level, since}] em users.skills e a ficha
+    [{skill_id, level}] (sem o nome: renomear vale para todos)."""
+
+    __tablename__ = "skill_catalog"
+    __table_args__ = (UniqueConstraint("name_key", name="uq_skill_catalog_name_key"),)
+
+    name: Mapped[str] = mapped_column(String(80))
+    name_key: Mapped[str] = mapped_column(String(160))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @validates("name")
+    def _name_key(self, _: str, name: str) -> str:
+        self.name_key = fold(name)
+        return name

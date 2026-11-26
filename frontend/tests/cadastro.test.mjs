@@ -1,10 +1,11 @@
-// Cadastro V2 (Entrega 1) em lib/constants.ts (a mesma cópia do app): os casos iguais aos do pytest (placa, idade,
-// períodos de indisponibilidade, formas de recebimento mascaradas, e-mail que recebe, RG e órgão emissor com a UF), a
-// mini biografia com parágrafos, o CEP sobre o formulário (com o CEP geral depois de outro), a rua igual, os grupos de
-// seções da central e do app, os rótulos do histórico e o aviso de privacidade. Dados fictícios.
+// Cadastro V2 (Entregas 1 e 2) em lib/constants.ts (a mesma cópia do app): os casos iguais aos do pytest (placa,
+// idade, períodos de indisponibilidade, formas de recebimento mascaradas, e-mail que recebe, RG e órgão emissor com a
+// UF), a mini biografia com parágrafos, o CEP sobre o formulário (com o CEP geral depois de outro), a rua igual, os
+// grupos de seções da central e do app, os rótulos do histórico e da OS e o aviso de privacidade. Dados fictícios.
 // Sem dependência nova: node:test com o type stripping do Node 22.
 // Na pasta frontend: node --experimental-strip-types --test "tests/*.test.mjs"
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import * as C from "../src/lib/constants.ts";
 
@@ -509,6 +510,7 @@ describe("seções do cadastro (TECH_SECTION_GROUPS, central e app)", () => {
         ["transporte", "Transporte"],
         ["curriculo", "Currículo"],
         ["formacao", "Formação"],
+        ["areas-de-atuacao", "Áreas de atuação"],
         ["aptidoes", "Aptidões"],
         ["ferramental", "Ferramental"],
       ],
@@ -536,13 +538,23 @@ describe("seções do cadastro (TECH_SECTION_GROUPS, central e app)", () => {
     );
   });
 
-  it("Entrega 1 no ar: Documentos e Currículo ficam para a 2", () => {
-    assert.equal(C.CADASTRO_DELIVERY, 1);
-    const later = C.TECH_SECTION_GROUPS.flatMap((g) => g.sections).filter((s) => s.delivery > C.CADASTRO_DELIVERY);
+  it("Entrega 2 no ar: todas as seções do cadastro entram; Documentos, Currículo e Áreas de atuação são dela", () => {
+    assert.equal(C.CADASTRO_DELIVERY, 2);
+    const sections = C.TECH_SECTION_GROUPS.flatMap((g) => g.sections);
     assert.deepEqual(
-      later.map((s) => s.key),
-      ["documentos", "curriculo"],
+      sections.filter((s) => s.delivery > C.CADASTRO_DELIVERY).map((s) => s.key),
+      [],
     );
+    assert.deepEqual(
+      sections.filter((s) => s.delivery === 2).map((s) => s.key),
+      ["documentos", "curriculo", "areas-de-atuacao"],
+    );
+  });
+
+  it("Áreas de atuação fica entre Formação e Aptidões, no Perfil profissional", () => {
+    const keys = C.TECH_SECTION_GROUPS.find((g) => g.key === "profissional").sections.map((s) => s.key);
+    assert.equal(keys.indexOf("areas-de-atuacao"), keys.indexOf("formacao") + 1);
+    assert.equal(keys.indexOf("aptidoes"), keys.indexOf("areas-de-atuacao") + 1);
   });
 });
 
@@ -555,7 +567,7 @@ describe("situação e acesso", () => {
 
 describe("histórico do cadastro (USER_CHANGE_LABEL)", () => {
   it("os campos novos, com os rótulos do contrato", () => {
-    const NEW = {
+    const E1 = {
       cpf: "CPF",
       rg: "RG",
       birth_date: "Nascimento",
@@ -576,9 +588,23 @@ describe("histórico do cadastro (USER_CHANGE_LABEL)", () => {
       password_link: "Link para nova senha",
       application: "Homologação",
     };
+    const E2 = {
+      areas: "Áreas de atuação",
+      documents: "Documentos",
+      internal_attachments: "Anexos internos",
+      favorites: "Favoritos",
+      ratings: "Avaliações",
+    };
+    const NEW = { ...E1, ...E2 };
     for (const [field, label] of Object.entries(NEW)) assert.equal(C.USER_CHANGE_LABEL[field], label, field);
     const keys = Object.keys(C.USER_CHANGE_LABEL);
     assert.deepEqual(keys.slice(keys.indexOf("password") + 1), Object.keys(NEW));
+  });
+
+  it("Áreas de atuação com o mesmo nome da seção e da parte do perfil técnico", () => {
+    const section = C.TECH_SECTION_GROUPS.flatMap((g) => g.sections).find((s) => s.key === "areas-de-atuacao");
+    assert.equal(C.USER_CHANGE_LABEL.areas, section.label);
+    assert.equal(C.USER_CHANGE_LABEL.areas, C.TECH_PROFILE_PART.areas);
   });
 
   it("address_line é o logradouro; as linhas antigas de PIX continuam legíveis", () => {
@@ -593,13 +619,31 @@ describe("histórico do cadastro (USER_CHANGE_LABEL)", () => {
   });
 });
 
+describe("histórico da OS (EVENT_TYPE)", () => {
+  it("a avaliação do cliente (só a gestão vê)", () => {
+    assert.equal(C.EVENT_TYPE.rating_set, "registrou a avaliação do cliente");
+    assert.equal(C.EVENT_TYPE.rating_removed, "excluiu a avaliação do cliente");
+    const keys = Object.keys(C.EVENT_TYPE);
+    assert.deepEqual(keys.slice(-2), ["rating_set", "rating_removed"]);
+    assert.ok(unique(Object.values(C.EVENT_TYPE)));
+  });
+});
+
 describe("aviso de privacidade", () => {
   const body = (title) => C.PRIVACY_NOTICE.find((item) => item.title === title)?.body ?? "";
   const all = C.PRIVACY_NOTICE.map((item) => `${item.title} ${item.body}`).join(" ");
 
-  it("versão nova, da Entrega 1 (a publicação põe a data do dia, igual no backend)", () => {
-    assert.ok(C.PRIVACY_VERSION >= "2026-11-26", C.PRIVACY_VERSION);
+  it("versão nova, da Entrega 2 (a publicação põe a data do dia, igual no backend)", () => {
+    assert.ok(C.PRIVACY_VERSION > "2026-11-26", C.PRIVACY_VERSION);
+    assert.match(C.PRIVACY_VERSION, /^\d{4}-\d{2}-\d{2}(\.\d+)?$/);
     assert.equal(C.PRIVACY_DATE, C.PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/"));
+  });
+
+  const onboarding = new URL("../../backend/app/schemas/onboarding.py", import.meta.url);
+  it("a mesma versão de backend/app/schemas/onboarding.py", { skip: !existsSync(onboarding) && "pasta backend ausente" }, () => {
+    const found = /^PRIVACY_VERSION[^=\n]*=\s*"([^"]+)"/m.exec(readFileSync(onboarding, "utf8"));
+    assert.ok(found, "PRIVACY_VERSION não encontrado em backend/app/schemas/onboarding.py");
+    assert.equal(C.PRIVACY_VERSION, found[1]);
   });
 
   it("as seções, nesta ordem", () => {
@@ -610,6 +654,7 @@ describe("aviso de privacidade", () => {
         "Quais dados",
         "Para quê",
         "Situação na operação",
+        "Avaliações e anexos internos",
         "Com quem compartilhamos",
         "E-mails",
         "Localização (GPS)",
@@ -631,8 +676,24 @@ describe("aviso de privacidade", () => {
     assert.ok(body("E-mails").includes("WhatsApp"));
   });
 
+  it("Entrega 2: documentos, certificações, currículo, avaliações, anexos internos e o perfil pela central", () => {
+    for (const word of ["documentos", "certificações", "currículo", "Avaliações e anexos internos", "pela central"]) {
+      assert.ok(all.includes(word), word);
+    }
+    assert.ok(body("Quais dados").includes("Os documentos que você enviar na ficha ou no app"));
+    assert.ok(body("Quais dados").includes("informado na ficha, no app ou pela central"));
+    assert.ok(body("Para quê").includes("das suas certificações"));
+    assert.ok(body("Por quanto tempo").includes("excluída com a foto e os arquivos enviados"));
+    assert.ok(body("Por quanto tempo").includes("três versões anteriores"));
+    assert.ok(body("Seus direitos").includes("os documentos, o perfil técnico"));
+    // O que fica só com a equipe: fora do app e do Elo.
+    const internal = body("Avaliações e anexos internos");
+    assert.ok(internal.includes("não aparecem no app") && internal.includes("não mudam o seu Elo"), internal);
+  });
+
   it("textos curtos: sem \"Ex.:\" e sem pontos do Elo", () => {
     assert.ok(!all.includes("Ex.:"));
     assert.ok(!/\bpontos?\b/i.test(body("Elo")));
+    assert.ok(!/\bpontos?\b/i.test(body("Avaliações e anexos internos")));
   });
 });

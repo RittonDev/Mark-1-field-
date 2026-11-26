@@ -5,7 +5,9 @@ from app.models.account_token import AccountToken
 from app.models.asset import Asset
 from app.models.catalog import (
     Category,
+    ServiceArea,
     ServiceType,
+    Skill,
     SlaPolicy,
     TechnicianTool,
     UnproductiveReason,
@@ -26,8 +28,10 @@ from app.models.project import Project
 from app.models.quote import Quote, QuoteItemCatalog
 from app.models.repair import RepairEvent, RepairOrder, RepairPhoto
 from app.models.sync import DeviceToken, SyncOperation
+from app.models.technician_document import TechnicianDocument
 from app.models.technician_favorite import TechnicianFavorite
 from app.models.technician_level import TechnicianLevel, TechnicianLevelWaiver
+from app.models.technician_rating import TechnicianRating
 from app.models.ticket import (
     Ticket,
     TicketAttachment,
@@ -57,7 +61,9 @@ __all__ = [
     "RepairEvent",
     "RepairOrder",
     "RepairPhoto",
+    "ServiceArea",
     "ServiceType",
+    "Skill",
     "SlaPolicy",
     "SyncOperation",
     "SystemSetting",
@@ -72,11 +78,13 @@ __all__ = [
     "TicketPartRequest",
     "TicketPayout",
     "TicketWorklog",
+    "TechnicianDocument",
     "TechnicianFavorite",
     "TechnicianInvoice",
     "TechnicianLevel",
     "TechnicianLevelWaiver",
     "TechnicianPayoutMethod",
+    "TechnicianRating",
     "TechnicianTool",
     "UnproductiveReason",
     "TechnicianApplication",

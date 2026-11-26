@@ -382,6 +382,16 @@ FIELD_LABELS: dict[str, str] = {
     "reason": "Motivo",
     # Links por e-mail (validar o e-mail, nova senha).
     "token": "Link",
+    # Gestão dos técnicos (Entrega 2): áreas e aptidões do catálogo, documentos e a avaliação do
+    # cliente na OS concluída.
+    "area_ids": "Áreas de atuação",
+    "skill_id": "Aptidão",
+    "title": "Título",
+    "expires_on": "Validade",
+    "file": "Arquivo",
+    "score": "Nota",
+    "comment": "Comentário",
+    "rater_name": "Quem avaliou",
 }
 
 
@@ -549,10 +559,20 @@ CONSTRAINT_MESSAGES: dict[str, str] = {
     "uq_technician_invoices_technician_upload": "Esta nota já foi recebida. Atualize a lista.",
     # A mesma ocorrência desconsiderada duas vezes (elo do técnico).
     "uq_technician_level_waivers_occurrence": "Esta ocorrência já foi desconsiderada",
-    # Ferramental dos técnicos (Configurações › Técnicos): o serviço trava o catálogo e recusa o
-    # mesmo nome com outra grafia (acento, maiúsculas); o índice único fica de reserva para o nome
-    # exato.
+    # Catálogos de Configurações › Técnicos: o serviço trava o catálogo e recusa o mesmo nome com
+    # outra grafia (acento, maiúsculas); os índices únicos ficam de reserva (o nome exato do
+    # Ferramental e o nome sem acento e sem maiúsculas dos três).
     "uq_tool_catalog_name": "Já existe uma ferramenta com este nome",
+    "uq_tool_catalog_name_key": "Já existe uma ferramenta com este nome",
+    "uq_area_catalog_name_key": "Já existe uma área com este nome",
+    "uq_skill_catalog_name_key": "Já existe uma aptidão com este nome",
+    # Documentos do técnico e a avaliação do cliente (o serviço trava o dono antes; os índices
+    # ficam de reserva para os dois pedidos juntos).
+    "uq_technician_documents_user_resume": "Já há um currículo. Atualize a lista",
+    "uq_technician_documents_client_upload_id": "Este arquivo já foi recebido. Atualize a lista",
+    "uq_technician_ratings_ticket_technician": (
+        "Este técnico já foi avaliado nesta OS. Atualize a OS"
+    ),
     # Cadastro V2: o CPF é único entre os usuários; formas de recebimento (o serviço trava o técnico
     # e recusa antes; os índices ficam de reserva para a gravação simultânea).
     "uq_users_cpf": "Este CPF já está em outro cadastro",

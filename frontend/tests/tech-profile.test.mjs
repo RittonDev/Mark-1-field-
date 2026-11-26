@@ -218,29 +218,33 @@ describe("aviso de privacidade", () => {
   it("o aviso cita o perfil técnico", () => {
     const body = (title) => PRIVACY_NOTICE.find((item) => item.title === title)?.body ?? "";
     assert.ok(unique(PRIVACY_NOTICE.map((item) => item.title)));
-    for (const word of ["perfil técnico", "aptidões", "formação", "ferramental", "transporte", "CNH", "turnos"]) {
+    for (const word of ["perfil técnico", "áreas de atuação", "aptidões", "formação", "ferramental", "transporte", "CNH", "turnos"]) {
       assert.ok(body("Quais dados").includes(word), word);
     }
+    assert.ok(body("Quais dados").includes("O seu perfil técnico, informado na ficha, no app ou pela central:"));
     assert.ok(body("Para quê").includes("perfil técnico"));
     assert.ok(body("Seus direitos").includes("Configurações"));
   });
 });
 
 describe("rótulos e limites", () => {
-  it("o histórico do cadastro tem as 5 partes do perfil técnico, com os mesmos nomes", () => {
+  it("o histórico do cadastro tem as 6 partes do perfil técnico, com os mesmos nomes", () => {
     assert.deepEqual(TECH_PROFILE_PART, {
       tools: "Ferramental",
       availability: "Disponibilidade",
       transport: "Transporte",
       skills: "Aptidões",
       education: "Formação",
+      areas: "Áreas de atuação",
     });
     for (const [part, label] of Object.entries(TECH_PROFILE_PART)) assert.equal(USER_CHANGE_LABEL[part], label, part);
+    assert.ok(unique(Object.values(TECH_PROFILE_PART)));
     assert.ok(unique(Object.values(USER_CHANGE_LABEL)));
   });
 
   it("TECH_PROFILE_LIMITS igual ao servidor", () => {
     assert.equal(TECH_PROFILE_LIMITS.tools, 200);
+    assert.equal(TECH_PROFILE_LIMITS.areas, 20);
     assert.equal(TECH_PROFILE_LIMITS.slots, 28);
     assert.equal(TECH_PROFILE_LIMITS.modes, 6);
     assert.equal(TECH_PROFILE_LIMITS.skills, 30);

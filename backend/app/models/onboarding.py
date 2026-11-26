@@ -78,6 +78,11 @@ class TechnicianApplication(UUIDPrimaryKey, Timestamps, Base):
     company_name: Mapped[str | None] = mapped_column(String(160))  # razão social
     company_trade_name: Mapped[str | None] = mapped_column(String(160))  # nome fantasia
     years_experience: Mapped[int | None] = mapped_column(Integer)
+    # Áreas de atuação: ids (texto) do area_catalog, também as desativadas depois do envio; a ficha
+    # aberta antes da Entrega 2 manda os códigos antigos, que o envio troca pelos ids (a migração
+    # c8f2a4e6b0d3 trocou os das fichas de antes). Aptidões: [{skill_id, level}] (id do
+    # skill_catalog em texto; o nome vem do catálogo). Os documentos da ficha ficam em
+    # technician_documents (application_id), enviados depois da ficha.
     service_areas: Mapped[list[str]] = mapped_column(JSONB, default=list)
     skills: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     certifications: Mapped[str | None] = mapped_column(Text)

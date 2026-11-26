@@ -125,6 +125,10 @@ class TicketEventType(StrEnum):
     OFFER_ACCEPTED = "offer_accepted"
     OFFER_DECLINED = "offer_declined"
     OFFER_CANCELLED = "offer_cancelled"
+    # Avaliação do cliente sobre um técnico da OS concluída, registrada pela central
+    # (services/technician_ratings.py): só a gestão vê; nada no app e fora do Elo.
+    RATING_SET = "rating_set"
+    RATING_REMOVED = "rating_removed"
 
 
 class DevicePlatform(StrEnum):
@@ -367,3 +371,27 @@ class EmailStatus(StrEnum):
     SENT = "sent"
     FAILED = "failed"  # recusado pelo servidor ou sem sucesso depois das tentativas
     EXPIRED = "expired"  # passou do prazo sem sair: "Não enviado"
+
+
+# --------------------------------------------------------------- gestão dos técnicos (Entrega 2)
+
+
+class TechDocumentKind(StrEnum):
+    """Documento do técnico (models/technician_document.py). O técnico (app e ficha) envia os três
+    primeiros; o anexo interno é só da central, com Técnicos Editar, e nunca chega ao app."""
+
+    CERTIFICATION = "certification"  # certificação ou curso (a única com validade)
+    PERSONAL = "personal"  # documento pessoal (RG, CNH, comprovante...)
+    RESUME = "resume"  # currículo: um só por técnico (enviar outro substitui)
+    INTERNAL = "internal"  # anexo interno da parceria (contrato, ocorrências)
+
+
+# O nome do desenho do backend (D-B2): o mesmo enum.
+TechnicianDocumentKind = TechDocumentKind
+
+
+class RatingSource(StrEnum):
+    """De onde veio a avaliação do cliente (models/technician_rating.py)."""
+
+    CENTRAL = "central"  # registrada pela central na OS concluída
+    CLIENT = "client"  # o formulário do cliente (módulo de OS, depois)

@@ -116,8 +116,9 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     company_document: Mapped[str | None] = mapped_column(String(14))
     company_name: Mapped[str | None] = mapped_column(String(160))
     company_trade_name: Mapped[str | None] = mapped_column(String(160))
-    # Áreas de atuação (os códigos de schemas/onboarding.SERVICE_AREAS), copiadas da ficha na
-    # aprovação.
+    # Áreas de atuação: ids (texto) do area_catalog, também as desativadas que já estavam guardadas
+    # (a parte "areas" do perfil técnico; o app, a central e a aprovação da ficha gravam). Até a
+    # migração c8f2a4e6b0d3 eram os códigos das 10 áreas fixas (area_catalog.code guarda o código).
     service_areas: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     # E-mail de login validado pelo link (services/account.py). O e-mail novo pedido pelo app fica
     # em email_pending até o link: o login só muda quando ele é validado.
@@ -142,15 +143,17 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     unavailability: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, default=list, server_default="[]"
     )
-    # Perfil técnico: o técnico mantém no app; a central só vê (services/tech_profile.py). Sem
-    # índice: os filtros varrem só os técnicos; GIN em tool_ids/availability se a base passar de
-    # dezenas de milhares de técnicos. Ferramentas: ids (texto) do tool_catalog, inclusive as
-    # desativadas que já estavam marcadas; turnos "dia:turno" ("sat:afternoon"); meios de transporte
-    # e CNH (valem com a parte "transport" carimbada); aptidões [{name, level, since}]; formação
-    # [{id, course, level, institution, start, end}]; e o carimbo de cada parte informada
-    # {parte: {at, via: "app"|"ficha"}}. Grave sempre objetos novos (user.skills = [...],
-    # user.tech_profile_stamps = {**antigo, parte: carimbo}): mudar a lista ou o dicionário no
-    # lugar não é detectado e não grava.
+    # Perfil técnico: o técnico mantém no app e a central também edita (Técnicos em Editar;
+    # services/tech_profile.py). Sem índice: os filtros varrem só os técnicos; GIN em
+    # tool_ids/availability se a base passar de dezenas de milhares de técnicos. Ferramentas: ids
+    # (texto) do tool_catalog, inclusive as desativadas que já estavam marcadas; turnos "dia:turno"
+    # ("sat:afternoon"); meios de transporte e CNH (valem com a parte "transport" carimbada);
+    # aptidões [{skill_id, level, since}] (skill_id: id do skill_catalog em texto; o nome vem do
+    # catálogo; as desativadas ficam guardadas); formação [{id, course, level, institution, start,
+    # end}]; e o carimbo de cada parte informada (tools, availability, transport, skills, education
+    # e areas, as áreas de atuação de service_areas) {parte: {at, via: "app"|"ficha"|"central"}}.
+    # Grave sempre objetos novos (user.skills = [...], user.tech_profile_stamps = {**antigo, parte:
+    # carimbo}): mudar a lista ou o dicionário no lugar não é detectado e não grava.
     tool_ids: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     availability: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     transport_modes: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
