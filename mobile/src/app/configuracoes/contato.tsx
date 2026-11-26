@@ -124,6 +124,7 @@ export default function ContactScreen() {
                 onChangeText={(email) => update({ email: email.replace(/\s/g, "") })}
                 editable={form.mailEnabled}
                 accessibilityLabel="E-mail"
+                accessibilityState={{ disabled: !form.mailEnabled }}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}

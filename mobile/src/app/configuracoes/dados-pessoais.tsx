@@ -53,7 +53,13 @@ export default function PersonalDataScreen() {
             {base?.cpfLocked ? (
               // O gravado, só leitura: quem corrige é a central.
               <Field label="CPF" hint="Para corrigir, fale com a central.">
-                <Input value={base.cpf} editable={false} accessibilityLabel="CPF" style={styles.readOnly} />
+                <Input
+                  value={base.cpf}
+                  editable={false}
+                  accessibilityLabel="CPF"
+                  accessibilityState={{ disabled: true }}
+                  style={styles.readOnly}
+                />
               </Field>
             ) : (
               <Field label="CPF" error={errors.cpf}>
