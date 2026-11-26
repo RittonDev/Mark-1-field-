@@ -857,13 +857,14 @@ colaboradores.
     vivo (em jornada, sinal dos últimos 30 min). Calculada no banco (haversine), sem uma consulta por
     técnico.
   - Resposta: `{point: {latitude, longitude, label}, technicians: [{id, name, email, phone, is_active,
-    operational_status, avatar_url, base_city, base_state, base_source, distance_km, nearest_kind (store_history | home |
-    live), visits_at_location, last_visit_at_location, visits_in_city, total_visits, last_visit_at,
-    open_tickets, on_shift, reasons[]}]}`, do mais perto para o mais longe (empate: mais visitas à loja).
-    `operational_status` (desde 25/11/2026): Inativo e Bloqueado aparecem, com o selo na web, e não recebem OS.
+    operational_status, operational_reason, avatar_url, base_city, base_state, base_source, distance_km, nearest_kind
+    (store_history | home | live), visits_at_location, last_visit_at_location, visits_in_city, total_visits,
+    last_visit_at, open_tickets, on_shift, reasons[]}]}`, do mais perto para o mais longe (empate: mais visitas à loja).
+    `operational_status` e `operational_reason` (o motivo, só fora de Ativo), do cadastro V2: Inativo e Bloqueado
+    aparecem no lugar deles, com o selo na web (o motivo no título), e não recebem OS.
   - `reasons`, por exemplo: "Atendeu esta loja 5x (última em 03/10/2026)", "Em jornada agora a 4 km",
     "Já atendeu a 1,2 km daqui", "Mora a 3 km", "Base em Fortaleza-CE (128 OS)", "3 OS abertas agora",
-    "Inativo no app".
+    "Sem acesso ao app" (o técnico sem acesso; era "Inativo no app").
   - Erros (422): "A loja não tem coordenadas"; "Não há lojas com coordenadas em {cidade}-{UF} para
     calcular a distância"; sem ponto: "Informe a loja, as coordenadas ou a cidade com o estado". Loja
     inexistente: 404.
@@ -904,7 +905,8 @@ Até 3 técnicos por cidade pela regra automática, mais os que a central fixar.
 - Ordem: mais OS; no empate, quem tem acesso ao app (`is_active`), depois a visita mais recente, depois o nome.
 - Os sem acesso ao app entram na regra e aparecem na lista (com o "Liberar acesso"), mas nunca nas sugestões da OS.
 - Situação na operação (desde 25/11/2026): Inativo e Bloqueado ficam no ranking, mas fora dos automáticos (o
-  próximo Ativo sobe); o fixado pela central continua, com o selo. `FavoriteTechnician` ganha `operational_status`.
+  próximo Ativo sobe); o fixado pela central continua, com o selo. `FavoriteTechnician` ganha `operational_status` e
+  `operational_reason` (o motivo, só fora de Ativo: o título do selo na web; sem ele, "Não recebe OS").
 
 **Decisões da central** (analista, supervisor e admin):
 - Fixado: favorito mesmo sem OS ou fora do top 3. Até 10 por cidade, com nota opcional (até 300 caracteres; espaços
@@ -924,8 +926,9 @@ Até 3 técnicos por cidade pela regra automática, mais os que a central fixar.
   - `city` é a grafia mais usada nas lojas; `stores` conta as lojas ativas;
   - `visits` = OS distintas atendidas nas lojas da cidade na janela (uma OS com 2 técnicos conta 1);
   - `others_count` = quantos mais atenderam na janela sem ser favoritos nem tirados.
-- `FavoriteTechnician {id, name, email, phone, avatar_url, is_active, on_shift, open_tickets, base_city, base_state,
-  visits, last_visit_at, rank, automatic, pinned, hidden, note, set_by: Ref | null, set_at}`. `visits` e
+- `FavoriteTechnician {id, name, email, phone, avatar_url, is_active, operational_status, operational_reason, on_shift,
+  open_tickets, base_city, base_state, visits, last_visit_at, rank, automatic, pinned, hidden, note, set_by: Ref |
+  null, set_at}`. `visits` e
   `last_visit_at` são da cidade, na janela; `rank` é a posição no ranking da cidade (`null` sem OS na janela).
 - `GET /technicians/favorites/city?location_id=` ou `?state=SP&city=Santos` → `FavoriteCityDetail` =
   `FavoriteCity` + `hidden: [FavoriteTechnician]` + `others` (até 10, pelo ranking).
@@ -980,8 +983,8 @@ equipe: `{source, id, created_at, territories: [nome]}`). `created_at` é a data
 **Técnico** (`TechnicianOut`):
 - `address_line`, `address_district`, `address_zip` (o endereço padrão do escritório, usado por mais de 20
   colaboradores, não entra). Desde 25/11/2026, `address_line` é só o logradouro, com `address_number` e
-  `address_complement` no detalhe (a migração separou as linhas "rua, número - complemento"): ver
-  [Cadastro V2](#cadastro-v2-2026-11-25).
+  `address_complement` no detalhe (a migração separou as linhas "rua, número - complemento", e a importação grava as
+  partes: ver [Migração do Field Control](#migração-do-field-control)); ver [Cadastro V2](#cadastro-v2-2026-11-25).
 - `work_schedule: {start, end, break_start, break_end} | null`, com horários em `"HH:MM:SS"`.
 - `services: [{id, name}]`: os tipos de serviço que ele faz (as skills do Field Control).
 - `legacy: {source, id, territories: [nome]} | null`.
@@ -1400,8 +1403,8 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
 - Diálogo "Ofertar a OS com preço" (também no resumo da OS recém-criada): de 1 a 10 técnicos (`GET
   /technicians/suggest` com `exclude_ticket_id` e `limit=10`, mais a busca: `GET /technicians` com a tela Técnicos,
   senão os técnicos de `GET /users/assignable`; sem acesso ao app e já na OS aparecem travados, e desde 25/11/2026
-  também Inativo e Bloqueado, com os chips e o motivo no título, e o indisponível no dia da visita, com "Indisponível
-  até 30/11"; o sugerido fora da disponibilidade informada ganha o chip âmbar "Fora da disponibilidade (sáb · tarde)"), o valor (começa no
+  também Inativo e Bloqueado, com os chips e o motivo no título, e o indisponível nos dias da visita (do dia do início
+  ao do fim, `unavailableBetween`: a mesma conta da API), com "Indisponível até 30/11"; o sugerido fora da disponibilidade informada ganha o chip âmbar "Fora da disponibilidade (sáb · tarde)"), o valor (começa no
   `technician_fee` do tipo de serviço), o prazo (sem prazo, 30 min, 1 h, 2 h, 4 h ou até o fim do dia; o `expires_at` é
   calculado no clique) e o recado. Depois do envio, o aviso "Oferta enviada" com "Copiar texto para o grupo". Sem
   texto de exemplo nem explicação fixa nos campos. Escopo ou recado que cita o cliente ou a loja (os nomes que a API
@@ -1769,14 +1772,14 @@ não começa com "technician." (a web mandaria o evento para o mapa).
 - `fields` traz também as partes do perfil técnico (`tools`, `availability`, `transport`, `skills`, `education`): ver
   [Perfil técnico](#perfil-técnico-2026-11-19).
 
-**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-25" (era "2026-11-20"; o `GET /public/onboarding/catalog`
-devolve a versão nova e a ficha grava a do servidor no aceite). Na publicação, vale a data do dia, igual nos três
-lugares.
+**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-26", o dia da publicação do cadastro V2 (era "2026-11-20"; o
+`GET /public/onboarding/catalog` devolve a versão nova e a ficha grava a do servidor no aceite). Na publicação, vale a
+data do dia, igual nos três lugares.
 - O texto (`PRIVACY_NOTICE`) e a versão (`PRIVACY_VERSION`) ficam em `frontend/src/lib/constants.ts` e
   `mobile/src/lib/constants.ts`, cópias idênticas; `frontend/src/lib/onboarding.ts` só reexporta. Mudar o texto pede
   mudar a versão nos dois lados (as duas cópias e `backend/app/schemas/onboarding.py`), no mesmo dia.
 - Formato "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" ("AAAA-MM-DD.N"). As versões se comparam como texto.
-  Para mostrar, `PRIVACY_DATE` = os 10 primeiros caracteres em "DD/MM/AAAA" ("25/11/2026"; um ".2" não aparece).
+  Para mostrar, `PRIVACY_DATE` = os 10 primeiros caracteres em "DD/MM/AAAA" ("26/11/2026"; um ".2" não aparece).
 - A ficha da web compara a versão do servidor com a do pacote ao abrir, na última etapa e no envio: se a do servidor
   for mais nova, a página está velha, mostra "O aviso de privacidade mudou" com **Recarregar** e não envia. Por isso,
   publique a web antes da API, ou junto: com a API na frente, nenhuma ficha envia até a web nova entrar.
@@ -1786,7 +1789,7 @@ lugares.
   técnico, informado na ficha ou no app (aptidões, formação, ferramental, meios de transporte e CNH, e os dias e turnos
   disponíveis), que ajuda a central a escolher quem convidar para cada OS e que o técnico atualiza no app, em
   Configurações, e os registros das ofertas de OS no app (quando o técnico vê a oferta, abre o escopo e aceita ou
-  recusa: `viewed_at`, `scope_read_at`, `responded_at`); e, desde a "2026-11-25", 11 seções na ordem: Quem trata seus
+  recusa: `viewed_at`, `scope_read_at`, `responded_at`); e, desde a "2026-11-26", 11 seções na ordem: Quem trata seus
   dados, Quais dados (CPF, RG com órgão emissor e UF, nascimento, telefone secundário, a validação de que o e-mail é
   dele, mini biografia, veículo com modelo e placa, os dados da empresa, as formas de recebimento, chaves PIX e contas
   bancárias com o nome e o CPF ou CNPJ do titular, e os períodos de indisponibilidade), Para quê (o pagamento na forma
@@ -2342,8 +2345,9 @@ aprovação da ficha num passo e a reabertura da ficha reprovada. Na central, a 
 profissional; no app, "Credenciais" é "Senha"; o grupo Gestão é só da central). Código:
 `services/{mail,mail_templates,account,cep,payout_methods,unavailability,technician_status}.py`, `core/payout.py`,
 `schemas/{personal,payout_method,account,cep}.py`, `models/{payout_method,account_token,email_outbox}.py`,
-`api/routes/cep.py` e as rotas novas em `api/routes/{auth,my_profile,payouts,technicians,onboarding}.py`. Testes:
-`test_cadastro_v2_migration.py`, `test_cep.py`, `test_mail.py`, `test_account_links.py`, `test_payout_methods.py`,
+`db/errors.py` (os erros do banco pelo SQLSTATE e pela restrição), `api/routes/cep.py` e as rotas novas em
+`api/routes/{auth,my_profile,payouts,technicians,onboarding}.py`. Testes: `test_cadastro_v2_migration.py`,
+`test_cep.py`, `test_mail.py`, `test_account_links.py`, `test_cadastro_v2_links_fixes.py`, `test_payout_methods.py`,
 `test_cadastro_v2_profile.py`, `test_unavailability.py`, `test_operational_status.py`, `test_onboarding_v2.py` e
 `test_technician_credentials.py`.
 
@@ -2352,7 +2356,7 @@ profissional; no app, "Credenciais" é "Senha"; o grupo Gestão é só da centra
 
   | Coluna | Conteúdo |
   |---|---|
-  | `address_number` (10), `address_complement` (60) | número ("S/N" vale) e complemento; `address_line` passa a ser só o logradouro |
+  | `address_number` (10), `address_complement` (60) | número, em maiúsculas ("S/N" vale) e complemento; `address_line` passa a ser só o logradouro |
   | `cpf` (11, único: `uq_users_cpf`) | só os números |
   | `rg_number` (20), `rg_issuer` (20), `rg_state` (2) | RG, órgão emissor e UF |
   | `birth_date`, `phone_secondary` (40), `bio` | nascimento, telefone secundário ("(11) 98888-7777") e mini biografia (até 500 pela API) |
