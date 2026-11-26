@@ -2617,7 +2617,8 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
 - Trocar o e-mail (aqui ou no `PATCH /users/{id}` de um técnico) troca o login na hora (`account.central_email_changed`):
   zera a validação e o pedido de troca do app, revoga os links, vence as validações na fila, passa para o endereço novo a
   boas-vindas e a nova senha que ainda não saíram e manda a validação (`check`) para o novo, logo depois do commit.
-  Cortar o acesso, gerar a senha provisória (`reset-password`) ou definir a senha em Usuários revoga os links de senha.
+  Cortar o acesso, gerar a senha provisória (`reset-password`) ou definir a senha em Usuários revogam os links de
+  senha.
 - `POST …/email-verification`: o link de validação para o e-mail pendente ou, sem ele, para o login não validado.
   Validado e sem pendente: 409 `EMAIL_ALREADY_VERIFIED`; sem endereço que recebe mensagens: 422 "Este técnico não tem
   e-mail válido. Corrija em Contato ou use a senha provisória"; 5 por hora por técnico (429) → 202 `EmailQueued`.
@@ -2639,9 +2640,9 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   Erro temporário (conexão, tempo, 4xx, autenticação): nova tentativa em 1, 5, 15 e 60 min, e a 5ª falha dá `failed`;
   recusa permanente do servidor (5xx no remetente, no destinatário ou nos dados): `failed` na hora.
 - Sem SMTP (`settings.mail_enabled` falso: falta `SMTP_HOST` ou `MAIL_FROM`), nada sai: a linha entra `pending`, a
-  resposta diz `not_configured` e ela vence no prazo. Endereço que não recebe mensagens (`mail.sendable` =
-  `isSendableEmail`: sem "@" e domínio com ponto, ou terminado em `.invalid`/`.local`, como os importados): nada entra
-  (`not_sendable`).
+  resposta diz `not_configured` e ela vence no prazo. Endereço que não recebe mensagens: nada entra (`not_sendable`);
+  recebe (`mail.sendable` = `isSendableEmail`) o que tem "@" e domínio com ponto e não termina em `.invalid` nem
+  `.local` (os endereços de mentira dos importados).
 - Os três modelos, em texto e HTML, sem Reply-To e com `Auto-Submitted: auto-generated`; remetente `MAIL_FROM` com o
   nome `MAIL_FROM_NAME` (vazio, `COMPANY_NAME`); terminam com o nome da empresa (Configurações › Empresa) e "Mensagem
   automática: este endereço não recebe respostas. Para falar com a central, use o WhatsApp.":
@@ -2742,8 +2743,8 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   recebimento" (`payout_methods_count === 0`) e, no CSV, `acesso_app`, `situacao`, `situacao_motivo`, `email_validado` e
   `forma_recebimento` (sem CPF, RG, nascimento ou dados de pagamento).
 - Homologação: e-mail validado ou pendente (com "Reenviar validação"), o chip "Reaberta", as análises, aprovar num passo
-  (o painel diz se a boas-vindas foi para a fila e traz o texto do WhatsApp; sem senha e sem e-mail, "Gerar senha
-  provisória"), "Reabrir para análise" com motivo e "Excluída automaticamente em dd/mm/aaaa." na reprovada.
+  (o painel diz se a boas-vindas foi para a fila e traz o texto do WhatsApp; sem senha e sem o link enviado, "Gerar
+  senha provisória"), "Reabrir para análise" com motivo e "Excluída automaticamente em dd/mm/aaaa." na reprovada.
 - Pagamentos: a forma preferencial de cada técnico (a chave ou a conta inteira, "Copiar PIX" ou "Copiar dados", "Nova",
   o titular diferente em âmbar e "+N outras"), "Sem forma de recebimento" com "Pedir no WhatsApp" e a linha "Forma de
   recebimento: …" no extrato.
