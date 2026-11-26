@@ -19,17 +19,41 @@ export interface FichaMenuGroup {
 const ALL_GROUPS = [...TECH_SECTION_GROUPS, GESTAO_GROUP];
 
 /**
- * O menu da ficha: os três grupos de TECH_SECTION_GROUPS (os mesmos nomes do app) e o grupo Gestão, só com as seções da
- * entrega no ar (`delivery <= CADASTRO_DELIVERY`). Formas de recebimento só com Pagamentos.
+ * As seções que pedem um acesso a mais, com o aviso de quem abre o endereço sem ele (o item nem está no menu):
+ * Formas de recebimento só com Pagamentos; Anexos internos só com Técnicos em Editar.
  */
-export function fichaMenu(canPayouts: boolean): FichaMenuGroup[] {
+const GATED: Partial<Record<FichaSectionKey, { allowed: (canPayouts: boolean, canEditTechnicians: boolean) => boolean; text: string }>> = {
+  recebimento: { allowed: (canPayouts) => canPayouts, text: "Formas de recebimento: só com acesso a Pagamentos." },
+  anexos: { allowed: (_, canEditTechnicians) => canEditTechnicians, text: "Anexos internos: só com Técnicos em Editar." },
+};
+
+/**
+ * O menu da ficha: os três grupos de TECH_SECTION_GROUPS (os mesmos nomes do app) e o grupo Gestão, só com as seções da
+ * entrega no ar (`delivery <= CADASTRO_DELIVERY`). Formas de recebimento só com Pagamentos; Anexos internos só com
+ * Técnicos em Editar.
+ */
+export function fichaMenu(canPayouts: boolean, canEditTechnicians: boolean): FichaMenuGroup[] {
   return ALL_GROUPS.map((group) => ({
     key: group.key,
     label: group.label,
     sections: group.sections
-      .filter((s) => s.delivery <= CADASTRO_DELIVERY && (s.key !== "recebimento" || canPayouts))
+      .filter((s) => s.delivery <= CADASTRO_DELIVERY && (GATED[s.key]?.allowed(canPayouts, canEditTechnicians) ?? true))
       .map((s) => ({ key: s.key, label: s.label })),
   })).filter((group) => group.sections.length > 0);
+}
+
+/**
+ * A seção pedida na URL (`?secao=`) que a pessoa não pode ver, com o aviso que fica no lugar dela; null quando pode (ou
+ * quando a seção não pede acesso a mais).
+ */
+export function fichaDenied(
+  param: string | null,
+  canPayouts: boolean,
+  canEditTechnicians: boolean,
+): { key: FichaSectionKey; text: string } | null {
+  if (param !== "recebimento" && param !== "anexos") return null;
+  const gate = GATED[param];
+  return gate && !gate.allowed(canPayouts, canEditTechnicians) ? { key: param, text: gate.text } : null;
 }
 
 /** O nome da seção (o mesmo do menu), para o título do cartão e o aviso de alterações não salvas. */

@@ -82,11 +82,22 @@ export function ProfileUnavailable() {
   );
 }
 
+/** A célula da grade: marcada no tom da marca (com o visto), vazia neutra. */
+const cellClass = (on: boolean) =>
+  clsx("h-7 rounded-md text-center", on ? "bg-brand-soft text-brand-ink dark:bg-brand/15" : "bg-surface-2");
+
 /**
- * A disponibilidade numa grade de 7 dias por 4 turnos (só leitura). O leitor de tela ouve o resumo na legenda e, célula
- * a célula, "Disponível" ou "Indisponível".
+ * A disponibilidade numa grade de 7 dias por 4 turnos. Só leitura: o leitor de tela ouve o resumo na legenda e, célula
+ * a célula, "Disponível" ou "Indisponível". Com `onToggle` (a central editando), cada turno vira um botão de marcar e
+ * desmarcar ("Segunda-feira, manhã", pressionado quando marcado).
  */
-export function AvailabilityGrid({ slots }: { slots: readonly string[] }) {
+export function AvailabilityGrid({
+  slots,
+  onToggle,
+}: {
+  slots: readonly string[];
+  onToggle?: (slot: AvailabilitySlot) => void;
+}) {
   const marked = new Set(slots);
   return (
     <table className="w-full max-w-md table-fixed border-separate border-spacing-1 text-xs">
@@ -115,15 +126,29 @@ export function AvailabilityGrid({ slots }: { slots: readonly string[] }) {
               {WEEKDAY[day].short}
             </th>
             {DAY_PERIOD_ORDER.map((period) => {
-              const on = marked.has(`${day}:${period}`);
+              const slot: AvailabilitySlot = `${day}:${period}`;
+              const on = marked.has(slot);
+              if (onToggle) {
+                return (
+                  <td key={period} className="h-7 p-0">
+                    <button
+                      type="button"
+                      aria-pressed={on}
+                      aria-label={`${WEEKDAY[day].label}, ${DAY_PERIOD[period].label.toLowerCase()}`}
+                      onClick={() => onToggle(slot)}
+                      className={clsx(
+                        cellClass(on),
+                        "flex w-full items-center justify-center transition-shadow hover:ring-1 hover:ring-brand/40",
+                        "focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:pointer-events-none",
+                      )}
+                    >
+                      {on ? <Check aria-hidden className="size-3.5" /> : null}
+                    </button>
+                  </td>
+                );
+              }
               return (
-                <td
-                  key={period}
-                  className={clsx(
-                    "h-7 rounded-md text-center",
-                    on ? "bg-brand-soft text-brand-ink dark:bg-brand/15" : "bg-surface-2",
-                  )}
-                >
+                <td key={period} className={cellClass(on)}>
                   {on ? <Check aria-hidden className="mx-auto size-3.5" /> : null}
                   <span className="sr-only">{on ? "Disponível" : "Indisponível"}</span>
                 </td>
@@ -195,14 +220,15 @@ export function TransportPart({ tech, withVehicle = false }: { tech: Technician;
   );
 }
 
-/** As aptidões com o nível e o "desde". */
+/** As aptidões com o nível e o "desde" (os nomes do catálogo). */
 export function SkillsPart({ tech }: { tech: Technician }) {
   const skills = tech.skills ?? [];
   if (!skills.length) return <p className="text-sm text-ink-muted">Nenhuma aptidão</p>;
   return (
     <ul className="flex flex-col gap-1.5">
       {skills.map((skill, i) => (
-        <li key={`${i}-${skill.name}`} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
+        // A API de antes da Gestão manda só o nome (sem o id do catálogo).
+        <li key={skill.skill_id ?? `${i}-${skill.name}`} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
           <span className="font-semibold text-ink">{skill.name}</span>
           <span className="rounded-full border border-line px-2 py-px text-[11px] text-ink">
             {SKILL_LEVEL[skill.level] ?? skill.level}
@@ -233,25 +259,5 @@ export function EducationPart({ tech }: { tech: Technician }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-/** As áreas da ficha aprovada (rótulos do catálogo da homologação); sem áreas, nada. */
-export function HomologationAreas({ tech }: { tech: Technician }) {
-  const catalog = useOnboardingCatalog();
-  const areas = useMemo(() => labelMap(catalog.data?.service_areas), [catalog.data]);
-  const list = tech.service_areas ?? [];
-  if (!list.length) return null;
-  return (
-    <section className="flex min-w-0 flex-col gap-2 border-t border-line pt-5">
-      <h3 className="text-xs font-bold tracking-wide text-ink-muted uppercase">Áreas da homologação</h3>
-      <div className="flex flex-wrap gap-1.5">
-        {list.map((k) => (
-          <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
-            {areas[k] ?? k}
-          </span>
-        ))}
-      </div>
-    </section>
   );
 }

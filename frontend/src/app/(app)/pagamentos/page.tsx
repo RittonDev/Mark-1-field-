@@ -12,6 +12,7 @@ import { NoAccess } from "@/components/NoAccess";
 import { InvoiceDialog } from "@/components/payouts/InvoiceDialog";
 import { type InvoiceListState, InvoicesPanel, InvoiceStrip } from "@/components/payouts/InvoicesPanel";
 import { PayoutMethodLine } from "@/components/payouts/PayoutMethodLine";
+import { TechnicianLink } from "@/components/technicians/TechnicianLink";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, EmptyState, ErrorBox, LoadingBlock, PageHeader, Pill, Select } from "@/components/ui";
@@ -267,6 +268,8 @@ function PayoutsView() {
   // Os reembolsos de Custos extras entram no extrato só para quem tem acesso a Custos extras.
   const canExpenses = useCan("commercial.expenses");
   const canPayExpenses = useCan("commercial.expenses", "edit");
+  // O nome do técnico no fechamento leva à ficha dele (só com a tela Técnicos).
+  const canTechnicians = useCan("base.technicians");
   const months = useMemo(() => lastMonths(), []);
   const [view, setView] = useState<View>("to_pay");
   // ?mes=2026-11 (o "Valor dos técnicos" do relatório mensal): abre já no mês.

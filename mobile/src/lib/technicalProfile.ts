@@ -1,18 +1,19 @@
-// Perfil profissional em Configurações (Dias e horários, Transporte, Aptidões, Formação e Ferramental): o estado de cada
-// tela (o cadastro da memória e a releitura do servidor), a gravação no ar das listas (Aptidões, Formação, Formas de
-// recebimento e Indisponibilidade) e os catálogos, só na memória:
-// - o ferramental: GET /technician-tools (o técnico recebe só as ativas, em ordem alfabética);
-// - as sugestões de aptidão: as mesmas da ficha da homologação, de GET /public/onboarding/catalog.
+// Perfil profissional em Configurações (Dias e horários, Transporte, Formação, Áreas de atuação, Aptidões e Ferramental)
+// e as telas da gestão (Documentos e Currículo): o estado de cada tela (o cadastro da memória e a releitura do servidor;
+// as da gestão pedem hasCadastroE2), a gravação no ar das listas (Aptidões, Formação, Formas de recebimento,
+// Indisponibilidade e Documentos) e os catálogos que a central mantém em Configurações › Técnicos, só na memória: o
+// ferramental (GET /technician-tools), as aptidões (GET /technician-skills) e as áreas de atuação (GET
+// /technician-areas). O técnico recebe só os itens ativos, em ordem alfabética; do item, o app usa o id e o nome.
 // Nada vai para o SQLite, o kv nem o SecureStore. Um catálogo lido vale 10 min (abrir a tela depois disso relê), puxar a
 // tela relê na hora, e a troca de sessão (Sair ou outro técnico) apaga.
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { ProfileLoad } from "../components/settings/ProfileGate";
-import { api, ApiError, errorMessage, request } from "./api";
+import { api, ApiError, errorMessage } from "./api";
 import { offlineFailure } from "./net";
 import { hasTechnicalProfile, loadProfile, useProfile } from "./profile";
 import { session } from "./session";
-import type { MyProfile, OnboardingCatalog, TechnicianTool } from "./types";
+import type { MyProfile, TechCatalogItem, TechnicianTool } from "./types";
 
 /** Servidor antigo (o cadastro vem sem o perfil técnico): o que as telas de Atendimento mostram no lugar. */
 export const UNAVAILABLE = {
@@ -179,7 +180,7 @@ export async function trackListWrite<T>(part: ListPart, removing: string | null,
   }
 }
 
-/** A gravação no ar da lista, na tela (Aptidões, Formação, Formas de recebimento ou Dias e horários). */
+/** A gravação no ar da lista, na tela (Aptidões, Formação, Formas de recebimento, Dias e horários ou Documentos). */
 export function useListWrite(part: ListPart): ListWrite {
   const get = useCallback(() => listWrites[part], [part]);
   return useSyncExternalStore(subscribeList, get, get);
@@ -287,13 +288,13 @@ function useCatalog<T>(catalog: Catalog<T>): CatalogState<T> {
   return state;
 }
 
-const toolCatalog = createCatalog(() => api.get<TechnicianTool[]>("/technician-tools"));
+/** Só os itens ativos (o servidor já manda assim para o técnico; é por garantia). */
+const activeOnly = <T extends { is_active?: boolean | null }>(items: T[]): T[] =>
+  Array.isArray(items) ? items.filter((item) => item.is_active !== false) : [];
 
-const skillCatalog = createCatalog(() =>
-  request<OnboardingCatalog>("/public/onboarding/catalog", { auth: false }).then((catalog) =>
-    Array.isArray(catalog?.skill_suggestions) ? catalog.skill_suggestions : [],
-  ),
-);
+const toolCatalog = createCatalog(() => api.get<TechnicianTool[]>("/technician-tools"));
+const skillCatalog = createCatalog(() => api.get<TechCatalogItem[]>("/technician-skills").then(activeOnly));
+const areaCatalog = createCatalog(() => api.get<TechCatalogItem[]>("/technician-areas").then(activeOnly));
 
 /** O ferramental (só as ativas), para a tela Ferramental. */
 export function useToolCatalog(): CatalogState<TechnicianTool[]> {
@@ -305,12 +306,25 @@ export function reloadToolCatalog(): Promise<void> {
   return toolCatalog.load({ force: true });
 }
 
-/** As sugestões de aptidão (null sem catálogo: a folha segue só com o texto livre). */
-export function useSkillSuggestions(): string[] | null {
-  return useCatalog(skillCatalog).data;
+/**
+ * As aptidões da central (só as ativas), para a folha "Adicionar aptidão". O servidor de antes da gestão não tem a rota:
+ * o erro vem com `missing` (404) e a folha diz que a lista ainda não existe.
+ */
+export function useSkillCatalog(): CatalogState<TechCatalogItem[]> {
+  return useCatalog(skillCatalog);
 }
 
-/** Relê as sugestões de aptidão agora (puxar a tela). */
-export function reloadSkillSuggestions(): Promise<void> {
+/** Relê as aptidões agora: puxar a tela, "Tentar de novo" ou uma aptidão que a central desativou ou excluiu. */
+export function reloadSkillCatalog(): Promise<void> {
   return skillCatalog.load({ force: true });
+}
+
+/** As áreas de atuação da central (só as ativas), para a tela Áreas de atuação. */
+export function useAreaCatalog(): CatalogState<TechCatalogItem[]> {
+  return useCatalog(areaCatalog);
+}
+
+/** Relê as áreas de atuação agora: puxar a tela, "Tentar de novo" ou uma área que a central desativou ou criou. */
+export function reloadAreaCatalog(): Promise<void> {
+  return areaCatalog.load({ force: true });
 }

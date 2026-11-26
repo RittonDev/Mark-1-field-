@@ -1,12 +1,14 @@
-// Ferramental (Configurações › Atendimento): o técnico marca as ferramentas que leva, do catálogo que a central mantém
-// (Configurações › Técnicos, na central). Salva ao tocar, sem botão: os toques de perto vão juntos num envio só (sem
-// rede, avisa e não muda). Ferramenta desativada na central com a tela aberta: o servidor ignora a marcação e a lista
-// é relida (ela some). Com muitas ferramentas, aparece a busca.
+// Ferramental (Configurações › Perfil profissional): o técnico marca as ferramentas que leva, do catálogo que a central
+// mantém (Configurações › Técnicos, na central). Salva ao tocar, sem botão: os toques de perto vão juntos num envio só
+// (sem rede, avisa e não muda). Ferramenta desativada na central com a tela aberta: o servidor ignora a marcação e a
+// lista é relida (ela some). Com muitas ferramentas, aparece a busca. Ferramental mudado por último pela central: o
+// carimbo "Atualizado pela central em …" no topo.
 
 import { Stack } from "expo-router";
 import { useMemo, useState, type ReactNode } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { CentralStamp } from "../../components/settings/CentralStamp";
 import { CheckCard } from "../../components/settings/CheckCard";
 import { OfflineNotice } from "../../components/settings/OfflineNotice";
 import { ProfileGate } from "../../components/settings/ProfileGate";
@@ -146,6 +148,7 @@ export default function ToolsScreen() {
       >
         <OfflineNotice />
         {stale ? <InfoBox message="Não foi possível atualizar agora. Os dados podem estar desatualizados." /> : null}
+        <CentralStamp stamp={gate.profile.tech_profile_updated.tools} />
         {list}
       </ScrollView>
     </>

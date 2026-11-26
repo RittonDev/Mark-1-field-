@@ -1,63 +1,44 @@
-// Folha da aptidão (Configurações › Aptidões). Incluir: o nome (texto livre ou uma das sugestões da ficha) e o nível.
-// Editar: só o nível (o nome fica na descrição da folha; para mudar o nome, exclui e inclui de novo). Os erros aparecem
-// depois de tocar no botão; o do servidor, no fim da folha. Quem grava é a tela (onSubmit).
+// Folha "Editar aptidão" (Configurações › Aptidões): só o nível. O nome, que vem do catálogo da central, fica na
+// descrição da folha; para trocar de aptidão, o técnico exclui e inclui outra pela folha "Adicionar aptidão"
+// (SkillCatalogSheet). "Salvar" só com o nível mudado; o erro do servidor aparece no fim da folha. Quem grava é a tela
+// (onSubmit).
 
 import { useState } from "react";
-import { View } from "react-native";
-import { SKILL_LEVEL, SKILL_LEVEL_ORDER, TECH_PROFILE_LIMITS } from "../../lib/constants";
+import { SKILL_LEVEL, SKILL_LEVEL_ORDER } from "../../lib/constants";
 import { haptic } from "../../lib/haptics";
-import { cleanText, foldName, skillProblem, suggestionsFor } from "../../lib/techProfileForm";
-import type { SkillLevel, TechnicianSkill, TechnicianSkillIn } from "../../lib/types";
-import { Field, Input, SectionTitle } from "../ui";
+import type { SkillLevel } from "../../lib/types";
+import { Field } from "../ui";
 import { ChoiceChips, type ChoiceOption } from "./ChoiceChips";
 import { FormSheet } from "./FormSheet";
 
-export type SkillSheetTarget = { kind: "add" } | { kind: "edit"; skill: TechnicianSkill };
-
-const LEVEL_OPTIONS: ChoiceOption<SkillLevel>[] = SKILL_LEVEL_ORDER.map((level) => ({ value: level, label: SKILL_LEVEL[level] }));
+/** As opções de nível das folhas de aptidão (editar e adicionar). */
+export const SKILL_LEVEL_OPTIONS: ChoiceOption<SkillLevel>[] = SKILL_LEVEL_ORDER.map((level) => ({ value: level, label: SKILL_LEVEL[level] }));
 
 export function SkillSheet({
   visible,
-  target,
-  others,
-  suggestions,
+  skill,
   onSubmit,
   onClose,
   onClosed,
 }: {
   visible: boolean;
-  target: SkillSheetTarget;
-  /** As outras aptidões do técnico (na edição, sem a editada): o nome não pode repetir. */
-  others: readonly TechnicianSkill[];
-  /** As sugestões da ficha; null sem catálogo (a seção some e o texto livre continua valendo). */
-  suggestions: readonly string[] | null;
-  /** Grava. Devolve a mensagem de erro, ou null quando gravou (a tela fecha a folha). */
-  onSubmit: (skill: TechnicianSkillIn) => Promise<string | null>;
+  /** A aptidão editada: o nome do catálogo e o nível gravado. */
+  skill: { name: string; level: SkillLevel };
+  /** Grava o nível. Devolve a mensagem de erro, ou null quando gravou (a tela fecha a folha). */
+  onSubmit: (level: SkillLevel) => Promise<string | null>;
   onClose: () => void;
   onClosed: () => void;
 }) {
-  const editing = target.kind === "edit" ? target.skill : null;
-  const [name, setName] = useState(editing?.name ?? "");
-  const [level, setLevel] = useState<SkillLevel | null>(editing?.level ?? null);
-  const [attempted, setAttempted] = useState(false);
+  const [level, setLevel] = useState<SkillLevel>(skill.level);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const problems = skillProblem({ name, level }, others);
-  const shown = attempted ? problems : {};
-  const dirty = editing ? level !== editing.level : cleanText(name) !== "" || level !== null;
-  const offered = editing || !suggestions ? [] : suggestionsFor(name, suggestions, others.map((skill) => skill.name));
-  const picked = offered.find((suggestion) => foldName(suggestion) === foldName(name)) ?? null;
+  const dirty = level !== skill.level;
 
   async function submit() {
-    setAttempted(true);
+    if (!dirty) return;
     setError(null);
-    if (problems.name || problems.level || !level) {
-      haptic.warning();
-      return;
-    }
     setBusy(true);
-    const message = await onSubmit({ name: cleanText(editing?.name ?? name), level });
+    const message = await onSubmit(level);
     setBusy(false);
     if (message) {
       haptic.warning();
@@ -68,53 +49,23 @@ export function SkillSheet({
   return (
     <FormSheet
       visible={visible}
-      title={editing ? "Editar aptidão" : "Adicionar aptidão"}
-      description={editing?.name}
-      submitLabel={editing ? "Salvar" : "Adicionar"}
+      title="Editar aptidão"
+      description={skill.name}
+      submitLabel="Salvar"
       onSubmit={() => void submit()}
       onClose={onClose}
       onClosed={onClosed}
       busy={busy}
       error={error}
       dirty={dirty}
-      submitDisabled={Boolean(editing) && !dirty}
+      submitDisabled={!dirty}
     >
-      {editing ? null : (
-        <Field label="Aptidão" required error={shown.name}>
-          <Input
-            value={name}
-            onChangeText={(text) => {
-              setName(text);
-              setError(null);
-            }}
-            maxLength={TECH_PROFILE_LIMITS.skillName}
-            autoCapitalize="sentences"
-            returnKeyType="done"
-            accessibilityLabel="Aptidão"
-          />
-        </Field>
-      )}
-      {offered.length ? (
-        <View>
-          <SectionTitle>Sugestões</SectionTitle>
-          <ChoiceChips
-            options={offered.map((suggestion) => ({ value: suggestion, label: suggestion }))}
-            value={picked}
-            accessibilityLabel="Sugestões"
-            onChange={(next) => {
-              if (Array.isArray(next)) return;
-              haptic.select();
-              setName(next);
-              setError(null);
-            }}
-          />
-        </View>
-      ) : null}
-      <Field label="Nível" required error={shown.level}>
+      <Field label="Nível" required>
         <ChoiceChips
-          options={LEVEL_OPTIONS}
+          options={SKILL_LEVEL_OPTIONS}
           value={level}
           accessibilityLabel="Nível"
+          disabled={busy}
           onChange={(next) => {
             if (Array.isArray(next)) return;
             haptic.select();

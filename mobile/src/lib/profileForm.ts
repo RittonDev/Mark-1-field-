@@ -679,9 +679,12 @@ export const NO_ADDRESS = "Não informado";
 export const EMAIL_PENDING = "E-mail pendente";
 export const EMAIL_UNVERIFIED = "E-mail não validado";
 
-/** "3 ferramentas", "1 ferramenta"; zero: "Nenhuma" (aptidão, formação e ferramenta são femininas). */
-export function countLabel(n: number, one: string, many: string): string {
-  if (n <= 0) return "Nenhuma";
+/**
+ * "3 ferramentas", "1 ferramenta"; zero: `zero`, "Nenhuma" por padrão (aptidão, área, formação e ferramenta são
+ * femininas; documento passa "Nenhum").
+ */
+export function countLabel(n: number, one: string, many: string, zero = "Nenhuma"): string {
+  if (n <= 0) return zero;
   return n === 1 ? `1 ${one}` : `${n} ${many}`;
 }
 

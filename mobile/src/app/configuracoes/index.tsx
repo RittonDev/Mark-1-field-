@@ -1,9 +1,10 @@
 // Configurações (Perfil › Configurações): o cadastro do técnico nos 3 grupos de seções que a central também usa
 // (TECH_SECTION_GROUPS, com os mesmos nomes; "Credenciais" aqui é "Senha"; só as seções da entrega no ar,
-// CADASTRO_DELIVERY) e o grupo App (aparência, notificações e sincronização). Cada linha tem o resumo à direita. Abre
-// sempre, até sem internet: cada tela cuida do próprio estado. Com o servidor de antes do cadastro V2 (hasCadastroV2),
-// as linhas do cadastro, menos Foto, Senha e o perfil profissional, dizem "Indisponível". O cadastro fica só na memória
-// (lib/profile.ts).
+// CADASTRO_DELIVERY: na Entrega 2, também Documentos, Currículo e Áreas de atuação) e o grupo App (aparência,
+// notificações e sincronização). Cada linha tem o resumo à direita. Abre sempre, até sem internet: cada tela cuida do
+// próprio estado. Com o servidor de antes do cadastro V2 (hasCadastroV2), as linhas do cadastro, menos Foto, Senha e o
+// perfil profissional, dizem "Indisponível"; com o de antes da gestão (hasCadastroE2), Documentos, Currículo e Áreas de
+// atuação. O cadastro fica só na memória (lib/profile.ts).
 
 import { router } from "expo-router";
 import { useState, type ReactNode } from "react";
@@ -19,11 +20,13 @@ import { Text } from "../../components/Text";
 import { Button, InfoBox } from "../../components/ui";
 import { useAvatarRecovery, useAvatarTask } from "../../lib/avatarFlow";
 import { CADASTRO_DELIVERY, TECH_SECTION_GROUPS, transportText } from "../../lib/constants";
+import { documentsRowSummary, resumeRowSummary } from "../../lib/documentRules";
 import { haptic } from "../../lib/haptics";
 import { openSync } from "../../lib/navigation";
 import { payoutRowSummary } from "../../lib/payoutForm";
-import { hasCadastroV2, hasTechnicalProfile } from "../../lib/profile";
+import { hasCadastroE2, hasCadastroV2, hasTechnicalProfile } from "../../lib/profile";
 import { addressSummary, bioSummary, companySummary, contactRowSummary, countLabel, todayIso } from "../../lib/profileForm";
+import { useResumeTask } from "../../lib/resumeFlow";
 import { useSession } from "../../lib/session";
 import { useSyncStatus } from "../../lib/sync";
 import { useSyncSummary } from "../../lib/syncSummary";
@@ -48,7 +51,7 @@ interface RowSummary {
   accessibilityLabel?: string;
 }
 
-/** Linha cuja tela o servidor ainda não tem (cadastro V2 ou perfil técnico): a tela de cada uma explica. */
+/** Linha cuja tela o servidor ainda não tem (cadastro V2, perfil técnico ou gestão): a tela de cada uma explica. */
 const NOT_AVAILABLE: RowSummary = { value: "Indisponível" };
 
 /** O ícone e a tela de cada seção (sem entrada: a seção ainda não tem tela no app, e a linha não aparece). */
@@ -58,12 +61,15 @@ const SECTION_ROW: Partial<Record<TechSectionKey, { icon: IconName; href: string
   endereco: { icon: "pin", href: "/configuracoes/endereco" },
   contato: { icon: "phone", href: "/configuracoes/contato" },
   credenciais: { icon: "lock", href: "/trocar-senha" },
+  documentos: { icon: "idCard", href: "/configuracoes/documentos" },
   "mini-biografia": { icon: "note", href: "/configuracoes/biografia" },
   "dados-empresariais": { icon: "building", href: "/configuracoes/empresa" },
   recebimento: { icon: "wallet", href: "/configuracoes/recebimento" },
   "dias-e-horarios": { icon: "calendar", href: "/configuracoes/disponibilidade" },
   transporte: { icon: "car", href: "/configuracoes/transporte" },
+  curriculo: { icon: "fileText", href: "/configuracoes/curriculo" },
   formacao: { icon: "graduation", href: "/configuracoes/formacao" },
+  "areas-de-atuacao": { icon: "grid", href: "/configuracoes/areas" },
   aptidoes: { icon: "target", href: "/configuracoes/aptidoes" },
   ferramental: { icon: "wrench", href: "/configuracoes/ferramental" },
 };
@@ -91,6 +97,11 @@ function payoutRow(p: MyProfile, label: string): RowSummary {
   return { value, valueTone: tone, accessibilityLabel: spoken.startsWith(label) ? spoken : `${label}, ${spoken}` };
 }
 
+/** "Enviado" ou "Não enviado" (o envio e a exclusão no ar ficam com a ResumeRow). */
+function resumeRow(p: MyProfile): RowSummary {
+  return { value: resumeRowSummary(p.documents) };
+}
+
 export default function SettingsScreen() {
   const c = useTheme();
   const styles = useStyles(makeStyles);
@@ -111,6 +122,9 @@ export default function SettingsScreen() {
   /** Servidor ainda sem o perfil técnico (API antiga): "Indisponível"; a tela de cada linha explica. */
   const fromTechnical = (summary: (p: MyProfile) => RowSummary): RowSummary =>
     hasTechnicalProfile(profile) ? summary(profile) : profile ? NOT_AVAILABLE : placeholder;
+  /** Resumo da gestão (documentos, currículo e áreas de atuação): servidor de antes dela, "Indisponível". */
+  const fromE2 = (summary: (p: MyProfile) => RowSummary): RowSummary =>
+    profile ? (hasCadastroE2(profile) ? summary(profile) : NOT_AVAILABLE) : placeholder;
 
   function summaryOf(key: TechSectionKey, label: string): RowSummary {
     switch (key) {
@@ -121,6 +135,12 @@ export default function SettingsScreen() {
         return fromCadastro((p) => ({ value: addressSummary(p.home_city, p.home_state) }));
       case "contato":
         return fromCadastro(contactRow);
+      case "documentos":
+        // Vencida ou vencendo (âmbar), senão quantos (o currículo não conta).
+        return fromE2((p) => {
+          const { value, tone } = documentsRowSummary(p.documents, todayIso());
+          return { value, valueTone: tone };
+        });
       case "mini-biografia":
         return fromCadastro((p) => {
           const value = bioSummary(p.bio);
@@ -140,6 +160,12 @@ export default function SettingsScreen() {
         return fromTechnical((p) => ({ value: transportText(p.transport) ?? "Não informado" }));
       case "formacao":
         return fromTechnical((p) => ({ value: countLabel(size(p.education), "formação", "formações") }));
+      case "areas-de-atuacao":
+        // Sem área, âmbar: é a área que leva às sugestões de técnico para as OS.
+        return fromE2((p) => {
+          const n = size(p.area_ids);
+          return { value: countLabel(n, "área", "áreas"), valueTone: n ? "muted" : "warning" };
+        });
       case "aptidoes":
         return fromTechnical((p) => ({ value: countLabel(size(p.skills), "aptidão", "aptidões") }));
       case "ferramental":
@@ -183,6 +209,9 @@ export default function SettingsScreen() {
               const label = section.app ?? section.label;
               if (section.key === "foto") {
                 return <PhotoRow key={section.key} label={label} profile={profile} loading={loading} fallbackName={user?.name ?? null} />;
+              }
+              if (section.key === "curriculo") {
+                return <ResumeRow key={section.key} icon={row.icon} label={label} href={row.href} summary={fromE2(resumeRow)} />;
               }
               return (
                 <MenuRow
@@ -243,9 +272,9 @@ function PhotoRow({
   const task = useAvatarTask();
   const busy = task === "upload" ? "Enviando foto" : task === "remove" ? "Removendo foto" : null;
   const trailing = busy ? (
-    <View style={styles.photoBusy}>
+    <View style={styles.rowBusy}>
       <ActivityIndicator size="small" color={c.inkMuted} />
-      <Text style={styles.photoBusyText} numberOfLines={1} maxFontSizeMultiplier={1.3}>
+      <Text style={styles.rowBusyText} numberOfLines={1} maxFontSizeMultiplier={1.3}>
         {`${busy}…`}
       </Text>
     </View>
@@ -265,6 +294,31 @@ function PhotoRow({
       onPress={() => router.push("/configuracoes/foto")}
     />
   );
+}
+
+/**
+ * A linha Currículo: o resumo do cadastro ("Enviado", "Não enviado", "Indisponível") ou, com o envio ou a exclusão no ar
+ * (lib/resumeFlow.ts: a tela Currículo saiu e ele continua), o andamento, como a linha da foto.
+ */
+function ResumeRow({ icon, label, href, summary }: { icon: IconName; label: string; href: string; summary: RowSummary }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
+  const task = useResumeTask();
+  const busy = task ? resumeRowSummary(null, task) : null;
+  const row: RowSummary = busy
+    ? {
+        trailing: (
+          <View style={styles.rowBusy}>
+            <ActivityIndicator size="small" color={c.inkMuted} />
+            <Text style={styles.rowBusyText} numberOfLines={1} maxFontSizeMultiplier={1.3}>
+              {busy}
+            </Text>
+          </View>
+        ),
+        accessibilityLabel: `${label}, ${task === "remove" ? "excluindo" : "enviando"}`,
+      }
+    : summary;
+  return <MenuRow icon={icon} label={label} {...row} onPress={() => router.push(href)} />;
 }
 
 /** "Ligadas", "Desligadas", "Bloqueadas" (âmbar) ou "Indisponíveis"; lendo, nada. */
@@ -303,6 +357,6 @@ const makeStyles = (c: Palette) =>
     content: { padding: 16, gap: 18 },
     notice: { gap: 6 },
     retry: { alignSelf: "flex-start" },
-    photoBusy: { flexDirection: "row", alignItems: "center", gap: 6 },
-    photoBusyText: { fontSize: 14, fontWeight: "500", color: c.inkMuted },
+    rowBusy: { flexDirection: "row", alignItems: "center", gap: 6 },
+    rowBusyText: { fontSize: 14, fontWeight: "500", color: c.inkMuted },
   });

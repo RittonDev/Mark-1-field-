@@ -1,13 +1,16 @@
 // WebSocket /api/v1/ws?token=… (docs/MOBILE_SYNC.md §4):
 // ping a cada 25 s, reconexão com backoff exponencial e, no fechamento 4401,
 // renova o access token antes de reconectar. Os eventos não carregam a OS inteira:
-// quem consome faz um novo pull.
+// quem consome faz um novo pull. Passam adiante os das OS (ticket.*) e o aviso, só
+// para o técnico, de que a central mudou o cadastro dele (me.profile_changed, sem
+// dados: o app relê /me/profile).
 //
 // Conexão "zumbi" (a rede caiu sem fechar o socket: expiração no NAT, troca de Wi-Fi para dados):
 // sem nenhuma mensagem (hello, pong ou evento) até 15 s depois de um ping, o socket é refeito.
 
 import { refreshSession } from "./api";
 import { wsUrlFor } from "./config";
+import { ME_PROFILE_EVENT } from "./constants";
 import { session } from "./session";
 import type { RealtimeEvent } from "./types";
 
@@ -157,7 +160,7 @@ export class RealtimeClient {
       } catch {
         return;
       }
-      if (event.type?.startsWith("ticket.")) this.handlers.onEvent(event);
+      if (event.type?.startsWith("ticket.") || event.type === ME_PROFILE_EVENT) this.handlers.onEvent(event);
     };
 
     const handleClose = (code: number) => {

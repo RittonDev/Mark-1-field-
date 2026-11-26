@@ -30,14 +30,13 @@ import {
   sameSlots,
   sameTransport,
   SKILL_MSG,
+  skillKey,
   skillLine,
-  skillProblem,
   skillsBody,
   skillSpoken,
   skillsWith,
   skillsWithout,
   sortTools,
-  suggestionsFor,
   thisMonth,
   toggleId,
   toggleMode,
@@ -84,41 +83,29 @@ describe("nomes", () => {
   });
 });
 
+// As aptidões do catálogo (id, folha "Adicionar aptidão", busca, carimbo): tests/skill-catalog.test.mjs. Aqui, o formato
+// pelo nome (o servidor de antes da gestão) e o que vale para os dois.
 describe("aptidões", () => {
-  const mine = [{ name: "Impressoras HP" }, { name: "Linux" }];
-
-  it("skillProblem: nome repetido sem diferença de maiúsculas, acentos e espaços", () => {
-    assert.deepEqual(skillProblem({ name: "impressoras  hp", level: "basico" }, mine), { name: SKILL_MSG.repeated });
-    assert.equal(SKILL_MSG.repeated, "Você já tem esta aptidão.");
-  });
-
-  it("skillProblem: nome curto e nível faltando", () => {
-    assert.deepEqual(skillProblem({ name: "A", level: "avancado" }, mine), { name: "Informe a aptidão." });
-    assert.deepEqual(skillProblem({ name: "   ", level: null }, mine), { name: "Informe a aptidão.", level: "Escolha o nível." });
-    assert.deepEqual(skillProblem({ name: "Redes", level: null }, mine), { level: "Escolha o nível." });
-  });
-
-  it("skillProblem: válido (na edição, a própria aptidão fica fora de `others`)", () => {
-    assert.deepEqual(skillProblem({ name: "Active Directory", level: "intermediario" }, mine), {});
-    assert.deepEqual(skillProblem({ name: "Linux", level: "avancado" }, [{ name: "Impressoras HP" }]), {});
-  });
-
-  it("skillProblem e skillsBody com invisíveis: só invisíveis é vazio, com um invisível no meio é repetida (como o servidor)", () => {
-    assert.deepEqual(skillProblem({ name: "\u200B\u200B\u200B", level: "basico" }, mine), { name: SKILL_MSG.name });
-    assert.deepEqual(skillProblem({ name: "Lin\u200Bux", level: "basico" }, mine), { name: SKILL_MSG.repeated });
-    assert.deepEqual(skillsBody([{ name: "\u202ELin\u200Bux", level: "basico" }]), [{ name: "Linux", level: "basico" }]);
-  });
-
-  it("skillsBody leva só nome (limpo) e nível, sem o `since`", () => {
-    const body = skillsBody([
-      { name: " Redes  de dados ", level: "basico", since: "2026-11-19" },
-      { name: "Linux", level: "avancado", since: "2025-01-10" },
-    ]);
+  it("skillsBody pelo nome (servidor de antes da gestão): nome limpo, sem invisíveis, e nível; nunca o `since`", () => {
+    const body = skillsBody(
+      [
+        { name: " Redes  de dados ", level: "basico", since: "2026-11-19" },
+        { name: "‮Lin​ux", level: "avancado", since: "2025-01-10" },
+      ],
+      false,
+    );
     assert.deepEqual(body, [
       { name: "Redes de dados", level: "basico" },
       { name: "Linux", level: "avancado" },
     ]);
     assert.ok(body.every((item) => !("since" in item) && !("added_at" in item)));
+  });
+
+  it("skillsBody pelo catálogo: só o id e o nível (o nome é do catálogo)", () => {
+    const id = "00000000-0000-4000-8000-000000000009";
+    assert.deepEqual(skillsBody([{ skill_id: id, name: "Linux", level: "avancado", since: "2025-01-10" }], true), [
+      { skill_id: id, level: "avancado" },
+    ]);
   });
 
   const SKILLS = [
@@ -127,40 +114,30 @@ describe("aptidões", () => {
     { name: "Redes", level: "basico", since: "2025-01-10" },
   ];
 
-  it("skillsWithout: tira pelo nome sem acento e maiúsculas, sem o `since`; a que já saiu não muda nada", () => {
-    assert.deepEqual(skillsWithout(SKILLS, "impressoras  hp"), [
+  it("skillsWithout pela chave do nome (sem acento e maiúsculas), sem o `since`; a que já saiu não muda nada", () => {
+    assert.equal(skillKey({ name: "impressoras  HP" }), "nome:impressoras hp");
+    assert.deepEqual(skillsWithout(SKILLS, skillKey({ name: "impressoras  hp" }), false), [
       { name: "Linux", level: "intermediario" },
       { name: "Redes", level: "basico" },
     ]);
-    assert.deepEqual(skillsWithout(SKILLS, "Fibra óptica"), skillsBody(SKILLS));
+    assert.deepEqual(skillsWithout(SKILLS, skillKey({ name: "Fibra óptica" }), false), skillsBody(SKILLS, false));
   });
 
-  it("skillsWith: inclui no fim; na edição muda só o nível, com o nome gravado; null se a editada já saiu", () => {
-    assert.deepEqual(skillsWith(SKILLS, { name: " Fibra  óptica ", level: "basico" }), [
-      { name: "Impressoras HP", level: "avancado" },
-      { name: "Linux", level: "intermediario" },
-      { name: "Redes", level: "basico" },
-      { name: "Fibra óptica", level: "basico" },
-    ]);
-    assert.deepEqual(skillsWith(SKILLS, { name: "LINUX", level: "avancado" }, "linux"), [
+  it("skillsWith muda só o nível, com o nome gravado; null se a editada já saiu", () => {
+    assert.deepEqual(skillsWith(SKILLS, skillKey({ name: "LINUX" }), "avancado", false), [
       { name: "Impressoras HP", level: "avancado" },
       { name: "Linux", level: "avancado" },
       { name: "Redes", level: "basico" },
     ]);
-    assert.equal(skillsWith(SKILLS.slice(0, 1), { name: "Linux", level: "avancado" }, "Linux"), null);
+    assert.equal(skillsWith(SKILLS.slice(0, 1), skillKey({ name: "Linux" }), "avancado", false), null);
     assert.equal(SKILL_MSG.gone, "Esta aptidão foi excluída.");
   });
 
-  it("suggestionsFor: no máximo 12, sem as que o técnico já tem, filtrando pelo texto", () => {
-    const catalog = Array.from({ length: 16 }, (_, i) => `Sugestão ${i + 1}`);
-    assert.equal(suggestionsFor("", catalog, []).length, 12);
-    assert.deepEqual(suggestionsFor("", catalog, [], 3), ["Sugestão 1", "Sugestão 2", "Sugestão 3"]);
-
-    const printers = ["Impressoras HP", "Impressoras Brother", "Linux", "Câmeras Hikvision", "impressoras hp"];
-    assert.deepEqual(suggestionsFor("impress", printers, []), ["Impressoras HP", "Impressoras Brother"]);
-    assert.deepEqual(suggestionsFor("", printers, ["IMPRESSORAS HP", "linux"]), ["Impressoras Brother", "Câmeras Hikvision"]);
-    assert.deepEqual(suggestionsFor("CAMERAS", printers, []), ["Câmeras Hikvision"]);
-    assert.deepEqual(suggestionsFor("xyz", printers, []), []);
+  it("o texto livre saiu: nada de skillProblem, suggestionsFor nem das mensagens do nome", async () => {
+    const lib = await import("../src/lib/techProfileForm.ts");
+    assert.equal(lib.skillProblem, undefined);
+    assert.equal(lib.suggestionsFor, undefined);
+    assert.deepEqual(Object.keys(SKILL_MSG).sort(), ["gone", "level", "pick"]);
   });
 
   it("a linha e o que o leitor de tela fala", () => {
@@ -271,16 +248,19 @@ describe("listas: o corpo montado quando a gravação sai da fila (saveProfileWi
   const apply = (stored, body) =>
     body.map((item) => ({ ...item, since: stored.find((old) => foldName(old.name) === foldName(item.name))?.since ?? "2026-11-20" }));
 
+  const PRINTERS = skillKey({ name: "Impressoras HP" });
+  const LINUX = skillKey({ name: "Linux" });
+
   it("duas exclusões em fila terminam sem as duas: cada corpo sai do que a anterior gravou", () => {
     let stored = SKILLS;
-    for (const build of [(list) => skillsWithout(list, "Impressoras HP"), (list) => skillsWithout(list, "Linux")]) {
+    for (const build of [(list) => skillsWithout(list, PRINTERS, false), (list) => skillsWithout(list, LINUX, false)]) {
       stored = apply(stored, build(stored));
     }
     assert.deepEqual(stored, [{ name: "Redes", level: "basico", since: "2025-01-10" }]);
 
     // O defeito corrigido: com os dois corpos montados da mesma lista, a 2ª exclusão devolvia a 1ª, com o "desde" do dia.
     let early = SKILLS;
-    for (const body of [skillsWithout(SKILLS, "Impressoras HP"), skillsWithout(SKILLS, "Linux")]) early = apply(early, body);
+    for (const body of [skillsWithout(SKILLS, PRINTERS, false), skillsWithout(SKILLS, LINUX, false)]) early = apply(early, body);
     assert.deepEqual(
       early.map((item) => `${item.name}@${item.since}`),
       ["Impressoras HP@2026-11-20", "Redes@2025-01-10"],
@@ -288,8 +268,8 @@ describe("listas: o corpo montado quando a gravação sai da fila (saveProfileWi
   });
 
   it("mudar o nível de uma aptidão que a gravação anterior excluiu não monta corpo (a folha mostra o erro)", () => {
-    const afterRemoval = apply(SKILLS, skillsWithout(SKILLS, "Linux"));
-    assert.equal(skillsWith(afterRemoval, { name: "Linux", level: "avancado" }, "Linux"), null);
+    const afterRemoval = apply(SKILLS, skillsWithout(SKILLS, LINUX, false));
+    assert.equal(skillsWith(afterRemoval, LINUX, "avancado", false), null);
   });
 });
 

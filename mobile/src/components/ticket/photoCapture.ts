@@ -3,7 +3,8 @@
 // Android fecha o app com a câmera aberta (comum em aparelho simples): antes de abrir a câmera o alvo
 // fica guardado no aparelho e, ao voltar para a OS, ImagePicker.getPendingResultAsync devolve a foto.
 // A foto do Meu cadastro (alvo "avatar") passa pelo mesmo caminho, com recorte quadrado, e a da nota
-// fiscal (alvo "invoice", tela /nota-fiscal), com qualidade maior para o texto ficar legível.
+// fiscal (alvo "invoice", tela /nota-fiscal) e a do documento ou do currículo (alvo "document",
+// Configurações › Documentos e Currículo), com qualidade maior para o texto ficar legível.
 
 import * as ImagePicker from "expo-image-picker";
 import { Platform } from "react-native";
@@ -30,7 +31,12 @@ export type CaptureTarget =
   /** Foto do Meu cadastro (não é de OS): lib/profile.ts reduz para 512 px e envia. */
   | { kind: "avatar" }
   /** Foto da nota fiscal (não é de OS): sem `ticketId`, a recuperação da tela da OS nunca fica com ela. */
-  | { kind: "invoice"; ticketId?: undefined };
+  | { kind: "invoice"; ticketId?: undefined }
+  /**
+   * Foto de um documento ou certificação (formulário de Configurações › Documentos, `slot` "document") ou do currículo
+   * (`slot` "resume"). Não é de OS: sem `ticketId`, como a da nota fiscal.
+   */
+  | { kind: "document"; slot: "document" | "resume"; ticketId?: undefined };
 
 type StoredTarget = CaptureTarget & { at: string };
 
@@ -55,14 +61,17 @@ const OPTIONS: ImagePicker.ImagePickerOptions = {
  */
 const AVATAR_OPTIONS: ImagePicker.ImagePickerOptions = { ...OPTIONS, quality: 0.8, allowsEditing: true, aspect: [1, 1] };
 
-/** Nota fiscal fotografada: uma foto só, com qualidade maior que a da OS (número, CNPJ e valor precisam ser lidos). */
+/**
+ * Nota fiscal, documento e currículo fotografados: uma foto só, com qualidade maior que a da OS (número, CNPJ, valor,
+ * nome e validade precisam ser lidos).
+ */
 const INVOICE_OPTIONS: ImagePicker.ImagePickerOptions = { ...OPTIONS, quality: 0.8 };
 
 function pickerOptions(source: "camera" | "library", target: CaptureTarget, limit: number): ImagePicker.ImagePickerOptions {
   if (target.kind === "avatar") {
     return source === "camera" ? { ...AVATAR_OPTIONS, cameraType: ImagePicker.CameraType.front } : AVATAR_OPTIONS;
   }
-  if (target.kind === "invoice") return INVOICE_OPTIONS;
+  if (target.kind === "invoice" || target.kind === "document") return INVOICE_OPTIONS;
   return source === "camera" ? OPTIONS : { ...OPTIONS, allowsMultipleSelection: limit > 1, selectionLimit: Math.max(1, limit) };
 }
 
@@ -100,7 +109,15 @@ async function cameraAllowed(target: CaptureTarget): Promise<boolean> {
   const permission = await ImagePicker.requestCameraPermissionsAsync();
   if (permission.granted) return true;
   const purpose =
-    target.kind === "avatar" ? "tirar a foto do cadastro" : target.kind === "invoice" ? "fotografar a nota fiscal" : "fotografar o atendimento";
+    target.kind === "avatar"
+      ? "tirar a foto do cadastro"
+      : target.kind === "invoice"
+        ? "fotografar a nota fiscal"
+        : target.kind === "document"
+          ? target.slot === "resume"
+            ? "fotografar o currículo"
+            : "fotografar o documento"
+          : "fotografar o atendimento";
   const message = `Libere o acesso à câmera nas configurações do aparelho para ${purpose}.`;
   if (permission.canAskAgain) notify("Câmera bloqueada", message);
   else await askOpenSettings("Câmera bloqueada", message);

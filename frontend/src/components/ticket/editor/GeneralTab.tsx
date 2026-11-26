@@ -954,7 +954,7 @@ export function GeneralTab({
             <ErrorBox message={saveError} />
           </div>
         ) : null}
-  
+
         {/* Na ordem da abertura da OS (Nova OS): cliente, localização, tipo de OS, escopo, agendamento,
             colaborador e etiquetas. O resto fica em "Mais detalhes". */}
         <Card>
@@ -1005,7 +1005,7 @@ export function GeneralTab({
                 </p>
               ) : null}
             </div>
-  
+
             {/* Rótulo fora de <label>: dentro dele, o clique no texto acionaria o "Trocar". A busca já
                 trata Enter (escolhe a loja, não salva a OS) e Esc (fecha só a lista). */}
             <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-7">
@@ -1087,7 +1087,7 @@ export function GeneralTab({
                 </div>
               ) : null}
             </div>
-  
+
             <div className="col-span-12 flex flex-col gap-1.5">
               <FieldLabel id={fieldId("type")}>Tipo de OS</FieldLabel>
               <Combobox
@@ -1126,7 +1126,7 @@ export function GeneralTab({
                 )}
               />
             </div>
-  
+
             <div className="col-span-12 flex flex-col gap-1">
               <Field label="Escopo">
                 <Textarea
@@ -1139,7 +1139,7 @@ export function GeneralTab({
               </Field>
               <Counter value={form.description} max={20000} />
             </div>
-  
+
             <Field label="Data do agendamento" className="col-span-6 @xl:col-span-4">
               <Input
                 type="date"
@@ -1183,7 +1183,7 @@ export function GeneralTab({
             {unscheduledWarning ? (
               <Caution className="col-span-12">Sem data e hora, a OS sai de Agendado e volta para Atribuído (fora da agenda do técnico).</Caution>
             ) : null}
-  
+
             {/* O "Ver ficha" do técnico gravado fica fora do <label> (o resumo do cabeçalho acha o campo pelo rótulo),
                 na linha do rótulo. Mesma aba: com alteração não salva, a guarda da Geral pergunta antes. */}
             <div className="relative col-span-12 @xl:col-span-6">
@@ -1287,7 +1287,7 @@ export function GeneralTab({
             {/* Fora do ternário: se a OS ganha técnico com o diálogo aberto, ele continua e diz por que travou
                 (e o erro de um envio em andamento não se perde). Portal no <body>: não ocupa a grade. */}
             {offering ? <OfferDialog ticket={server} onClose={() => setOffering(false)} /> : null}
-  
+
             <div className="col-span-12">
               {suggestionsShown ? (
                 <div className="rounded-xl border border-line bg-surface-2/40 p-3">
@@ -1333,7 +1333,7 @@ export function GeneralTab({
                 </button>
               )}
             </div>
-  
+
             {conflicts ? (
               <div ref={conflictRef} className="col-span-12">
                 <ConflictList tone="error" items={conflicts} title={conflictsTitle} />
@@ -1354,7 +1354,7 @@ export function GeneralTab({
                 ))}
               </div>
             ) : null}
-  
+
             <div className="col-span-12 flex flex-col gap-1.5">
               <FieldLabel id={fieldId("tags")}>Etiquetas</FieldLabel>
               <TagsInput
@@ -1371,7 +1371,7 @@ export function GeneralTab({
             </div>
           </div>
         </Card>
-  
+
         {/* Recolhido, o cartão é só o cabeçalho: sem a linha de baixo dele, que dobraria com a borda do cartão. */}
         <Card className={moreOpen ? undefined : "[&>div:first-child]:border-b-0"}>
           <CardHeader
@@ -1431,7 +1431,7 @@ export function GeneralTab({
                 </Field>
               </div>
             </div>
-  
+
             <div className="p-5">
               <SectionTitle className="mb-3">Central</SectionTitle>
               <div className="grid grid-cols-12 gap-4">
@@ -1468,7 +1468,7 @@ export function GeneralTab({
                 </Field>
               </div>
             </div>
-  
+
             <div className="p-5">
               <SectionTitle wrap className="mb-3" aside={<span className="text-xs text-ink-muted">Origem: {TICKET_SOURCE[server.source]}</span>}>
                 Pedido do cliente
@@ -1500,7 +1500,7 @@ export function GeneralTab({
                 </Field>
               </div>
             </div>
-  
+
             <div className="p-5">
               <SectionTitle className="mb-3">Visita</SectionTitle>
               <div className="flex flex-col gap-4">
@@ -1529,7 +1529,7 @@ export function GeneralTab({
                 </Field>
               </div>
             </div>
-  
+
             <div className="p-5">
               <SectionTitle className="mb-1">Situação e horários</SectionTitle>
               <p className="mb-3 text-xs text-ink-muted">Os horários reais vêm do app do técnico; aqui a central corrige, com o motivo.</p>
@@ -1618,7 +1618,7 @@ export function GeneralTab({
                 ) : null}
               </div>
             </div>
-  
+
             <div className="flex flex-col gap-1 p-5">
               <SectionTitle className="mb-2">Conclusão</SectionTitle>
               <Field label="Descrição da conclusão" hint="O que foi feito. Aparece no relatório do cliente.">

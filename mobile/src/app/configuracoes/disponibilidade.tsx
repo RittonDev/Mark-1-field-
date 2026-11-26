@@ -4,7 +4,8 @@
 // turnos e "Copiar para os dias úteis" repete os de um dia de segunda a sexta. Os períodos entram e mudam numa folha e
 // saem com confirmação, como na Formação: uma gravação por vez (a trava vale também depois de sair e voltar à tela,
 // lib/technicalProfile.ts), com a lista inteira montada quando a gravação sai da fila (saveProfileWith). O período de
-// hoje leva "Agora". Sem a API nova (hasCadastroV2), só os turnos.
+// hoje leva "Agora". Sem a API nova (hasCadastroV2), só os turnos. Turnos mudados por último pela central: o carimbo
+// "Atualizado pela central em …" no topo.
 
 import { Stack } from "expo-router";
 import { useState } from "react";
@@ -13,6 +14,7 @@ import Animated, { FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../../components/Icon";
 import { useListMotion } from "../../components/motion";
+import { CentralStamp } from "../../components/settings/CentralStamp";
 import { DayCard } from "../../components/settings/DayCard";
 import { OfflineNotice } from "../../components/settings/OfflineNotice";
 import { PeriodSheet, type PeriodSheetTarget } from "../../components/settings/PeriodSheet";
@@ -182,6 +184,7 @@ export default function ScheduleScreen() {
       >
         <OfflineNotice />
         {stale ? <InfoBox message="Não foi possível atualizar agora. Os dados podem estar desatualizados." /> : null}
+        <CentralStamp stamp={gate.profile.tech_profile_updated.availability} />
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle} accessibilityRole="header">

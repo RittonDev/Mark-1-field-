@@ -172,7 +172,7 @@ export function toggleId(ids: readonly string[], id: string): string[] {
   return ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id];
 }
 
-/** A busca do Ferramental aparece com mais ferramentas do que isto no catálogo. */
+/** A busca do Ferramental e das Áreas de atuação aparece com mais itens do que isto no catálogo. */
 export const TOOL_SEARCH_AFTER = 15;
 
 /** O catálogo em ordem alfabética, sem diferença de acento e maiúsculas (o servidor já manda assim; é por garantia). */

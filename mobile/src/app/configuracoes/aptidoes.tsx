@@ -1,60 +1,81 @@
-// Aptidões (Configurações › Atendimento): o que o técnico sabe fazer, com o nível e o "desde" (o dia em que entrou no
-// perfil; quem guarda é o servidor). Incluir e mudar o nível numa folha; excluir pela lixeira, com confirmação. Uma
-// gravação por vez: enquanto uma está no ar, as outras ações da lista ficam desligadas, também depois de sair e voltar
-// à tela (o estado fica em lib/technicalProfile.ts). O corpo é montado quando a gravação sai da fila (saveProfileWith),
-// com a lista que a anterior devolveu: duas exclusões seguidas não devolvem um item apagado, e mudar o nível de uma
-// aptidão que já saiu mostra o erro na folha.
+// Aptidões (Configurações › Perfil profissional): o que o técnico sabe fazer, do catálogo que a central mantém
+// (Configurações › Técnicos, na central), com o nível e o "desde" (o dia em que entrou no perfil; quem guarda é o
+// servidor). Incluir pela folha "Adicionar aptidão" (várias da lista de uma vez, com um nível só), mudar o nível na
+// folha "Editar aptidão" e excluir pela lixeira, com confirmação. Uma gravação por vez: enquanto uma está no ar, as
+// outras ações da lista ficam desligadas, também depois de sair e voltar à tela (o estado fica em
+// lib/technicalProfile.ts). O corpo é montado quando a gravação sai da fila (saveProfileWith), com a lista que a
+// anterior devolveu: duas exclusões seguidas não devolvem um item apagado, e mudar o nível de uma aptidão que já saiu
+// mostra o erro na folha. Cada aptidão tem a chave do catálogo (skillKey); com o servidor de antes da gestão
+// (hasCadastroE2 falso) elas vêm só com o nome, o corpo vai pelo nome e a folha de incluir diz que a lista ainda não
+// existe. Lista mudada por último pela central: o carimbo "Atualizado pela central em …" no topo.
 
 import { useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import Animated, { FadeOut } from "react-native-reanimated";
 import { Icon } from "../../components/Icon";
 import { useListMotion } from "../../components/motion";
+import { CentralStamp } from "../../components/settings/CentralStamp";
 import { FixedFooter } from "../../components/settings/FixedFooter";
 import { OfflineNotice } from "../../components/settings/OfflineNotice";
 import { ProfileGate } from "../../components/settings/ProfileGate";
-import { SkillSheet, type SkillSheetTarget } from "../../components/settings/SkillSheet";
+import { SkillCatalogSheet } from "../../components/settings/SkillCatalogSheet";
+import { SkillSheet } from "../../components/settings/SkillSheet";
 import { Text } from "../../components/Text";
 import { Button, EmptyState, InfoBox } from "../../components/ui";
-import { errorMessage } from "../../lib/api";
+import { ApiError, errorMessage } from "../../lib/api";
 import { TECH_PROFILE_LIMITS } from "../../lib/constants";
 import { confirmAction } from "../../lib/dialogs";
 import { haptic } from "../../lib/haptics";
 import { noNetwork, offlineFailure } from "../../lib/net";
-import { saveProfileWith } from "../../lib/profile";
+import { hasCadastroE2, saveProfileWith } from "../../lib/profile";
 import {
   OFFLINE_SAVE,
-  reloadSkillSuggestions,
+  reloadSkillCatalog,
   trackListWrite,
   UNAVAILABLE,
   useListWrite,
-  useSkillSuggestions,
+  useSkillCatalog,
   useTechProfileScreen,
 } from "../../lib/technicalProfile";
-import { foldName, SKILL_MSG, skillLine, skillSpoken, skillsWith, skillsWithout } from "../../lib/techProfileForm";
+import {
+  availableSkills,
+  SKILL_MSG,
+  skillKey,
+  skillLine,
+  skillsAdd,
+  skillSpoken,
+  skillsWith,
+  skillsWithout,
+} from "../../lib/techProfileForm";
 import { showToast } from "../../lib/toast";
-import type { TechnicianSkill, TechnicianSkillIn } from "../../lib/types";
+import type { SkillLevel, TechCatalogItem, TechnicianSkill } from "../../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
+
+/** Incluir (a lista da central) ou mudar o nível de uma aptidão. */
+type SheetTarget = { kind: "add" } | { kind: "edit"; skill: TechnicianSkill };
 
 interface SheetState {
   /** Uma folha nova a cada abertura (o formulário começa do zero). */
   key: number;
   open: boolean;
-  target: SkillSheetTarget;
+  target: SheetTarget;
 }
 
 const NO_INTERNET = "Sem internet";
 const OFFLINE_DELETE = "Conecte o aparelho para excluir.";
+
+/** A recusa que pede a lista de novo: aptidão que a central excluiu ou desativou ("Atualize a lista"), nome fora dela. */
+const catalogRefused = (error: unknown) => error instanceof ApiError && error.status === 422;
 
 export default function SkillsScreen() {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const motion = useListMotion();
   const { gate, stale, retry, refresh, refreshing } = useTechProfileScreen();
-  const suggestions = useSkillSuggestions();
+  const catalog = useSkillCatalog();
   const [sheet, setSheet] = useState<SheetState | null>(null);
   // Uma gravação da lista no ar (`writing`): incluir, editar e excluir ficam desligados. `removing`: as aptidões que
-  // estão saindo, pelo nome sem acento e maiúsculas.
+  // estão saindo, pela chave (skillKey).
   const { busy: writing, removing } = useListWrite("skills");
 
   if (gate.status === "unavailable") {
@@ -66,17 +87,16 @@ export default function SkillsScreen() {
   }
   if (gate.status !== "ready") return <ProfileGate load={gate} onRetry={retry} />;
 
-  const skills = gate.profile.skills;
+  const profile = gate.profile;
+  const skills = profile.skills;
   const full = skills.length >= TECH_PROFILE_LIMITS.skills;
-  const editing = sheet?.target.kind === "edit" ? sheet.target.skill : null;
-  const others = editing ? skills.filter((skill) => foldName(skill.name) !== foldName(editing.name)) : skills;
 
   function pull() {
     refresh();
-    void reloadSkillSuggestions();
+    void reloadSkillCatalog();
   }
 
-  function openSheet(target: SkillSheetTarget) {
+  function openSheet(target: SheetTarget) {
     if (writing) return;
     setSheet((current) => ({ key: (current?.key ?? 0) + 1, open: true, target }));
   }
@@ -89,14 +109,35 @@ export default function SkillsScreen() {
     setSheet((current) => (current && !current.open ? null : current));
   }
 
-  async function submit(target: SkillSheetTarget, skill: TechnicianSkillIn): Promise<string | null> {
+  /** Inclui as escolhidas na folha, com o nível. Devolve o erro para a folha (null: gravou e a folha fecha). */
+  async function add(picked: TechCatalogItem[], level: SkillLevel): Promise<string | null> {
     if (await noNetwork()) return OFFLINE_SAVE;
-    // Na edição, o nome da aptidão (a lista gravada na hora do envio pode não ter mais ela).
-    const edited = target.kind === "edit" ? target.skill.name : null;
+    try {
+      const saved = await trackListWrite("skills", null, () =>
+        saveProfileWith((current) => ({ skills: skillsAdd(current.skills, picked, level, hasCadastroE2(current)) })),
+      );
+      haptic.success();
+      closeSheet();
+      // A central desativou alguma enquanto a folha estava aberta: o servidor a ignorou.
+      if (availableSkills(picked, saved.skills).length) {
+        showToast("Nem todas foram incluídas", { description: "A lista da central mudou. Confira as aptidões." });
+        void reloadSkillCatalog();
+      }
+      return null;
+    } catch (error) {
+      if (catalogRefused(error)) void reloadSkillCatalog();
+      return (await offlineFailure(error)) ? OFFLINE_SAVE : errorMessage(error);
+    }
+  }
+
+  /** Muda o nível. A chave vale para a lista gravada na hora do envio, que pode não ter mais a aptidão. */
+  async function changeLevel(skill: TechnicianSkill, level: SkillLevel): Promise<string | null> {
+    if (await noNetwork()) return OFFLINE_SAVE;
+    const key = skillKey(skill);
     try {
       await trackListWrite("skills", null, () =>
-        saveProfileWith((profile) => {
-          const next = skillsWith(profile.skills, skill, edited);
+        saveProfileWith((current) => {
+          const next = skillsWith(current.skills, key, level, hasCadastroE2(current));
           if (!next) throw new Error(SKILL_MSG.gone);
           return { skills: next };
         }),
@@ -105,6 +146,7 @@ export default function SkillsScreen() {
       closeSheet();
       return null;
     } catch (error) {
+      if (catalogRefused(error)) void reloadSkillCatalog();
       return (await offlineFailure(error)) ? OFFLINE_SAVE : errorMessage(error);
     }
   }
@@ -117,9 +159,10 @@ export default function SkillsScreen() {
       showToast(NO_INTERNET, { description: OFFLINE_DELETE });
       return;
     }
+    const key = skillKey(skill);
     try {
-      await trackListWrite("skills", foldName(skill.name), () =>
-        saveProfileWith((profile) => ({ skills: skillsWithout(profile.skills, skill.name) })),
+      await trackListWrite("skills", key, () =>
+        saveProfileWith((current) => ({ skills: skillsWithout(current.skills, key, hasCadastroE2(current)) })),
       );
       haptic.success();
     } catch (error) {
@@ -127,6 +170,8 @@ export default function SkillsScreen() {
       else showToast("Não foi possível excluir", { tone: "error", description: errorMessage(error) });
     }
   }
+
+  const target = sheet?.target ?? null;
 
   return (
     <View style={styles.screen}>
@@ -137,9 +182,10 @@ export default function SkillsScreen() {
       >
         <OfflineNotice />
         {stale ? <InfoBox message="Não foi possível atualizar agora. Os dados podem estar desatualizados." /> : null}
+        <CentralStamp stamp={profile.tech_profile_updated.skills} />
         {skills.length ? (
           skills.map((skill, index) => {
-            const key = foldName(skill.name);
+            const key = skillKey(skill);
             const leaving = removing.includes(key);
             return (
               <Animated.View
@@ -192,14 +238,24 @@ export default function SkillsScreen() {
         <Button title="Adicionar aptidão" icon="plus" variant="primary" onPress={() => openSheet({ kind: "add" })} disabled={full || writing} />
       </FixedFooter>
 
-      {sheet ? (
+      {sheet && target?.kind === "add" ? (
+        <SkillCatalogSheet
+          key={sheet.key}
+          visible={sheet.open}
+          catalog={catalog}
+          mine={skills}
+          onRetry={() => void reloadSkillCatalog()}
+          onSubmit={add}
+          onClose={closeSheet}
+          onClosed={sheetClosed}
+        />
+      ) : null}
+      {sheet && target?.kind === "edit" ? (
         <SkillSheet
           key={sheet.key}
           visible={sheet.open}
-          target={sheet.target}
-          others={others}
-          suggestions={suggestions}
-          onSubmit={(skill) => submit(sheet.target, skill)}
+          skill={target.skill}
+          onSubmit={(level) => changeLevel(target.skill, level)}
           onClose={closeSheet}
           onClosed={sheetClosed}
         />

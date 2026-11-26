@@ -1,15 +1,16 @@
-// Formação (Configurações › Atendimento): cursos, certificações e escolaridade, com o nível, a instituição e o período
-// (o fim vazio é "em andamento"). Incluir e editar numa folha; excluir com confirmação. A lista vem na ordem do servidor
-// (em andamento primeiro, depois as mais recentes). Uma gravação por vez, como em Aptidões: a trava vale também depois
-// de sair e voltar à tela (lib/technicalProfile.ts), e o corpo é montado quando a gravação sai da fila
+// Formação (Configurações › Perfil profissional): cursos, certificações e escolaridade, com o nível, a instituição e o
+// período (o fim vazio é "em andamento"). Incluir e editar numa folha; excluir com confirmação. A lista vem na ordem do
+// servidor (em andamento primeiro, depois as mais recentes). Uma gravação por vez, como em Aptidões: a trava vale também
+// depois de sair e voltar à tela (lib/technicalProfile.ts), e o corpo é montado quando a gravação sai da fila
 // (saveProfileWith), com a lista que a anterior devolveu; salvar a edição de uma formação que já saiu mostra o erro na
-// folha.
+// folha. Lista mudada por último pela central: o carimbo "Atualizado pela central em …" no topo.
 
 import { useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import Animated, { FadeOut } from "react-native-reanimated";
 import { Icon } from "../../components/Icon";
 import { useListMotion } from "../../components/motion";
+import { CentralStamp } from "../../components/settings/CentralStamp";
 import { EducationSheet, type EducationSheetTarget } from "../../components/settings/EducationSheet";
 import { FixedFooter } from "../../components/settings/FixedFooter";
 import { OfflineNotice } from "../../components/settings/OfflineNotice";
@@ -120,6 +121,7 @@ export default function EducationScreen() {
       >
         <OfflineNotice />
         {stale ? <InfoBox message="Não foi possível atualizar agora. Os dados podem estar desatualizados." /> : null}
+        <CentralStamp stamp={gate.profile.tech_profile_updated.education} />
         {items.length ? (
           items.map((item, index) => {
             const leaving = removing.includes(item.id);

@@ -3,12 +3,16 @@
 // validação do e-mail (POST /me/profile/email/verification e DELETE /me/profile/email/pending). Toda rota do cadastro
 // devolve o MyProfile inteiro: writeProfile põe o pedido na fila e guarda o que voltar.
 //
-// Fica só na memória: endereço, documentos, chaves e contas nunca vão para o SQLite nem para o SecureStore, e somem ao
-// sair da conta. Nada entra na fila offline (a senha pedida para o e-mail, os dados da empresa e as formas de
-// recebimento não fica guardada, e o aviso à central sai na hora): abrir, salvar e trocar a foto pedem internet. Nome,
-// e-mail e celular atualizam também o usuário da sessão, e o e-mail de login vira o último login (session.updateUser,
-// para preencher o login). O e-mail novo só vira login depois do link, aberto fora do app: a leitura do cadastro (ou a
-// renovação do token, session.setTokens) traz o novo.
+// Fica só na memória: endereço, CPF e RG, a lista de documentos (pessoais, certificações e currículo, sem link: o link
+// de cada arquivo é pedido na hora), chaves e contas nunca vão para o SQLite nem para o SecureStore, e somem ao sair da
+// conta. Nada entra na fila offline (a senha pedida para o e-mail, os dados da empresa e as formas de recebimento não
+// fica guardada, e o aviso à central sai na hora): abrir, salvar e trocar a foto pedem internet. Nome, e-mail e celular
+// atualizam também o usuário da sessão, e o e-mail de login vira o último login (session.updateUser, para preencher o
+// login). O e-mail novo só vira login depois do link, aberto fora do app: a leitura do cadastro (ou a renovação do token,
+// session.setTokens) traz o novo.
+//
+// A central também muda o cadastro (o perfil profissional e os documentos, na ficha do técnico): o tempo real avisa só a
+// ele (me.profile_changed, lib/sync.ts) e, com o cadastro na memória, ele é relido (profileChangedElsewhere).
 //
 // Gravações em fila (salvar, foto, formas de recebimento e e-mail): uma só sai depois de a anterior responder. O
 // "salvar ao tocar" do perfil técnico nunca corre junto de outra gravação, e cada resposta já inclui a anterior. As
@@ -42,6 +46,10 @@ const EMPTY: Snapshot = { profile: null, loadedAt: 0 };
 let current: Snapshot = EMPTY;
 const listeners = new Set<() => void>();
 
+/** A central mudou o cadastro: a releitura sai este tempo depois do último aviso (avisos seguidos viram uma leitura). */
+const ELSEWHERE_MS = 400;
+let elsewhereTimer: ReturnType<typeof setTimeout> | undefined;
+
 function publish(next: Snapshot) {
   current = next;
   listeners.forEach((listener) => listener());
@@ -61,12 +69,15 @@ export function useProfile(): MyProfile | null {
   return useSyncExternalStore(subscribe, getProfile, getProfile);
 }
 
-// Saiu da conta (ou entrou outro técnico): o cadastro do anterior sai da memória.
+// Saiu da conta (ou entrou outro técnico): o cadastro do anterior sai da memória, com a releitura que esperava a vez.
 session.subscribe(() => {
   const owner = current.profile?.id;
   if (!owner) return;
   const { status, user } = session.get();
-  if (status !== "signedIn" || user?.id !== owner) publish(EMPTY);
+  if (status === "signedIn" && user?.id === owner) return;
+  clearTimeout(elsewhereTimer);
+  elsewhereTimer = undefined;
+  publish(EMPTY);
 });
 
 /**
@@ -147,7 +158,10 @@ function queueWrite<T>(askedBy: string | null, task: () => Promise<T>): Promise<
   return run;
 }
 
-let inflight: { userId: string | null; promise: Promise<MyProfile> } | null = null;
+/** `round`: a ordem da leitura (reads), para saber se ela saiu antes de um aviso da central. */
+let inflight: { userId: string | null; promise: Promise<MyProfile>; round: number } | null = null;
+/** Leituras que já saíram (sobe a cada GET /me/profile novo). */
+let reads = 0;
 
 /**
  * Lê o cadastro no servidor. Pedidos ao mesmo tempo dividem a mesma leitura. Se uma gravação saiu, voltou ou ainda está
@@ -157,13 +171,15 @@ export function loadProfile(): Promise<MyProfile> {
   const userId = session.get().user?.id ?? null;
   if (inflight?.userId === userId) return inflight.promise;
   const startedAt = writes;
+  reads += 1;
+  const round = reads;
   const promise = api.get<MyProfile>("/me/profile").then((profile) => {
     const shown = current.profile;
     const raced = writes !== startedAt || writes % 2 === 1;
     if (raced && shown && shown.id === profile.id) return shown;
     return keep(profile, userId);
   });
-  inflight = { userId, promise };
+  inflight = { userId, promise, round };
   const settle = () => {
     if (inflight?.promise === promise) inflight = null;
   };
@@ -176,6 +192,33 @@ export function ensureProfile(): void {
   if (session.get().status !== "signedIn") return;
   if (current.profile && Date.now() - current.loadedAt < STALE_MS) return;
   void loadProfile().catch(() => undefined);
+}
+
+/**
+ * A central mudou algo que o app mostra (tempo real me.profile_changed, lib/sync.ts): o perfil profissional, os
+ * documentos. Com o cadastro na memória, relê 0,4 s depois do último aviso, sem aviso de erro (a tela segue com o da
+ * memória); sem ele, nada (é lido ao abrir Configurações). Uma leitura que já estava no ar quando o aviso chegou pode
+ * ser de antes da mudança: a releitura espera ela e lê de novo. Vale a regra de loadProfile: a leitura durante uma
+ * gravação não é publicada (fica o que a gravação devolveu), e os formulários abertos seguem o cadastro novo sem perder
+ * o que foi digitado (rebase).
+ */
+export function profileChangedElsewhere(): void {
+  const owner = current.profile?.id;
+  if (!owner) return;
+  const readsAtNotice = reads;
+  clearTimeout(elsewhereTimer);
+  elsewhereTimer = setTimeout(() => {
+    elsewhereTimer = undefined;
+    // Saiu da conta (ou entrou outro técnico) enquanto esperava: nada sai.
+    const mine = () => {
+      const { status, user } = session.get();
+      return status === "signedIn" && user?.id === owner && current.profile?.id === owner;
+    };
+    if (!mine()) return;
+    const reread = () => (mine() ? loadProfile().then(() => undefined, () => undefined) : undefined);
+    const before = inflight && inflight.round <= readsAtNotice ? inflight.promise : null;
+    void (before ? before.then(reread, reread) : reread());
+  }, ELSEWHERE_MS);
 }
 
 /**

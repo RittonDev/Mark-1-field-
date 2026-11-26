@@ -4,12 +4,14 @@
 // a CNH, e tocar num meio o desmarca. Nunca informado (TRANSPORT_UNSET), a tela começa sem nada marcado e qualquer toque
 // grava, mesmo voltando a tudo desmarcado antes do envio ("Nenhum · sem CNH"). O veículo (modelo e placa, campos
 // próprios: gravar os meios não mexe nele) aparece com carro ou moto marcados, ou já informado, e grava pela folha.
+// Transporte mudado por último pela central: o carimbo "Atualizado pela central em …" no topo.
 
 import { Stack } from "expo-router";
 import { useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../../components/Icon";
+import { CentralStamp } from "../../components/settings/CentralStamp";
 import { CheckCard } from "../../components/settings/CheckCard";
 import { OfflineNotice } from "../../components/settings/OfflineNotice";
 import { ProfileGate } from "../../components/settings/ProfileGate";
@@ -117,6 +119,7 @@ export default function TransportScreen() {
       >
         <OfflineNotice />
         {stale ? <InfoBox message="Não foi possível atualizar agora. Os dados podem estar desatualizados." /> : null}
+        <CentralStamp stamp={profile.tech_profile_updated.transport} />
         <View style={styles.section}>
           <Text style={styles.title} accessibilityRole="header">
             Meios de transporte

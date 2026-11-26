@@ -88,14 +88,14 @@ def test_copies_match_the_app() -> None:
     samples = [
         " Multímetro ",
         "multimetro",
-        "ﬁbra óptica",
-        "Lin​ux",
-        "﻿‮Redes‬ ",
+        "\ufb01bra óptica",
+        "Lin\u200bux",
+        "\ufeff\u202eRedes\u202c ",
         "Curso\u0000 Exemplo\u0007",
         "Fibra\tóptica\r\n(fusão)\v\f",
         "Re\x1cdes\x85",
-        "Cafe‍́",
-        "Windows 10/11",
+        "Cafe\u200d\u0301",
+        "Windows\xa010/11",
         "ÁÉÍÓÚ ç Ñ straße",
         "",
         None,
@@ -104,8 +104,8 @@ def test_copies_match_the_app() -> None:
         assert M.fold(sample) == core_text.fold(sample), sample
         assert M.clean(sample) == core_text.clean(sample), sample
     assert M.fold(" Multímetro ") == "multimetro"
-    assert M.fold("ﬁbra") == M.fold("FIBRA") == "fibra"
-    assert M.clean("Cafe‍́") == "Café"
+    assert M.fold("\ufb01bra") == M.fold("FIBRA") == "fibra"
+    assert M.clean("Cafe\u200d\u0301") == "Café"
     # O texto das listas do histórico de hoje (" e mais N" e o " (Nível)").
     from app.services.tech_profile import items_text
 
@@ -131,7 +131,7 @@ def test_skill_names_seed_defaults_first() -> None:
         "LÍNUX",
         "Pýthon exemplo",
         "x" * 100,
-        "Lin​ux",
+        "Lin\u200bux",
     ]
     assert M.seed_skill_names(("Linux", "Windows 10/11"), recorded) == [
         "Linux",
@@ -249,7 +249,7 @@ def test_area_stamp_and_names() -> None:
     assert M.stamp_areas({"areas": skills}, at) is None
     assert M.stamp_areas(None, at) is None
     assert M.catalog_name("  Área   Exemplo ") == "Área Exemplo"
-    assert M.catalog_name("​") is None and M.catalog_name(3) is None
+    assert M.catalog_name("\u200b") is None and M.catalog_name(3) is None
     assert M.key_of("Ação") == "acao"
 
 
@@ -655,7 +655,7 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
             await transaction.rollback()
 
 
-@pytest.mark.parametrize("name", ["Multímetro", "  Trena   laser ", "ﬁbra"])
+@pytest.mark.parametrize("name", ["Multímetro", "  Trena   laser ", "\ufb01bra"])
 def test_tool_name_key_is_the_fold(name: str) -> None:
     """O modelo grava o name_key sozinho (o mesmo fold da migração)."""
     from app.models import ServiceArea, Skill, TechnicianTool

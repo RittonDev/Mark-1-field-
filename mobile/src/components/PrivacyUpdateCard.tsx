@@ -47,7 +47,7 @@ export function PrivacyUpdateCard({ userId }: { userId: string }) {
         <Text style={styles.title} accessibilityRole="header">
           Aviso de privacidade atualizado
         </Text>
-        <Text style={styles.text}>Agora ele inclui RG, veículo, empresa e formas de recebimento.</Text>
+        <Text style={styles.text}>Agora ele inclui documentos, currículo e avaliações.</Text>
         <Button compact title="Ler aviso" onPress={() => router.push("/privacidade")} style={styles.action} />
       </View>
     </Animated.View>

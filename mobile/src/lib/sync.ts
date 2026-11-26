@@ -22,6 +22,9 @@
 // A rodada também confere as ofertas de OS com preço (GET /me/offers, lib/offers.ts): antes do upload das fotos,
 // entre uma foto e outra, depois do download e quando o download falha por erro do servidor. E, com o app na tela,
 // busca o elo do técnico (GET /me/level, lib/level.ts) a cada 30 min e no "puxar para atualizar".
+//
+// O aviso de que a central mudou o cadastro do técnico (me.profile_changed) não é de OS e não dispara rodada: só relê o
+// cadastro da memória (profileChangedElsewhere, lib/profile.ts).
 
 import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
@@ -29,7 +32,7 @@ import { useSyncExternalStore } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { api, ApiError, errorMessage, serverNow, uploadFile } from "./api";
 import { notifyDataChanged } from "./changes";
-import { STATUS } from "./constants";
+import { ME_PROFILE_EVENT, STATUS } from "./constants";
 import {
   addNotice,
   addPartAttachment,
@@ -124,6 +127,7 @@ import {
 import { userRef } from "./ops";
 import { deleteAllPhotoFiles, deletePhotoFile, persistPhoto, photoExists } from "./photoFiles";
 import { photoFileType } from "./photoFormat";
+import { profileChangedElsewhere } from "./profile";
 import { RealtimeClient, type RealtimeState } from "./realtime";
 import { session } from "./session";
 import { showSuccess } from "./success";
@@ -1898,10 +1902,16 @@ let wsDebounce: ReturnType<typeof setTimeout> | undefined;
  * Evento do tempo real: só dispara o sync, e o pull compara a OS e avisa o que importa (OS nova,
  * reagendada, cancelada, peça decidida), também quando o app estava fechado. O eco do que o
  * aparelho já tem (a própria ação do técnico, gravada com a resposta do envio) não dispara nada.
+ * O aviso de cadastro mudado pela central só relê o cadastro (sem rodada e sem toast: o técnico
+ * pode estar numa OS).
  */
 async function handleRealtimeEvent(event: RealtimeEvent) {
   const user = session.get().user;
   if (!user) return;
+  if (event.type === ME_PROFILE_EVENT) {
+    profileChangedElsewhere();
+    return;
+  }
   // Oferta de OS nova, aceita por outro técnico ou cancelada (o evento vem sem versão): a rodada busca a lista.
   if (event.type === "ticket.offer") offersChanged();
   const ticketId = event.ticket_id;

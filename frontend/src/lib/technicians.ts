@@ -178,26 +178,74 @@ export const REVIEW_ACTION_LABEL: Record<ApplicationReview["action"], string> = 
 /** Cadastro incompleto (filtro rápido da lista). */
 export type GapKey = "phone" | "region" | "services" | "gps" | "payout";
 
-/** Os filtros da lista de Técnicos como a tela guarda; na URL, as grafias em português (listQueryFrom/listQueryPatch). */
+/** A cidade escolhida na lista: o nome como veio e a UF (null: a cidade em qualquer UF). */
+export interface CityChoice {
+  city: string;
+  /** "SP". */
+  state: string | null;
+}
+
+/**
+ * Os filtros da lista de Técnicos como a tela guarda; na URL, as grafias em português (listQueryFrom/listQueryPatch).
+ * Só a busca vai ao servidor: o resto filtra a base carregada (lib/techListFilter.ts), combinado com E.
+ */
 export interface TechListQuery {
   q: string;
-  /** "SP". */
+  /** "SP": a UF da região de atuação. */
   uf: string;
-  cidade: string;
-  /** Id do grupo técnico. */
-  grupo: string;
+  /** A região de atuação ("Cidade-UF" na URL); sem UF, a cidade em qualquer UF. */
+  cidade: CityChoice | null;
+  situacao: OperationalStatus | "";
   /** Acesso ao app, como a API (`active`): "true" liberado, "false" sem acesso. */
   acesso: "" | "true" | "false";
-  /** Id da ferramenta. */
+  /** Ids dos catálogos de Configurações › Técnicos. */
+  area: string;
+  aptidao: string;
   ferramenta: string;
+  /** Id do grupo técnico. */
+  grupo: string;
   dia: Weekday | "";
   turno: DayPeriod | "";
+  /** Favorito em alguma cidade. */
+  favorito: boolean;
+  /** Com certificação vencida ou vencendo em até 30 dias. */
+  certificacao: "" | "vencendo";
   incompleto: GapKey | "";
   elo: LevelTier | "at_risk" | "";
   /** "name": a padrão (pela situação e pelo nome); "visit": última OS; "level": elo. */
   ordem: "name" | "visit" | "level";
 }
 
+/** As 27 UFs: "-SP" no fim do `cidade` é a UF; "-XX" que não é UF fica no nome. */
+const STATES: ReadonlySet<string> = new Set([
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA",
+  "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+]);
+
+/**
+ * O `cidade` da URL ("Cidade Exemplo-SP"; o "-sp" vale): a cidade e a UF do fim. Sem "-UF" (o link antigo mandava
+ * `cidade` e `uf` separados), vale a `uf`; sem nenhuma, `state` null (a cidade em qualquer UF). Vazio: null.
+ */
+export function parseCityParam(cidade: string | null | undefined, uf?: string | null): CityChoice | null {
+  const text = (cidade ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  const end = /^(.*\S)\s*-\s*([A-Za-z]{2})$/.exec(text);
+  if (end && STATES.has(end[2].toUpperCase())) return { city: end[1], state: end[2].toUpperCase() };
+  const state = (uf ?? "").trim().toUpperCase();
+  return { city: text, state: STATES.has(state) ? state : null };
+}
+
+/** A cidade para a URL e a tela: "Cidade Exemplo-SP"; sem UF, só a cidade. */
+export function cityParam(city: string, state: string | null | undefined): string {
+  return state ? `${city}-${state}` : city;
+}
+
+/** O texto termina numa UF ("Santos-SP"): a busca da aba Favoritos que vale como cidade na lista. */
+export function hasStateSuffix(text: string | null | undefined): boolean {
+  return parseCityParam(text, null)?.state != null;
+}
+
+const SITUACAO_PARAM: Record<OperationalStatus, string> = { active: "ativo", inactive: "inativo", blocked: "bloqueado" };
 const ACESSO_PARAM: Record<"true" | "false", string> = { true: "liberado", false: "sem-acesso" };
 const DIA_PARAM: Record<Weekday, string> = { mon: "seg", tue: "ter", wed: "qua", thu: "qui", fri: "sex", sat: "sab", sun: "dom" };
 const TURNO_PARAM: Record<DayPeriod, string> = { morning: "manha", afternoon: "tarde", evening: "noite", night: "madrugada" };
@@ -226,51 +274,70 @@ function keyOf<K extends string>(params: Record<K, string>, value: string | null
   return (Object.keys(params) as K[]).find((key) => params[key] === text) ?? "";
 }
 
-/** Os filtros da URL da lista (grafias em português) para o estado da tela; valor desconhecido vira "". */
+/**
+ * Os filtros da URL da lista (grafias em português) para o estado da tela; valor desconhecido e id que não é UUID viram
+ * vazio. A cidade aceita "Cidade-UF" e o `cidade` + `uf` dos links antigos; a de outra UF que a `uf` escolhida sai (como
+ * ao trocar a UF na tela).
+ */
 export function listQueryFrom(params: Pick<URLSearchParams, "get">): TechListQuery {
   const id = (name: string) => {
     const value = (params.get(name) ?? "").trim();
     return UUID_TEXT.test(value) ? value : "";
   };
-  const uf = (params.get("uf") ?? "").trim().toUpperCase();
+  const state = (params.get("uf") ?? "").trim().toUpperCase();
+  const uf = STATES.has(state) ? state : "";
+  const city = parseCityParam(params.get("cidade"), uf);
   return {
     q: params.get("q") ?? "",
-    uf: /^[A-Z]{2}$/.test(uf) ? uf : "",
-    cidade: (params.get("cidade") ?? "").trim(),
-    grupo: id("grupo"),
+    uf,
+    cidade: city && uf && city.state && city.state !== uf ? null : city,
+    situacao: keyOf(SITUACAO_PARAM, params.get("situacao")),
     acesso: keyOf(ACESSO_PARAM, params.get("acesso")),
+    area: id("area"),
+    aptidao: id("aptidao"),
     ferramenta: id("ferramenta"),
+    grupo: id("grupo"),
     dia: keyOf(DIA_PARAM, params.get("dia")),
     turno: keyOf(TURNO_PARAM, params.get("turno")),
+    favorito: (params.get("favorito") ?? "").trim().toLowerCase() === "sim",
+    certificacao: (params.get("certificacao") ?? "").trim().toLowerCase() === "vencendo" ? "vencendo" : "",
     incompleto: keyOf(INCOMPLETO_PARAM, params.get("incompleto")),
     elo: keyOf(ELO_PARAM, params.get("elo")),
     ordem: keyOf(ORDEM_PARAM, params.get("ordem")) || "name",
   };
 }
 
-/** O estado da tela para a URL (replaceSearch): cada filtro na grafia em português; vazio ou padrão: null (sai da URL). */
+/**
+ * O estado da tela para a URL (replaceSearch): todos os parâmetros da lista, cada filtro na grafia em português; vazio
+ * ou padrão: null (sai da URL). A cidade vai como "Cidade-UF".
+ */
 export function listQueryPatch(q: TechListQuery): Record<string, string | null> {
   return {
     q: q.q.trim() || null,
     uf: q.uf || null,
-    cidade: q.cidade || null,
-    grupo: q.grupo || null,
+    cidade: q.cidade ? cityParam(q.cidade.city, q.cidade.state) : null,
+    situacao: q.situacao ? SITUACAO_PARAM[q.situacao] : null,
     acesso: q.acesso ? ACESSO_PARAM[q.acesso] : null,
+    area: q.area || null,
+    aptidao: q.aptidao || null,
     ferramenta: q.ferramenta || null,
+    grupo: q.grupo || null,
     dia: q.dia ? DIA_PARAM[q.dia] : null,
     turno: q.turno ? TURNO_PARAM[q.turno] : null,
+    favorito: q.favorito ? "sim" : null,
+    certificacao: q.certificacao || null,
     incompleto: q.incompleto ? INCOMPLETO_PARAM[q.incompleto] : null,
     elo: q.elo ? ELO_PARAM[q.elo] : null,
     ordem: q.ordem === "name" ? null : ORDEM_PARAM[q.ordem],
   };
 }
 
-/**
- * A cidade que a lista filtra, a partir do `cidade` da URL (o mesmo parâmetro da aba Favoritos): só vale com a UF, e a
- * busca dos Favoritos chega como "Santos-SP" (o link "Favorito em"), que sem o "-UF" do fim é a cidade.
- */
-export function listCityOf(cidade: string, uf: string): string {
-  if (!uf) return "";
-  const suffix = `-${uf}`;
-  return cidade.toUpperCase().endsWith(suffix.toUpperCase()) ? cidade.slice(0, -suffix.length).trim() : cidade;
+/** Algum filtro ligado (a ordem não conta): "Limpar filtros" aparece. */
+export function hasListFilter(q: TechListQuery): boolean {
+  return Object.entries(listQueryPatch(q)).some(([key, value]) => key !== "ordem" && value !== null);
+}
+
+/** Os filtros vazios, com a ordem de agora ("Limpar filtros" apaga todos; a aba e a ordem ficam). */
+export function clearedListQuery(ordem: TechListQuery["ordem"]): TechListQuery {
+  return { ...listQueryFrom(new URLSearchParams()), ordem };
 }

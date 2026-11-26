@@ -205,6 +205,39 @@ export function thisMonth(today: string): string {
   return today.slice(0, 7);
 }
 
+/**
+ * Os erros do mês digitado à mão (o campo de mês vira texto nos navegadores sem o seletor), os do servidor
+ * (schemas/tech_profile._month) com ponto. O app escolhe num seletor e não precisa deles.
+ */
+export const MONTH_MSG = {
+  invalid: "Mês inválido: use AAAA-MM.",
+  tooOld: "Confira o ano.",
+  tooNew: "Use um mês até o atual.",
+} as const;
+
+/** O mês da formação: "AAAA-MM" de 1950-01 até o mês de hoje; vazio não é erro daqui (é o "Informe …"). */
+export function monthProblem(value: string | null | undefined, today: string): string | null {
+  const month = (value ?? "").trim();
+  if (!month) return null;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return MONTH_MSG.invalid;
+  if (month < PROFILE_EDIT_LIMITS.firstMonth) return MONTH_MSG.tooOld;
+  if (month > thisMonth(today)) return MONTH_MSG.tooNew;
+  return null;
+}
+
+/**
+ * Os erros de um curso na tela da central: os do app (educationProblem) e, sem eles, o mês fora do formato ou do
+ * intervalo (no início e no fim).
+ */
+export function educationEditProblem(draft: EducationDraft, today: string): Partial<Record<EducationField, string>> {
+  const errors = educationProblem(draft);
+  const start = errors.start ? null : monthProblem(draft.start, today);
+  if (start) errors.start = start;
+  const end = errors.end || draft.ongoing ? null : monthProblem(draft.end, today);
+  if (end) errors.end = end;
+  return errors;
+}
+
 // --------------------------------------------------------------------------- áreas, aptidões e ferramental
 
 /** Ids sem repetir e em ordem (o corpo de `area_ids` e `tool_ids`: a mesma lista em outra ordem não é mudança). */

@@ -774,6 +774,16 @@ describe("resumos das linhas de Configurações", () => {
     assert.equal(countLabel(2, "formação", "formações"), "2 formações");
   });
 
+  it("countLabel com o zero de cada linha (Áreas de atuação: Nenhuma; documento: Nenhum)", () => {
+    assert.equal(countLabel(0, "área", "áreas"), "Nenhuma");
+    assert.equal(countLabel(1, "área", "áreas"), "1 área");
+    assert.equal(countLabel(20, "área", "áreas"), "20 áreas");
+    assert.equal(countLabel(0, "documento", "documentos", "Nenhum"), "Nenhum");
+    assert.equal(countLabel(-1, "documento", "documentos", "Nenhum"), "Nenhum");
+    assert.equal(countLabel(1, "documento", "documentos", "Nenhum"), "1 documento");
+    assert.equal(countLabel(3, "documento", "documentos", "Nenhum"), "3 documentos");
+  });
+
   it("Contato: o celular; sem celular ou com a troca de e-mail pendente, em âmbar", () => {
     assert.equal(contactSummary("(11) 98888-7777"), "(11) 98888-7777");
     assert.equal(contactSummary("+55 11 98888-7777"), "(11) 98888-7777");
