@@ -94,8 +94,8 @@ def test_personal_validators() -> None:
             personal.rg_number(bad)
     assert personal.rg_issuer(" ssp ") == "SSP"
     assert personal.rg_issuer("Polícia  Civil") == "POLICIA CIVIL"
-    for bad in ("S", "Secretaria de Segurança"):  # 2 a 20 letras
-        with pytest.raises(ValueError, match=personal.ISSUER_INVALID):
+    for bad in ("S", "Secretaria de Segurança", "S/SP", "/", "ABCDEFGHIJKLMNOPQRSTU/SP"):
+        with pytest.raises(ValueError, match=personal.ISSUER_INVALID):  # 2 a 20 letras
             personal.rg_issuer(bad)
     assert personal.uf("sp") == "SP"
     with pytest.raises(ValueError, match=personal.UF_INVALID):
@@ -124,7 +124,6 @@ def test_personal_validators() -> None:
         personal.phone("98888-777")
     with pytest.raises(ValueError, match="No máximo 500 caracteres"):
         personal.bio("a" * 501)
-    assert personal.bio("  Técnico \n de  redes ") == "Técnico de redes"
     # Exibição (histórico).
     assert personal.format_cpf(CPF) == "123.456.789-09"
     assert personal.format_cnpj(CNPJ) == "12.345.678/0001-95"
@@ -132,6 +131,60 @@ def test_personal_validators() -> None:
     assert personal.format_rg("12.345.678-9", None, None) == "12.345.678-9"
     assert personal.format_date(date(1990, 11, 25)) == "25/11/1990"
     assert personal.format_date("1990-11-25") == "25/11/1990"
+
+
+def test_issuer_with_the_state_at_the_end() -> None:
+    """"SSP/SP" ou "SSP-SP" no órgão emissor (= splitIssuer): órgão e UF separados; a UF do fim
+    vale quando a do RG está vazia (com outra, fica a do campo); o fim que não é UF fica no órgão,
+    com espaço no lugar da barra."""
+    assert personal.split_issuer("SSP/SP") == ("SSP", "SP")
+    assert personal.split_issuer(" ssp-sp ") == ("SSP", "SP")
+    assert personal.split_issuer("SSP / SP") == ("SSP", "SP")
+    assert personal.split_issuer("Detran-RJ") == ("DETRAN", "RJ")
+    assert personal.split_issuer("SSP/XX") == ("SSP XX", None)
+    assert personal.split_issuer("PC-SSP/MG") == ("PC SSP", "MG")
+    assert personal.split_issuer("/SP") == ("SP", None)  # sem o órgão antes, não separa
+    assert personal.split_issuer("SSP") == ("SSP", None)
+    assert personal.split_issuer(None) == (None, None)
+    assert personal.split_issuer("  ") == (None, None)
+    # O schema confere o órgão e guarda a UF do fim para o grupo separar.
+    assert personal.rg_issuer("ssp-sp") == "SSP/SP"
+    assert personal.rg_issuer("SSP / XX") == "SSP XX"
+    rg = "12.345.678-9"
+    assert personal.rg_group(rg, "SSP/SP", None) == (rg, "SSP", "SP")
+    assert personal.rg_group(rg, "SSP-SP", "") == (rg, "SSP", "SP")
+    assert personal.rg_group(rg, "SSP/SP", "rj") == (rg, "SSP", "RJ")
+    assert personal.rg_group(rg, "SSP/XX", "SP") == (rg, "SSP XX", "SP")
+    with pytest.raises(ValueError, match=personal.RG_INCOMPLETE):
+        personal.rg_group(rg, "SSP/XX", None)
+
+
+def test_bio_keeps_the_paragraphs() -> None:
+    """= normalizeBio: "\\r\\n" vira "\\n", sem espaços no fim das linhas, três ou mais quebras viram
+    duas e sem quebras nem espaços nas pontas; os 500 contam depois disso. A ficha, o app e a
+    central usam esta mesma regra (personal.bio)."""
+    assert personal.bio("Técnico de redes.  \r\n\r\n\r\n\r\nAtendo a Cidade Exemplo.  ") == (
+        "Técnico de redes.\n\nAtendo a Cidade Exemplo."
+    )
+    assert personal.bio("\n\n  Linha 1 \n Linha 2\t\n\n") == "Linha 1\n Linha 2"
+    assert personal.bio("Um\rDois") == "Um\nDois"
+    assert personal.bio("Técnico​ de‮ redes") == "Técnico de redes"
+    assert personal.bio(" \r\n \n ") is None and personal.bio(None) is None
+    assert personal.bio("a" * 500 + "\n\n\n\n") == "a" * 500
+    with pytest.raises(ValueError, match="No máximo 500 caracteres"):
+        personal.bio("a" * 499 + "\n\nb")
+
+
+def test_address_number_rule() -> None:
+    """O número em maiúsculas nos três caminhos (ficha, app e central): "SN" e "S / N" viram
+    "S/N"; até 10 caracteres."""
+    for raw in ("s/n", "SN", "sn", " s / n ", "S/N"):
+        assert personal.address_number(raw) == "S/N", raw
+    assert personal.address_number("100a") == "100A"
+    assert personal.address_number("  12   b ") == "12 B"
+    assert personal.address_number("") is None and personal.address_number(None) is None
+    with pytest.raises(ValueError, match="No máximo 10 caracteres"):
+        personal.address_number("12345678901")
 
 
 # ------------------------------------------------------------------ com banco
