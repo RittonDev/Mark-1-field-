@@ -1,47 +1,62 @@
 """Histórico do cadastro do técnico (tabela user_changes) e o aviso em tempo real à central.
 
-Toda mudança no cadastro, pelo app (Meu cadastro) ou pela central (Técnicos, Usuários, Pagamentos),
-vira uma linha com quem fez, por onde e as mudanças [{field, from, to}] já com o texto da tela:
-- name, email, phone, job_title, home_city, home_state, coverage_area, address_line,
-  address_district, address_zip: o valor como está;
-- team: o nome do grupo; is_active: "Liberado" ou "Bloqueado"; role: o rótulo do papel;
+Toda mudança no cadastro, pelo app (Meu cadastro), pela central (Técnicos, Usuários, Pagamentos),
+pela aprovação da ficha (Homologação) ou pelo técnico no link do e-mail vira uma linha com quem
+fez, por onde (`via`: app, central, ficha, link), o motivo quando a tela pede um (`note`: a situação
+na operação) e as mudanças [{field, from, to}] já com o texto da tela:
+- name, email, phone, phone_secondary, job_title, home_city, home_state, coverage_area,
+  address_line (o logradouro), address_number, address_complement, address_district, address_zip,
+  bio, company_name, company_trade_name, email_pending (o e-mail novo pedido no app, à espera do
+  link): o valor como está;
+- cpf "123.456.789-09"; rg "12.345.678-9 · SSP/SP"; birth_date "25/11/1990"; company_document
+  "12.345.678/0001-95"; vehicle "Modelo Exemplo · ABC-1234" (o que houver);
+- team: o nome do grupo; is_active (acesso ao app): "Liberado" ou "Sem acesso"; role: o rótulo do
+  papel; operational_status: "Ativo", "Inativo" ou "Bloqueado" (o motivo vai em `note`);
+  email_verified: "validado" ou "pendente";
 - work_schedule: "08:00–17:00, intervalo 12:00–13:00"; services: "12 serviços";
-- pix: a chave MASCARADA ("CPF ***.456.789-**"), null sem chave; pix_holder: o titular da conta;
+- payout_preferred: a forma de recebimento preferencial MASCARADA ("PIX CPF ***.456.789-**",
+  "Banco Exemplo ****5678-9"; core/payout.describe); muda quando outra forma vira a preferencial;
 - avatar: to "nova" na troca e null na remoção; password: to "provisória" (redefinição em Técnicos),
   "definida pela central" (Usuários), "criada no app" (o técnico trocou a provisória) ou "trocada
-  no app";
-- perfil técnico (o técnico muda no app; services/tech_profile.py): tools, availability, skills e
-  education (DELTA_FIELDS) gravam o que SAIU em "from" e o que ENTROU em "to" (null: nada), e não
-  o de → para: tools com os nomes em ordem alfabética ("Escada, Multímetro"), availability em
-  turnos ("sáb · tarde e noite"), skills "Linux (Básico)" em ordem alfabética, education "Técnico
-  em redes · Escola Exemplo · Técnico · desde 02/2024 (em andamento)" pelo início, separados por
-  "; " (listas com mais de 10 itens: os 10 primeiros e " e mais N"); transport segue de → para,
-  "Carro, Moto · com CNH", null quando não informado.
-E-mail e celular ficam em claro (a central desfaz uma troca indevida); a chave PIX nunca. Quem não
-tem Pagamentos lê o histórico sem o titular e com a chave como "***" (`hide_pix`). As partes do
-perfil técnico comparam como tech_profile.wanted (a rota do app só grava com mudança no histórico).
+  no app"; as linhas especiais de `record` (application, password pelo link, password_link) vêm de
+  quem grava;
+- DELTA_FIELDS gravam o que SAIU em "from" e o que ENTROU em "to" (null: nada), e não o de → para:
+  payout_methods ("PIX CPF ***.456.789-** · Tecnico Alfa"; core/payout.describe_with_holder),
+  unavailability ("20/12/2026 a 05/01/2027"; só os períodos que não acabaram) e o perfil técnico
+  (o técnico muda no app; services/tech_profile.py): tools com os nomes em ordem alfabética
+  ("Escada, Multímetro"), availability em turnos ("sáb · tarde e noite"), skills "Linux (Básico)"
+  em ordem alfabética, education "Técnico em redes · Escola Exemplo · Técnico · desde 02/2024 (em
+  andamento)" pelo início, separados por "; " (listas com mais de 10 itens: os 10 primeiros e " e
+  mais N"); transport segue de → para, "Carro, Moto · com CNH", null quando não informado.
+As linhas antigas de pix/pix_holder (a chave única de antes das formas de recebimento) continuam
+legíveis. E-mail e celular ficam em claro (a central desfaz uma troca indevida); chave PIX e conta
+nunca. Quem não tem Pagamentos lê o histórico com as formas de recebimento como "***" e sem o
+titular (`hide_payout`). As partes do perfil técnico comparam como tech_profile.wanted (a rota do
+app só grava com mudança no histórico).
 
 Uso: `before = await snapshot(db, user)`, aplica, `changes = await track(db, user, before, ...)`
-(ou `record` com as mudanças especiais) e, depois do commit, `publish_changed`.
+(ou `record` com as mudanças especiais) e, depois do commit, `publish_changed`. O `snapshot` faz
+flush antes de ler (a sessão é autoflush=False): as formas de recebimento recém-gravadas contam.
 """
 
 import logging
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import DateTime, Uuid, literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import permissions, pix
+from app.core import payout, permissions, pix
 from app.core.enums import UserRole
 from app.core.labels import ROLE_LABELS
 from app.db.base import utcnow
-from app.models import Team, User, UserChange
+from app.models import Team, TechnicianPayoutMethod, User, UserChange
 from app.models.user_change import VIA_CENTRAL
+from app.schemas import personal
 from app.schemas.my_profile import UserChangeItem, UserChangeOut
-from app.services import tech_profile
+from app.services import tech_profile, unavailability
 from app.services.errors import WorkflowError
 
 log = logging.getLogger(__name__)
@@ -61,22 +76,35 @@ PASSWORD_SET: dict[str, Any] = {"field": "password", "from": None, "to": "defini
 PASSWORD_CREATED: dict[str, Any] = {"field": "password", "from": None, "to": "criada no app"}
 PASSWORD_CHANGED: dict[str, Any] = {"field": "password", "from": None, "to": "trocada no app"}
 
-# Campo do histórico -> campo do aviso (o titular faz parte da chave PIX).
+# Campo do histórico -> campo do aviso: os nomes crus, menos o titular das linhas antigas de PIX
+# (fazia parte da chave).
 _EVENT_FIELD = {"pix_holder": "pix"}
 
-# Troca de e-mail ou de chave PIX pelo app até 72 h depois de a central redefinir a senha: o aviso
-# diz quem redefiniu e quando. Não bloqueia (o técnico novo recebe a senha da central e precisa
-# cadastrar o PIX), só sinaliza: quem redefiniu também conheceu a senha.
+# Troca de e-mail, de forma de recebimento ou do CNPJ pelo app até 72 h depois de a central
+# redefinir a senha: o aviso diz quem redefiniu e quando. Não bloqueia (o técnico novo recebe a
+# senha da central e precisa cadastrar onde recebe), só sinaliza: quem redefiniu também conheceu a
+# senha. O CNPJ entra porque decide se o titular da conta é "diferente".
 RESET_ALERT_WINDOW = timedelta(hours=72)
-_RESET_ALERT_FIELDS = frozenset({"pix", "email"})
+_RESET_ALERT_FIELDS = frozenset(
+    {"pix", "email", "email_pending", "payout_methods", "payout_preferred", "company_document"}
+)
 
-# A chave no histórico de quem não tem Pagamentos.
+# As formas de recebimento no histórico de quem não tem Pagamentos.
 PIX_HIDDEN = "***"
+_PAYOUT_FIELDS = frozenset({"pix", "payout_methods", "payout_preferred"})
 
-# Partes do perfil técnico em lista: "from" = o que saiu, "to" = o que entrou.
-DELTA_FIELDS = frozenset({"tools", "availability", "skills", "education"})
+# Partes em lista: "from" = o que saiu, "to" = o que entrou.
+DELTA_FIELDS = frozenset(
+    {"tools", "availability", "skills", "education", "payout_methods", "unavailability"}
+)
 # Ferramenta marcada que não está mais no catálogo (a API não exclui; só apagando no banco).
 TOOL_GONE = "Ferramenta removida"
+
+# Acesso ao app (users.is_active) e situação na operação (= OPERATIONAL_STATUS e APP_ACCESS de
+# lib/constants.ts).
+ACCESS_ON, ACCESS_OFF = "Liberado", "Sem acesso"
+OPERATIONAL_LABELS = {"active": "Ativo", "inactive": "Inativo", "blocked": "Bloqueado"}
+EMAIL_VERIFIED, EMAIL_UNVERIFIED = "validado", "pendente"
 
 # Campo -> (valor para comparar, texto da tela). Nos DELTA_FIELDS, o valor é o conjunto dos itens e
 # o "texto" é a função que escreve um pedaço deles (o que saiu ou o que entrou).
@@ -152,37 +180,164 @@ def _transport(user: User) -> tuple[Any, str | None]:
     return value, tech_profile.transport_text(*value) if value is not None else None
 
 
+# ------------------------------------------------------------- dados pessoais e da empresa
+
+
+def _rg(user: User) -> tuple[Any, str | None]:
+    value = (user.rg_number, user.rg_issuer, user.rg_state)
+    if not any(value):
+        return None, None
+    return value, personal.format_rg(*value)
+
+
+def _vehicle(user: User) -> tuple[Any, str | None]:
+    model, plate = user.vehicle_model or None, user.vehicle_plate or None
+    if model is None and plate is None:
+        return None, None
+    text = " · ".join(part for part in (model, personal.format_plate(plate)) if part)
+    return (model, plate), text
+
+
+def _email_pending(user: User) -> tuple[Any, str | None]:
+    pending = user.email_pending or None
+    return (pending.lower() if pending else None), pending
+
+
+# ------------------------------------------------------------- formas de recebimento
+
+
+class _Method(NamedTuple):
+    """Uma forma de recebimento como o histórico compara: tudo o que a tela mostra ou o destino do
+    pagamento usa (o id não: trocar a chave é sair uma e entrar outra)."""
+
+    kind: str
+    pix_key_type: str | None
+    pix_key: str | None
+    bank_code: str | None
+    bank_name: str | None
+    branch: str | None
+    account_number: str | None
+    account_digit: str | None
+    account_type: str | None
+    holder_name: str | None
+    holder_document: str | None
+
+
+def _method(row: TechnicianPayoutMethod) -> _Method:
+    def text(value: Any) -> str | None:
+        return None if value is None else str(value)
+
+    return _Method(
+        kind=str(row.kind),
+        pix_key_type=text(row.pix_key_type),
+        pix_key=row.pix_key,
+        bank_code=row.bank_code,
+        bank_name=row.bank_name,
+        branch=row.branch,
+        account_number=row.account_number,
+        account_digit=row.account_digit,
+        account_type=text(row.account_type),
+        holder_name=row.holder_name,
+        holder_document=row.holder_document,
+    )
+
+
+def _masked_document(document: str | None) -> str | None:
+    """O CPF ou o CNPJ do titular mascarado, como a chave PIX ("CPF ***.456.789-**")."""
+    if not document:
+        return None
+    if len(document) == 11:
+        return pix.describe("cpf", document)
+    if len(document) == 14:
+        return pix.describe("cnpj", document)
+    return None
+
+
+def _methods_text(items: Iterable[_Method]) -> str | None:
+    return tech_profile.items_text(sorted(payout.describe_with_holder(m) for m in items), "; ")
+
+
+def _methods_text_with_document(items: Iterable[_Method]) -> str | None:
+    """Quando só o documento do titular mudou, o texto de sempre sairia igual dos dois lados: aí
+    vai também o documento mascarado."""
+    labels = []
+    for method in items:
+        text = payout.describe_with_holder(method)
+        document = _masked_document(method.holder_document)
+        labels.append(f"{text} · {document}" if document else text)
+    return tech_profile.items_text(sorted(labels), "; ")
+
+
+def _periods_text(items: Iterable[tuple[str, str]]) -> str | None:
+    labels = [unavailability.period_text({"start": s, "end": e}) for s, e in sorted(items)]
+    return tech_profile.items_text(labels, "; ")
+
+
+# Nos DELTA_FIELDS em que o texto de sempre pode não mostrar a diferença.
+_DETAILED_TEXT: dict[str, ItemsText] = {"payout_methods": _methods_text_with_document}
+
+
+async def _payout_rows(db: AsyncSession, user_id: uuid.UUID) -> list[TechnicianPayoutMethod]:
+    return list(
+        await db.scalars(
+            select(TechnicianPayoutMethod).where(TechnicianPayoutMethod.user_id == user_id)
+        )
+    )
+
+
 async def snapshot(db: AsyncSession, user: User) -> Snapshot:
-    """O cadastro agora, campo a campo (sem ir ao banco a não ser pelo nome do grupo e, com
-    ferramenta marcada, pelos nomes delas)."""
+    """O cadastro agora, campo a campo. Vai ao banco pelo nome do grupo, pelas formas de
+    recebimento e, com ferramenta marcada, pelos nomes delas; antes, flush (a sessão é
+    autoflush=False: o que a gravação acabou de mudar precisa estar no banco)."""
+    await db.flush()
     team = await db.get(Team, user.team_id) if user.team_id else None
     tools = await tech_profile.user_tools(db, user)
-    key_type, key = user.pix_key_type, user.pix_key
-    has_pix = bool(key_type and key)
+    methods = await _payout_rows(db, user.id)
+    preferred = next((m for m in methods if m.preferred), None)
+    periods = unavailability.current(user.unavailability or [], personal.local_today())
+    status = str(user.operational_status) if user.operational_status else None
     return {
         "name": _same(user.name),
         "email": ((user.email or "").lower(), user.email),
+        "email_pending": _email_pending(user),
+        "email_verified": (
+            user.email_verified_at is not None,
+            EMAIL_VERIFIED if user.email_verified_at is not None else EMAIL_UNVERIFIED,
+        ),
         "phone": _same(user.phone),
+        "phone_secondary": _same(user.phone_secondary),
+        "cpf": (user.cpf, personal.format_cpf(user.cpf)),
+        "rg": _rg(user),
+        "birth_date": (user.birth_date, personal.format_date(user.birth_date)),
         "job_title": _same(user.job_title),
         "team": (user.team_id, team.name if team else None),
-        "is_active": (bool(user.is_active), "Liberado" if user.is_active else "Bloqueado"),
+        "is_active": (bool(user.is_active), ACCESS_ON if user.is_active else ACCESS_OFF),
+        "operational_status": (status, OPERATIONAL_LABELS.get(status or "", status)),
         "role": _role(user.role),
         "home_city": _same(user.home_city),
         "home_state": _same(user.home_state),
         "coverage_area": _same(user.coverage_area),
         "address_line": _same(user.address_line),
+        "address_number": _same(user.address_number),
+        "address_complement": _same(user.address_complement),
         "address_district": _same(user.address_district),
         "address_zip": _same(user.address_zip),
+        "bio": _same(user.bio),
+        "company_document": (user.company_document, personal.format_cnpj(user.company_document)),
+        "company_name": _same(user.company_name),
+        "company_trade_name": _same(user.company_trade_name),
         "work_schedule": _schedule(user.work_schedule),
         "services": _services(user.service_type_ids),
-        "pix": (
-            (str(key_type), key) if key_type and key else None,
-            pix.describe(key_type, key) if key_type and key else None,
+        "payout_methods": (frozenset(_method(m) for m in methods), _methods_text),
+        "payout_preferred": (
+            preferred.id if preferred else None,
+            payout.describe(preferred) if preferred else None,
         ),
-        "pix_holder": _same(user.pix_holder_name if has_pix else None),
+        "unavailability": (frozenset((p["start"], p["end"]) for p in periods), _periods_text),
         "tools": _tools(user, tools),
         "availability": (tech_profile.slot_set(user), _slots_text),
         "transport": _transport(user),
+        "vehicle": _vehicle(user),
         "skills": (tech_profile.skill_set(user.skills or []), _skills_text),
         "education": (tech_profile.education_set(user.education or []), _education_text),
     }
@@ -197,7 +352,11 @@ def diff(before: Snapshot, after: Snapshot) -> list[dict[str, Any]]:
             continue
         old, old_text = before[key]
         if key in DELTA_FIELDS:
-            changes.append({"field": key, "from": old_text(old - value), "to": text(value - old)})
+            gone, came = old - value, value - old
+            frm, to = old_text(gone), text(came)
+            if frm == to and key in _DETAILED_TEXT:
+                frm, to = _DETAILED_TEXT[key](gone), _DETAILED_TEXT[key](came)
+            changes.append({"field": key, "from": frm, "to": to})
         else:
             changes.append({"field": key, "from": old_text, "to": text})
     return changes
@@ -210,9 +369,10 @@ def record(
     *,
     via: str,
     actor: User | None,
+    note: str | None = None,
 ) -> UserChange | None:
-    """Uma linha no histórico (nada quando não há mudança). Grava junto com a mudança (o commit é
-    de quem chamou)."""
+    """Uma linha no histórico (nada quando não há mudança), com o motivo (`note`) quando a tela pede
+    um. Grava junto com a mudança (o commit é de quem chamou)."""
     if not changes:
         return None
     row = UserChange(
@@ -221,6 +381,7 @@ def record(
         actor_id=actor.id if actor else None,
         via=via,
         changes=changes,
+        note=note or None,
         created_at=utcnow(),
     )
     db.add(row)
@@ -235,16 +396,18 @@ async def track(
     via: str,
     actor: User | None,
     extra: list[dict[str, Any]] | None = None,
+    note: str | None = None,
 ) -> list[dict[str, Any]]:
     """Compara com o cadastro de agora, grava o que mudou (mais as mudanças especiais, como a senha
-    ou a foto) e devolve as mudanças."""
+    ou a foto, e o motivo em `note`) e devolve as mudanças."""
     changes = [*diff(before, await snapshot(db, user)), *(extra or [])]
-    record(db, user, changes, via=via, actor=actor)
+    record(db, user, changes, via=via, actor=actor, note=note)
     return changes
 
 
 def event_fields(changes: list[dict[str, Any]]) -> list[str]:
-    """Os campos do aviso, sem repetir (o titular conta como "pix")."""
+    """Os campos do aviso, sem repetir: os nomes crus (o titular das linhas antigas de PIX conta
+    como "pix")."""
     fields: list[str] = []
     for change in changes:
         name = _EVENT_FIELD.get(change["field"], change["field"])

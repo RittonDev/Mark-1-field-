@@ -5,6 +5,7 @@ from app.api.routes import (
     activities,
     auth,
     catalog,
+    cep,
     client_report,
     company,
     customers,
@@ -84,3 +85,5 @@ for module in (
 api_router.include_router(onboarding.public)
 api_router.include_router(quotes.public)
 api_router.include_router(client_report.public)
+# Busca de CEP dos formulários de endereço (sem login; logado, o limite é por pessoa).
+api_router.include_router(cep.public)

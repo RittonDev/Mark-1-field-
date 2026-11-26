@@ -46,15 +46,25 @@ class RedactTokens(logging.Filter):
     """Tira tokens dos logs: o WebSocket e os links de anexo levam o token na URL, e o log de
     acesso do uvicorn gravaria a sessão de quem acessou. Os links públicos (relatório, orçamento,
     ficha de técnico) levam o token no caminho: ele também sai do log. O CEP buscado (dado do
-    endereço de alguém) também não fica no log."""
+    endereço de alguém) também não fica no log: nem o da rota nem o das URLs do ViaCEP e da
+    BrasilAPI, que o httpx registra a cada pedido (services/cep.py)."""
 
     _pattern = re.compile(r"((?:token|access_token|refresh_token)=)[^&\s\"']+")
     _public = re.compile(r"(/public/(?:reports|quotes|onboarding|cep)/)(?!catalog\b)[^/?\s\"']+")
+    _cep_services = re.compile(
+        r"((?:viacep\.com\.br/ws|brasilapi\.com\.br/api/cep/v\d+)/)[^/?\s\"']+"
+    )
 
     def _clean(self, value: object) -> object:
-        if not isinstance(value, str):
+        if isinstance(value, str):
+            value = self._pattern.sub(r"\1***", value)
+            return self._cep_services.sub(r"\1***", self._public.sub(r"\1***", value))
+        if value is None or isinstance(value, bool | int | float):
             return value
-        return self._public.sub(r"\1***", self._pattern.sub(r"\1***", value))
+        # Objetos que viram texto no log (a URL do httpx): limpa o texto só quando muda.
+        text_ = str(value)
+        cleaned = self._clean(text_)
+        return cleaned if cleaned != text_ else value
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = self._clean(record.msg)
@@ -63,7 +73,7 @@ class RedactTokens(logging.Filter):
         return True
 
 
-for _name in ("uvicorn.access", "uvicorn.error"):
+for _name in ("uvicorn.access", "uvicorn.error", "httpx"):
     logging.getLogger(_name).addFilter(RedactTokens())
 
 
