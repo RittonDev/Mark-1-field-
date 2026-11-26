@@ -62,7 +62,10 @@ class RedactTokens(logging.Filter):
         if value is None or isinstance(value, bool | int | float):
             return value
         # Objetos que viram texto no log (a URL do httpx): limpa o texto só quando muda.
-        text_ = str(value)
+        try:
+            text_ = str(value)
+        except Exception:  # o filtro nunca derruba quem está registrando
+            return value
         cleaned = self._clean(text_)
         return cleaned if cleaned != text_ else value
 

@@ -647,19 +647,15 @@ async def test_password_lines_and_the_reset_warning(
     reset_at = datetime.fromisoformat(rows[1]["created_at"])
 
     events.clear()
-    r = await client.patch(
-        f"{API}/me/profile",
-        json={"pix": CPF_PIX, "current_password": "senha-do-tecnico-1"},
-        headers=h,
-    )
+    r = await add_method(client, h, CPF_KEY, password="senha-do-tecnico-1")
     assert r.status_code == 200, r.text
     r = await client.patch(f"{API}/me/profile", json={"name": "Tecnico Alfa"}, headers=h)
     assert r.status_code == 200, r.text
-    pix_event, name_event = events
-    warning = pix_event.pop("after_reset")
-    assert pix_event == {"fields": ["pix"], "via": "app"}
+    payout_event, name_event = events
+    warning = payout_event.pop("after_reset")
+    assert payout_event == {"fields": PAYOUT_FIELDS, "via": "app"}
     assert warning["by"] == "Analista" and datetime.fromisoformat(warning["at"]) == reset_at
-    # Só e-mail e PIX levam o sinal.
+    # Só e-mail, formas de recebimento e CNPJ levam o sinal.
     assert name_event == {"fields": ["name"], "via": "app"}
 
     # A senha dele trocada de novo.
@@ -684,7 +680,7 @@ async def test_password_lines_and_the_reset_warning(
         headers=h,
     )
     assert r.status_code == 200, r.text
-    assert events == [{"fields": ["email"], "via": "app"}]
+    assert events == [{"fields": ["email_pending"], "via": "app"}]
 
     # Quem não é técnico troca a senha sem histórico de cadastro.
     events.clear()
@@ -704,7 +700,7 @@ async def test_parallel_wrong_passwords_respect_the_limit(
     """A tentativa conta antes do bcrypt: uma rajada em paralelo não passa inteira pela checagem."""
 
     async def wrong_pix(i: int) -> Response:
-        return await patch(client, world, pix=CPF_PIX, current_password=f"errada-{i}")
+        return await add_method(client, world.tech.headers, CPF_KEY, password=f"errada-{i}")
 
     async def wrong_change(i: int) -> Response:
         return await client.post(
@@ -719,7 +715,7 @@ async def test_parallel_wrong_passwords_respect_the_limit(
     assert codes.count(429) == len(codes) - codes.count(422)
     assert all(int(r.headers["retry-after"]) > 0 for r in burst if r.status_code == 429)
     # Bloqueado até a janela acabar, mesmo com a senha certa.
-    r = await patch(client, world, pix=CPF_PIX, current_password=PASSWORD)
+    r = await add_method(client, world.tech.headers, CPF_KEY)
     assert r.status_code == 429
 
     # O contador é o mesmo da troca de senha, também em paralelo.
@@ -730,7 +726,8 @@ async def test_parallel_wrong_passwords_respect_the_limit(
     codes = [r.status_code for r in burst]
     assert codes.count(422) <= login_guard.MAX_PASSWORD_CHANGE
     assert codes.count(429) == len(codes) - codes.count(422)
-    assert (await client.get(f"{API}/me/profile", headers=world.tech.headers)).json()["pix"] is None
+    me = (await client.get(f"{API}/me/profile", headers=world.tech.headers)).json()
+    assert me["payout_methods"] == []
 
 
 async def test_name_takes_only_letters(
@@ -769,19 +766,33 @@ async def test_name_takes_only_letters(
     assert r.status_code == 200 and r.json()["name"] == "Tecnico 01"
 
 
-async def test_history_without_payouts_hides_the_pix(client: AsyncClient, world: World) -> None:
-    """Quem tem Técnicos sem Pagamentos não vê o titular nem a chave mascarada no histórico (a seção
-    Pagamento do cadastro também fica fechada para ele)."""
-    holder = {**CPF_PIX, "holder_name": "Conjuge Ficticia"}
-    assert (await patch(client, world, pix=holder, current_password=PASSWORD)).status_code == 200
-    other = {**holder, "holder_name": "Outra Pessoa Ficticia"}
-    assert (await patch(client, world, pix=other, current_password=PASSWORD)).status_code == 200
-    assert (await patch(client, world, pix=None, current_password=PASSWORD)).status_code == 200
+async def test_history_without_payouts_hides_the_payout_methods(
+    client: AsyncClient, world: World
+) -> None:
+    """Quem tem Técnicos sem Pagamentos não vê o titular nem a forma mascarada no histórico (as
+    Formas de recebimento da ficha também ficam fechadas para ele)."""
+    holder = {**CPF_KEY, "holder_name": "Conjuge Ficticia"}
+    r = await add_method(client, world.tech.headers, holder)
+    assert r.status_code == 200, r.text
+    method_id = r.json()["payout_methods"][0]["id"]
+    other = {**holder, "holder_name": "Outra Pessoa Ficticia", "current_password": PASSWORD}
+    r = await client.put(f"{METHODS}/{method_id}", json=other, headers=world.tech.headers)
+    assert r.status_code == 200, r.text
+    r = await client.post(
+        f"{METHODS}/{method_id}/remove",
+        json={"current_password": PASSWORD},
+        headers=world.tech.headers,
+    )
+    assert r.status_code == 200 and r.json()["payout_methods"] == []
     assert (await patch(client, world, name="Tecnico Alfa")).status_code == 200
 
     full = await history(client, world)
     assert full[2]["changes"] == [
-        {"field": "pix_holder", "from": "Conjuge Ficticia", "to": "Outra Pessoa Ficticia"}
+        {
+            "field": "payout_methods",
+            "from": "PIX CPF ***.456.789-** · Conjuge Ficticia",
+            "to": "PIX CPF ***.456.789-** · Outra Pessoa Ficticia",
+        }
     ]
     await restrict_analyst(
         client, world, **{"base.technicians": "view", "commercial.payouts": "none"}
@@ -790,9 +801,15 @@ async def test_history_without_payouts_hides_the_pix(client: AsyncClient, world:
     assert [row["id"] for row in hidden] == [row["id"] for row in full]
     assert [row["changes"] for row in hidden] == [
         [{"field": "name", "from": "Tecnico", "to": "Tecnico Alfa"}],
-        [{"field": "pix", "from": "***", "to": None}],
-        [{"field": "pix", "from": "***", "to": "***"}],
-        [{"field": "pix", "from": None, "to": "***"}],
+        [
+            {"field": "payout_methods", "from": "***", "to": None},
+            {"field": "payout_preferred", "from": "***", "to": None},
+        ],
+        [{"field": "payout_methods", "from": "***", "to": "***"}],
+        [
+            {"field": "payout_methods", "from": None, "to": "***"},
+            {"field": "payout_preferred", "from": None, "to": "***"},
+        ],
     ]
     assert "Ficticia" not in str(hidden) and "456.789" not in str(hidden)
     # Quem tem Pagamentos continua vendo tudo: as linhas gravadas não mudaram.
@@ -803,7 +820,11 @@ async def test_history_without_payouts_hides_the_pix(client: AsyncClient, world:
 
 
 async def test_company_email_stays_with_the_central(
-    client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient,
+    world: World,
+    engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    mail_box: MailBox,
 ) -> None:
     """E-mail do domínio da empresa (login Microsoft) não entra pelo app: travaria o login da pessoa
     contratada com ele. Quem já tem um (técnico interno) continua com ele."""
@@ -815,7 +836,7 @@ async def test_company_email_stays_with_the_central(
     r = await patch(client, world, email="novo.analista@empresa.exemplo.com")
     assert r.status_code == 422 and messages(r) == [onboarding.COMPANY_EMAIL]
     r = await patch(client, world, email="tecnico.alfa@exemplo.com", current_password=PASSWORD)
-    assert r.status_code == 200, r.text
+    assert r.status_code == 200 and r.json()["email_pending"] == "tecnico.alfa@exemplo.com"
 
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
@@ -823,7 +844,12 @@ async def test_company_email_stays_with_the_central(
         assert user is not None
         user.email = "tecnico.interno@empresa.exemplo.com"
         await db.commit()
+    # O e-mail do login de novo (com o pedido aberto, cancela o pedido; sem senha).
     r = await patch(
         client, world, email="tecnico.interno@empresa.exemplo.com", phone="(11) 97777-6666"
     )
-    assert r.status_code == 200 and r.json()["email"] == "tecnico.interno@empresa.exemplo.com"
+    assert r.status_code == 200, r.text
+    assert (r.json()["email"], r.json()["email_pending"]) == (
+        "tecnico.interno@empresa.exemplo.com",
+        None,
+    )

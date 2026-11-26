@@ -519,7 +519,9 @@ async def _verify_user(db: AsyncSession, token: AccountToken) -> LinkOutcome:
     if kind == "change" and _same(user.email_pending, token.email):
         token.used_at = now
         taken = await db.scalar(
-            select(User.id).where(func.lower(User.email) == token.email, User.id != user.id)
+            select(User.id)
+            .where(func.lower(User.email) == token.email, User.id != user.id)
+            .limit(1)
         )
         if taken is not None:
             changes = await _drop_pending(db, user)

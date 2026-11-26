@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { HeaderHeightContext } from "expo-router/react-navigation";
-import { useContext, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type TextInputInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BrandLogo } from "../components/Brand";
@@ -8,8 +8,14 @@ import { Icon } from "../components/Icon";
 import { Text } from "../components/Text";
 import { Button, Card, ErrorBox, Field, Input } from "../components/ui";
 import { changePassword, mustChangePassword } from "../lib/account";
-import { errorMessage } from "../lib/api";
-import { logout } from "../lib/auth";
+import { ApiError, errorMessage } from "../lib/api";
+import { logout, requestPasswordReset } from "../lib/auth";
+import { isSendableEmail } from "../lib/constants";
+import { confirmAction } from "../lib/dialogs";
+import { FORGOT_MSG, forgotOutcome } from "../lib/forgotPassword";
+import { haptic } from "../lib/haptics";
+import { noNetwork } from "../lib/net";
+import { ensureProfile, hasCadastroV2, useProfile } from "../lib/profile";
 import { useSession } from "../lib/session";
 import { startSync, stopSync } from "../lib/sync";
 import { showToast } from "../lib/toast";
@@ -20,17 +26,22 @@ const MISMATCH = "A confirmação não confere com a nova senha.";
 
 /**
  * Troca de senha. Com senha provisória (primeiro acesso ou redefinida pela central) é a única tela do
- * app até trocar. Depois, o técnico troca quando quiser pela Conta (ex.: a senha vazou).
+ * app até trocar. Depois, o técnico troca quando quiser (Configurações › Senha); sem lembrar a atual,
+ * "Esqueci a senha atual" manda o link para criar uma nova ao e-mail validado (só com o envio de e-mail
+ * ligado no servidor).
  */
 export default function ChangePasswordScreen() {
   const { user, status } = useSession();
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
-  // Com cabeçalho (troca pela Conta), o teclado sobe a partir dele.
+  // Com cabeçalho (troca pelas Configurações), o teclado sobe a partir dele.
   const headerHeight = useContext(HeaderHeightContext) ?? 0;
   // Lido ao abrir: depois da troca o usuário deixa de ter senha provisória, mas a tela não muda de modo.
   const [forced] = useState(() => mustChangePassword(user));
+  // O cadastro diz se o e-mail de login está validado e se o servidor envia e-mail ("Esqueci a senha atual").
+  const profile = useProfile();
+  const [requesting, setRequesting] = useState(false);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -41,6 +52,50 @@ export default function ChangePasswordScreen() {
   const [leaving, setLeaving] = useState(false);
   const nextRef = useRef<TextInputInstance>(null);
   const confirmRef = useRef<TextInputInstance>(null);
+
+  // Fora da senha provisória, o cadastro vem da memória (ou é lido agora, sem avisar erro).
+  useEffect(() => {
+    if (!forced) ensureProfile();
+  }, [forced]);
+
+  // O link vai só para o e-mail validado: sem o envio ligado ou sem a validação, a central redefine pelo WhatsApp.
+  const resetEmail =
+    !forced && profile && hasCadastroV2(profile) && profile.mail_enabled && profile.email_verified_at && isSendableEmail(profile.email)
+      ? profile.email
+      : null;
+
+  async function forgotCurrent() {
+    if (!resetEmail || requesting || saving) return;
+    const ok = await confirmAction(
+      "Enviar link para criar uma senha nova?",
+      `Vamos enviar para ${resetEmail}. Ao criar a senha nova, todos os aparelhos saem da conta.`,
+      { confirmText: "Enviar" },
+    );
+    if (!ok) return;
+    if (await noNetwork()) {
+      showToast("Sem internet", { description: "Conecte o aparelho para pedir o link." });
+      return;
+    }
+    setRequesting(true);
+    try {
+      await requestPasswordReset(resetEmail);
+      haptic.success();
+      showToast("Link enviado", { tone: "success", description: `Abra o e-mail em ${resetEmail}.` });
+    } catch (e) {
+      const outcome = e instanceof ApiError ? forgotOutcome(e.status, e.code) : "error";
+      if (outcome === "legacy") {
+        showToast("Indisponível no momento", { description: "Peça à central, no grupo de WhatsApp, para redefinir sua senha." });
+      } else if (outcome === "disabled") {
+        showToast("Indisponível no momento", { description: FORGOT_MSG.disabled });
+      } else if (outcome === "offline") {
+        showToast("Sem internet", { description: "Conecte o aparelho para pedir o link." });
+      } else {
+        showToast("Não foi possível enviar o link", { tone: "error", description: errorMessage(e) });
+      }
+    } finally {
+      setRequesting(false);
+    }
+  }
 
   function problem(): string | null {
     if (!current) return forced ? "Informe a senha atual (a provisória que você recebeu)." : "Informe a senha atual.";
@@ -170,6 +225,18 @@ export default function ChangePasswordScreen() {
             disabled={leaving}
           />
         </Card>
+        {resetEmail ? (
+          <Pressable
+            onPress={() => void forgotCurrent()}
+            disabled={saving || requesting}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: saving || requesting, busy: requesting }}
+            hitSlop={4}
+            style={({ pressed }) => [styles.forgot, (pressed || saving || requesting) && styles.forgotPressed]}
+          >
+            <Text style={styles.forgotText}>Esqueci a senha atual</Text>
+          </Pressable>
+        ) : null}
         {forced ? (
           <Button compact variant="ghost" title="Sair" onPress={leave} loading={leaving} disabled={saving} style={{ alignSelf: "center" }} />
         ) : null}
@@ -184,4 +251,7 @@ const makeStyles = (c: Palette) =>
     container: { paddingHorizontal: 20, gap: 24, flexGrow: 1, maxWidth: 480, width: "100%", alignSelf: "center" },
     title: { fontSize: 20, fontWeight: "700", color: c.ink },
     lead: { fontSize: 14, color: c.inkMuted, lineHeight: 20 },
+    forgot: { alignSelf: "center", minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
+    forgotPressed: { opacity: 0.6 },
+    forgotText: { fontSize: 14, fontWeight: "600", color: c.brandInk },
   });
