@@ -430,10 +430,10 @@ async def test_edit_keeps_the_kind_and_marks_the_destination(
     assert me["payout_methods"][0]["changed_at"] == account["changed_at"]
     # A conta muda: changed_at é agora.
     changed = {**ACCOUNT, "bank_name": "Banco Exemplo SA", "account_number": "87654321"}
-    me = body(
-        await client.put(url, json={**changed, "current_password": PASSWORD}, headers=h)
+    me = body(await client.put(url, json={**changed, "current_password": PASSWORD}, headers=h))
+    assert datetime.fromisoformat(me["payout_methods"][0]["changed_at"]) > datetime.fromisoformat(
+        account["changed_at"]
     )
-    assert me["payout_methods"][0]["changed_at"] > account["changed_at"]
     rows = await history(client, world)
     assert rows[0]["changes"] == [
         {
@@ -498,7 +498,7 @@ async def test_old_app_pix_patch_is_refused(client: AsyncClient, world: World) -
 
 @requires_db
 async def test_central_sees_with_payouts_only_and_flags_holder(
-    client: AsyncClient, world: World, mail_box: MailBox
+    client: AsyncClient, world: World
 ) -> None:
     h, tech_id = world.tech.headers, str(world.tech.user.id)
     url = f"{API}/technicians/{tech_id}/payout-methods"
@@ -633,7 +633,9 @@ async def test_paid_event_uses_the_preferred(client: AsyncClient, world: World) 
     an, tech_id = world.analyst.headers, str(world.tech.user.id)
     other_id = str(world.tech_other.user.id)
     body(await add_method(client, world.tech.headers, ACCOUNT))
-    t = await create(client, world, title="Rack", assignee_id=tech_id, helper_ids=[other_id])
+    t = await create(client, world, title="Rack", assignee_id=tech_id)
+    r = await client.patch(f"{API}/tickets/{t['id']}", json={"helper_ids": [other_id]}, headers=an)
+    assert r.status_code == 200, r.text
     for who in (tech_id, other_id):
         r = await client.put(
             f"{API}/tickets/{t['id']}/payouts/{who}", json={"amount": 90}, headers=an

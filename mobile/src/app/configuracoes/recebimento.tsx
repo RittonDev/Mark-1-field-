@@ -40,12 +40,24 @@ interface FormState {
   target: PayoutSheetTarget;
 }
 
+type ConfirmAction = "prefer" | "remove";
+
+/** Título, texto e botão da folha da senha de uma ação. */
+interface ConfirmCopy {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  destructive: boolean;
+}
+
 /** A folha da senha de "Tornar preferencial" e "Excluir". */
 interface ConfirmState {
   key: number;
   open: boolean;
-  action: "prefer" | "remove";
+  action: ConfirmAction;
   method: PayoutMethod;
+  /** Fixo ao abrir: a lista muda quando a gravação volta e a folha ainda está saindo. */
+  copy: ConfirmCopy;
   password: string;
   error: string | null;
   saving: boolean;
@@ -53,10 +65,10 @@ interface ConfirmState {
 
 const NO_METHODS: PayoutMethod[] = [];
 
-/** Título, texto e botão da folha da senha de cada ação (o texto diz para onde os pagamentos passam a ir). */
-function confirmCopy(state: ConfirmState, methods: readonly PayoutMethod[]) {
-  const text = payoutMethodText(state.method);
-  if (state.action === "prefer") {
+/** O texto de cada ação diz para onde os pagamentos passam a ir. */
+function confirmCopy(action: ConfirmAction, method: PayoutMethod, methods: readonly PayoutMethod[]): ConfirmCopy {
+  const text = payoutMethodText(method);
+  if (action === "prefer") {
     return {
       title: "Tornar preferencial?",
       description: `Os pagamentos passam a ir para ${text}.`,
@@ -64,14 +76,14 @@ function confirmCopy(state: ConfirmState, methods: readonly PayoutMethod[]) {
       destructive: false,
     };
   }
-  const next = nextPreferred(methods, state.method.id);
+  const next = nextPreferred(methods, method.id);
   const description = next
     ? `${text} sai da lista. Os pagamentos passam a ir para ${payoutMethodText(next)}.`
-    : state.method.preferred
+    : method.preferred
       ? `${text} sai da lista. Você fica sem forma de recebimento.`
       : `${text} sai da lista.`;
   return {
-    title: state.method.kind === "pix" ? "Excluir a chave PIX?" : "Excluir a conta?",
+    title: method.kind === "pix" ? "Excluir a chave PIX?" : "Excluir a conta?",
     description,
     confirmLabel: "Excluir",
     destructive: true,
@@ -147,9 +159,10 @@ export default function PayoutMethodsScreen() {
     setMenu({ open: true, method });
   }
 
-  function ask(action: ConfirmState["action"], method: PayoutMethod) {
+  function ask(action: ConfirmAction, method: PayoutMethod) {
     if (writing) return;
-    setConfirm((current) => ({ key: (current?.key ?? 0) + 1, open: true, action, method, password: "", error: null, saving: false }));
+    const copy = confirmCopy(action, method, methods);
+    setConfirm((current) => ({ key: (current?.key ?? 0) + 1, open: true, action, method, copy, password: "", error: null, saving: false }));
   }
 
   function patchConfirm(patch: Partial<ConfirmState>) {
@@ -215,8 +228,6 @@ export default function PayoutMethodsScreen() {
         { key: "remove", label: "Excluir", icon: "trash", tone: "danger", onPress: () => ask("remove", menu.method) },
       ]
     : [];
-
-  const copy = confirm ? confirmCopy(confirm, methods) : null;
 
   return (
     <View style={styles.screen}>
@@ -318,18 +329,18 @@ export default function PayoutMethodsScreen() {
         />
       ) : null}
 
-      {confirm && copy ? (
+      {confirm ? (
         <PasswordSheet
           key={confirm.key}
           visible={confirm.open}
-          title={copy.title}
-          description={copy.description}
+          title={confirm.copy.title}
+          description={confirm.copy.description}
           password={confirm.password}
           onChangePassword={(password) => patchConfirm({ password, error: null })}
           error={confirm.error}
           saving={confirm.saving}
-          confirmLabel={copy.confirmLabel}
-          destructive={copy.destructive}
+          confirmLabel={confirm.copy.confirmLabel}
+          destructive={confirm.copy.destructive}
           onConfirm={() => void runConfirm()}
           onClose={closeConfirm}
           onClosed={confirmClosed}

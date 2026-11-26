@@ -370,7 +370,7 @@ export function PayoutMethodSheet({
           checked={draft.preferred}
           onPress={() => {
             haptic.select();
-            update({ preferred: !draft.preferred });
+            change((current) => ({ ...current, preferred: !current.preferred }));
           }}
         />
       ) : null}
