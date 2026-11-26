@@ -336,6 +336,15 @@ const EVERY_SLOT: ReadonlySet<keyof CepSlots> = new Set(["street", "district", "
 const NO_SLOT: ReadonlySet<keyof CepSlots> = new Set();
 const EMPTY_SLOTS: CepSlots = { street: "", district: "", city: "", state: "" };
 
+/** Sem acento (os sinais soltos do NFD, U+0300 a U+036F), espaços juntados e em maiúsculas: a comparação de cepFill. */
+const fold = (text: string) =>
+  text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+
 export interface CepPatch {
   /** O que muda no formulário (vazio: nada a preencher). */
   patch: Partial<AddressForm>;
@@ -366,7 +375,8 @@ export function cepPatch(
     if (key === "state") patch.uf = result.next.state;
     else patch[key] = result.next[key];
   }
-  if (result.filled.includes("street")) {
+  // Outra rua (não só outra grafia: acento, maiúsculas e espaços não contam).
+  if (result.filled.includes("street") && fold(result.next.street) !== fold(form.street)) {
     if (form.number && form.number === base.number) patch.number = "";
     if (form.complement && form.complement === base.complement) patch.complement = "";
   }

@@ -461,6 +461,11 @@ describe("CEP no Endereço (cepPatch, cepDiffers, cepMiss)", () => {
     assert.deepEqual(r.patch, { street: "Rua Nova Exemplo", district: "Bairro Exemplo", number: "", complement: "" });
   });
 
+  it("a mesma rua com outra grafia: o logradouro ganha a do CEP e o número e o complemento ficam", () => {
+    const sameStreet = ADDRESS_SECTION.fromProfile({ ...PROFILE, address_line: "rua nova  exemplo" });
+    assert.deepEqual(cepPatch(sameStreet, sameStreet, NONE, FOUND).patch, { street: "Rua Nova Exemplo", district: "Bairro Exemplo" });
+  });
+
   it("o número digitado fica quando o logradouro muda", () => {
     const r = cepPatch({ ...saved, number: "250" }, saved, NONE, FOUND);
     assert.equal(r.patch.number, undefined);

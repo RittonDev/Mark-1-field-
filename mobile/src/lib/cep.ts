@@ -21,7 +21,8 @@ const UNAVAILABLE: CepOutcome = { status: "unavailable" };
 /** O que o servidor respondeu, pelos 8 números (o "indisponível" não fica: a próxima tentativa busca de novo). */
 const known = new Map<string, CepOutcome>();
 const inflight = new Map<string, Promise<CepOutcome>>();
-let owner: string | null = null;
+/** De quem é o que está guardado (o técnico da sessão quando o módulo carregou ou a última troca). */
+let owner: string | null = session.get().user?.id ?? null;
 
 // Saiu da conta ou entrou outro técnico: o que o anterior buscou sai da memória.
 session.subscribe(() => {
