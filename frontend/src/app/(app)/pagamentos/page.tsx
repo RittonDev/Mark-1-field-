@@ -373,7 +373,7 @@ function PayoutsView() {
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   }, [lines, view]);
   const options = useMemo(() => {
-    // Técnicos ativos, os das linhas e das notas fiscais (inclusive inativos) e os vistos antes de escolher um.
+    // Técnicos com acesso ao app, os das linhas e das notas fiscais (inclusive os sem acesso) e os vistos antes de escolher um.
     const map = new Map<UUID, string>();
     for (const person of people.data ?? []) map.set(person.id, person.name);
     for (const [id, name] of Object.entries(seen)) map.set(id, name);
@@ -463,12 +463,12 @@ function PayoutsView() {
       </strong>
     );
   };
-  // A lista de telefones é a dos técnicos ativos: o inativo não aparece nela.
+  // A lista de telefones é a dos técnicos com acesso ao app: quem está sem acesso não aparece nela.
   const whatsappTitle = (group: Group, phone: string | null) =>
     phone
       ? `Mandar o extrato para ${group.name} no WhatsApp`
       : people.data && !personOf(group.id)
-        ? "Técnico inativo: o telefone dele não aparece aqui"
+        ? "Sem acesso ao app: o telefone dele não aparece aqui"
         : "Técnico sem telefone no cadastro";
   const period = month ? (months.find((m) => m.value === month)?.label ?? month) : "até hoje";
   const reimbursementOf = (group: Group) =>

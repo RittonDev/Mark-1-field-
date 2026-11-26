@@ -329,11 +329,11 @@ def birth_date(value: date | str | None, today: date | None = None) -> date | No
 
 
 def bio(value: str | None) -> str | None:
-    """Mini biografia com os parágrafos (= normalizeBio): "\\r\\n" vira "\\n", sem espaços no fim das
-    linhas, três ou mais quebras viram duas (uma linha em branco entre os parágrafos) e sem quebras
-    nem espaços nas pontas; os 500 caracteres contam depois disso. Os espaços do meio da linha
-    ficam. Como em clean_text, saem os controles e a formatação (menos a quebra e o tab), antes do
-    NFC."""
+    """Mini biografia com os parágrafos (= normalizeBio): "\\r\\n" (e "\\r" sozinho) vira "\\n",
+    sem espaços no fim das linhas, três ou mais quebras viram duas (uma linha em branco entre os
+    parágrafos) e sem quebras nem espaços nas pontas; os 500 caracteres contam depois disso. Os
+    espaços do meio da linha ficam (como na tela). Como em clean_text, saem os controles e a
+    formatação (menos a quebra e o tab; "\\v" e "\\f" viram espaço), antes do NFC."""
     text = (value or "").replace("\r\n", "\n").replace("\r", "\n")
     text = "".join(
         " " if ch in _BIO_SPACES else ch

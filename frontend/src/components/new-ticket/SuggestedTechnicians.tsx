@@ -87,7 +87,7 @@ export function periodTitle(period: { start: string; end: string }): string {
   return `${period.start === period.end ? "Em" : "De"} ${periodText(period)}`;
 }
 
-/** O técnico escolhido avisou que não atende no dia da visita: "{Nome} está indisponível até 30/11." (`today`: hoje). */
+/** O técnico escolhido avisou que não atende nos dias da visita: "{Nome} está indisponível até 30/11." (`today`: hoje). */
 export function unavailableCaution(name: string, period: { start: string; end: string }, today: string): string {
   return `${name} está indisponível ${periodShort(period, today)}.`;
 }
@@ -431,14 +431,16 @@ function SuggestionList({
 
 /**
  * Outros técnicos da visita: etiquetas removíveis e um seletor para incluir mais. `options`: só quem pode receber OS
- * (Inativo e Bloqueado ficam de fora); `unavailable`, o sufixo de quem avisou que não atende no dia da visita
- * ("indisponível até 30/11"): escolhível, com o aviso.
+ * (Inativo e Bloqueado ficam de fora); `unavailable`, o sufixo de quem avisou que não atende nos dias da visita
+ * ("indisponível até 30/11"): escolhível, com o aviso. `noAccess`: quem já está na visita e ficou sem acesso ao app
+ * (etiqueta neutra, "· sem acesso ao app").
  */
 export function HelpersField({
   options,
   assigneeId,
   helperIds,
   names,
+  noAccess,
   onChange,
   hideLabel = false,
 }: {
@@ -446,6 +448,7 @@ export function HelpersField({
   assigneeId: UUID | "";
   helperIds: UUID[];
   names: Record<UUID, string>;
+  noAccess?: ReadonlySet<UUID>;
   onChange: (ids: UUID[]) => void;
   /** Dentro de um cartão que já tem o título. */
   hideLabel?: boolean;
@@ -457,8 +460,15 @@ export function HelpersField({
       {/* O foco no seletor aparece no contorno da caixa toda (o seletor em si não tem borda). */}
       <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-line bg-surface px-2 py-1.5 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/15">
         {helperIds.map((id) => (
-          <span key={id} className="inline-flex animate-pop items-center gap-1 rounded-md bg-brand-soft py-0.5 pr-1 pl-2 text-xs font-medium text-brand-ink">
+          <span
+            key={id}
+            className={clsx(
+              "inline-flex animate-pop items-center gap-1 rounded-md py-0.5 pr-1 pl-2 text-xs font-medium",
+              noAccess?.has(id) ? "bg-surface-2 text-ink-muted ring-1 ring-line ring-inset" : "bg-brand-soft text-brand-ink",
+            )}
+          >
             {names[id] ?? "Técnico"}
+            {noAccess?.has(id) ? " · sem acesso ao app" : null}
             <button
               type="button"
               onClick={() => onChange(helperIds.filter((h) => h !== id))}

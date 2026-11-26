@@ -225,8 +225,10 @@ def ficha_address(
 
 
 def welcome_password_link(user: User) -> bool:
-    """A boas-vindas leva o link para criar a senha: o técnico está sem senha e o e-mail dele está
-    validado (a mesma regra de services/mail ao montar a boas-vindas)."""
+    """`password_link` do ApplicationApproved: a boas-vindas leva o link para criar a senha (o
+    técnico está sem senha e o e-mail dele está validado). É a regra de mail.sends_password_link,
+    que monta a boas-vindas: as duas andam juntas (tests/test_onboarding_v2.py confere a resposta
+    e o e-mail)."""
     return bool(user.must_change_password) and user.email_verified_at is not None
 
 

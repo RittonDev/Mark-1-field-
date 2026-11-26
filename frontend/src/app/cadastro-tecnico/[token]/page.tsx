@@ -23,7 +23,7 @@ import { CepField } from "@/components/CepField";
 import { useConfirm } from "@/components/Confirm";
 import { PublicPanel, PublicShell } from "@/components/PublicPage";
 import { Button, buttonClassName, Card, Checkbox, ErrorBox, Field, Input, LoadingBlock, Select, Textarea } from "@/components/ui";
-import { type AddressSlots, NO_ADDRESS } from "@/lib/address";
+import { type AddressSlots, NO_ADDRESS, normalizeAddressNumber } from "@/lib/address";
 import { ApiError, errorMessage, request } from "@/lib/api";
 import {
   ageAt,
@@ -32,10 +32,12 @@ import {
   formatPlate,
   isValidPlate,
   isValidRg,
+  normalizeBio,
   normalizeIssuer,
   normalizePlate,
   normalizeRg,
   PROFILE_LIMITS,
+  splitIssuer,
 } from "@/lib/constants";
 import { formatDate, todayISO } from "@/lib/format";
 import {
@@ -340,6 +342,15 @@ const EMPTY: FormState = {
   password2: "",
   privacy_consent: false,
 };
+
+/**
+ * O RG como vai para a API: o órgão emissor sem a UF do fim ("SSP/SP" → órgão "SSP" e UF "SP"); a UF escolhida no campo
+ * vale mais que a do fim (que então sai).
+ */
+function rgOf(form: Pick<FormState, "rg_number" | "rg_issuer" | "rg_state">) {
+  const split = splitIssuer(form.rg_issuer);
+  return { rg_number: form.rg_number.trim(), rg_issuer: split.issuer, rg_state: form.rg_state || split.state || "" };
+}
 
 /*
  * Rascunho neste aparelho: o navegador do celular descarta a aba quando a pessoa vai ao WhatsApp ou à
@@ -745,12 +756,12 @@ export default function TechnicianSignupPage() {
           return fail("birth_date", `O cadastro é para maiores de ${BIRTH_AGE.min} anos: confira a data de nascimento.`);
         }
       }
-      const rg = { rg_number: form.rg_number.trim(), rg_issuer: normalizeIssuer(form.rg_issuer).trim(), rg_state: form.rg_state };
+      const rg = rgOf(form);
       if (rg.rg_number || rg.rg_issuer || rg.rg_state) {
         const missing = (Object.keys(rg) as (keyof typeof rg)[]).find((key) => !rg[key]);
         if (missing) return fail(missing, "Informe o número, o órgão emissor e a UF do RG.");
         if (!isValidRg(rg.rg_number)) return fail("rg_number", "Confira o número do RG.");
-        if (rg.rg_issuer.length < 2) return fail("rg_issuer", "Confira o órgão emissor.");
+        if (rg.rg_issuer.length < 2 || rg.rg_issuer.length > PROFILE_LIMITS.rgIssuer) return fail("rg_issuer", "Confira o órgão emissor.");
       }
     }
     if (index === 1) {
@@ -796,6 +807,13 @@ export default function TechnicianSignupPage() {
     const found = validate(step);
     setProblem(found);
     if (found) return;
+    // O órgão emissor com a UF no fim ("SSP/SP"): a UF vai para o campo dela, se vazio, e o órgão fica sem ela.
+    if (step === 0) {
+      const rg = rgOf(form);
+      if (rg.rg_issuer !== form.rg_issuer || rg.rg_state !== form.rg_state) {
+        setForm((f) => ({ ...f, rg_issuer: rg.rg_issuer, rg_state: rg.rg_state }));
+      }
+    }
     // Cartão de aptidão em branco sai sem aviso.
     if (step === 2 && form.skills.some((s) => !s.name.trim())) set("skills", form.skills.filter((s) => s.name.trim()));
     goTo(step + 1);
@@ -830,6 +848,7 @@ export default function TechnicianSignupPage() {
       const text = (value: string) => value.trim() || null;
       // Razão social e nome fantasia só aparecem com o CNPJ válido: sem ele, não vão.
       const company = isValidCnpj(form.company_document);
+      const rg = rgOf(form);
       const res = await request<SubmitResult>(`/public/onboarding/${encodeURIComponent(token)}`, {
         method: "POST",
         auth: false,
@@ -841,11 +860,11 @@ export default function TechnicianSignupPage() {
           document: form.document,
           birth_date: form.birth_date || null,
           rg_number: text(normalizeRg(form.rg_number)),
-          rg_issuer: text(normalizeIssuer(form.rg_issuer)),
-          rg_state: form.rg_state || null,
+          rg_issuer: rg.rg_issuer || null,
+          rg_state: rg.rg_state || null,
           postal_code: text(form.postal_code),
           address: text(form.address),
-          address_number: text(form.address_number),
+          address_number: normalizeAddressNumber(form.address_number) || null,
           address_complement: text(form.address_complement),
           address_district: text(form.address_district),
           city: form.city.trim(),
@@ -856,7 +875,8 @@ export default function TechnicianSignupPage() {
           skills: form.skills.filter((s) => s.name.trim().length >= 2).map((s) => ({ ...s, name: s.name.trim() })),
           certifications: text(form.certifications),
           tools: text(form.tools),
-          bio: text(form.bio),
+          // Com os parágrafos (as quebras de linha ficam).
+          bio: normalizeBio(form.bio) || null,
           company_document: text(form.company_document),
           company_name: company ? text(form.company_name) : null,
           company_trade_name: company ? text(form.company_trade_name) : null,
@@ -1165,7 +1185,10 @@ export default function TechnicianSignupPage() {
                       onChange={(v) => set("postal_code", v)}
                       address={{ street: form.address, district: form.address_district, city: form.city, state: form.state }}
                       // Nada aqui foi gravado: livre é o vazio e o que a busca anterior pôs; o resto a pessoa digitou.
+                      // O campo monta de novo ao voltar à etapa: é daqui que ele sabe o que ainda é da busca anterior
+                      // (o CEP geral esvazia logradouro e bairro que estão com esse valor).
                       opened={cepFilled}
+                      lastFill={cepFilled}
                       onApply={(found, info) => {
                         setCepFilled((before) => ({ ...before, ...Object.fromEntries(info.filled.map((key) => [key, found[key]])) }));
                         setForm((f) => ({
@@ -1200,7 +1223,11 @@ export default function TechnicianSignupPage() {
                         ref={numberRef}
                         name="address_number"
                         value={form.address_number}
-                        onChange={(e) => set("address_number", e.target.value)}
+                        // Em maiúsculas, como se grava ("100A", "S/N").
+                        onChange={(e) => set("address_number", e.target.value.toUpperCase())}
+                        autoCapitalize="characters"
+                        autoCorrect="off"
+                        spellCheck={false}
                         maxLength={PROFILE_LIMITS.addressNumber}
                         {...invalid("address_number")}
                       />
