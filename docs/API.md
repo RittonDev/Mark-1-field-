@@ -566,8 +566,8 @@ prazo mais apertado; `total` é o tamanho de verdade e `truncated` avisa do cort
 - `reasons: [{code, label, tone}]`: `sla_violated` (danger), `sla_at_risk` (warning), `late_start` (danger,
   agendada que passou 30 min do horário sem sair, a tolerância da Início e do prazo de chegada; não vale com
   visita improdutiva no horário ou depois), `no_technician` (warning, sem técnico de campo),
-  `inactive_technician` (warning, "Técnico sem acesso: libere ou troque": técnico inativo no cadastro, sem
-  acesso ao app), `unproductive` (warning, improdutiva sem nova agenda, fora de campo; enquanto espera a data
+  `inactive_technician` (warning, "Técnico sem acesso: libere ou troque": técnico sem acesso ao app, `is_active`
+  falso; a situação na operação, Inativo ou Bloqueado, não entra aqui), `unproductive` (warning, improdutiva sem nova agenda, fora de campo; enquanto espera a data
   nova, sem os motivos de chegada), `violation_pending` (info, concluída
   com SLA a justificar), `field_stuck` (danger, "Em campo há 13 h: conclua ou corrija", em dias a partir de
   24 h; dado parado, a regra de `services/field.py`) e as regras de campo (ver abaixo): `arrival_late`,
@@ -2777,10 +2777,11 @@ Os links dos e-mails usam o `WEB_URL` de sempre. Configure SPF e DKIM do domíni
    (campos livres), e o `PATCH` da central e a ficha pública mandam campos que a API velha ignora calada: depois de
    publicar, confira a gravação campo a campo.
 3. O app sobe depois da API (`MyProfileUpdate` recusa campo desconhecido). O app novo com a API velha (sem os campos
-   novos no `MyProfile`): as telas do cadastro, menos Foto e Senha, mostram "Indisponível no momento" e não gravam nada,
-   e o "Esqueci minha senha" cai no texto de pedir à central (404). O app de antes com a API nova: lê `pix` (a
-   preferencial PIX); gravar `pix` recebe "Atualize o app…"; trocar o e-mail fica pendente até o link; `address_line`
-   grava o logradouro e limpa número e complemento.
+   novos no `MyProfile`): Dados pessoais, Endereço, Contato, Mini biografia, Dados empresariais e Formas de recebimento
+   mostram "Indisponível no momento" e não gravam nada (Foto, Senha e o perfil profissional seguem como antes, sem o
+   veículo e a indisponibilidade), e o "Esqueci minha senha" cai no texto de pedir à central (404). O app de antes com
+   a API nova: lê `pix` (a preferencial PIX); gravar `pix` recebe "Atualize o app…"; trocar o e-mail fica pendente até
+   o link; `address_line` grava o logradouro e limpa número e complemento.
 4. `PRIVACY_VERSION` = a data do dia da publicação, igual em `backend/app/schemas/onboarding.py` e nas duas cópias de
    `constants.ts` (hoje "2026-11-25").
 5. Sem SMTP tudo funciona: `mail_enabled` falso, os e-mails ficam "Não enviado", o "Esqueci minha senha" manda falar com
