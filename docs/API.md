@@ -89,7 +89,8 @@ Origem: `web`, `mobile`, `email`, `phone`, `whatsapp`, `monitoring`.
 - `POST /auth/change-password` `{current_password, new_password (min 8)}` → `TokenResponse` (200). Encerra as outras sessões do usuário (`sessions_revoked_at`) e devolve tokens novos para este aparelho. 422 com "Senha atual incorreta" ou "A nova senha precisa ser diferente da atual". `UserOut.must_change_password = true` (senha provisória): o app obriga a trocar antes de seguir.
   - Limite: a tentativa conta antes de conferir a senha, então pedidos em paralelo não furam o limite. São 5 em 15 min, somando as do Meu cadastro do técnico (e-mail, dados da empresa e formas de recebimento); a partir da 6ª sai 429 com `Retry-After`, sem conferir a senha. A senha certa zera a conta.
   - Técnico: grava no histórico do cadastro (via app, autor o técnico) `password` "criada no app" (era a provisória) ou "trocada no app", e sai `profile.changed` com `fields: ["password"]` via app (só atualiza as listas da central). Ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
-  - Desde 25/11/2026, a troca também invalida os links de nova senha mandados por e-mail e ainda não usados.
+  - Desde 25/11/2026, a troca também invalida os links de nova senha mandados por e-mail e ainda não usados, e o pedido
+    de nova senha que ainda está na fila não sai mais.
 - **Esqueci minha senha e os links do e-mail** (sem login, desde 25/11/2026): `POST /auth/forgot-password` `{email}` →
   202; `POST /auth/password-reset/check` `{token}` → `PasswordResetCheck`; `POST /auth/password-reset`
   `{token, password}` → `PasswordResetDone`; `POST /auth/verify-email` `{token}` → `VerifyEmailResult`. O token chega
@@ -2724,7 +2725,8 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   senha trocada, provisória gerada, acesso cortado ou outra troca que encerra as sessões depois do pedido
   (`sessions_revoked_at` depois de `created_at`): a nova senha vence ("A senha mudou ou o acesso caiu depois do
   pedido": o link desfaria a senha nova) e a boas-vindas sai sem o link de criar senha, com a linha da senha
-  provisória. Um pedido igual feito depois (outro "Esqueci minha senha") vira linha nova, e a pendente de antes vence.
+  provisória. Depois de uma dessas trocas, um pedido igual (outro "Esqueci minha senha") vira linha nova, e a pendente
+  de antes vence.
 - Links `{WEB_URL}/validar-email#token=…` e `{WEB_URL}/definir-senha#token=…`: o token nasce na hora do envio e vai no
   fragmento (não chega a servidor nem a log); o banco guarda só o SHA-256. Uso único. Um link de senha novo revoga os
   anteriores; os de validação não (qualquer um válido serve). Falhou o envio, o link criado é desfeito junto.

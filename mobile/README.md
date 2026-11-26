@@ -678,10 +678,10 @@ com ponto final); só o que mudou é conferido, e um dado antigo fora da regra n
 depois do primeiro "Salvar", e o primeiro vai também para o rodapé. Sair com alteração não salva pergunta "Descartar as
 alterações?". Salvou: avisa e volta. Puxar a tela relê o cadastro, e voltar ao app com a tela aberta (o link do e-mail
 abre no navegador) também relê (`AppState` "active", em `useProfileLoad`), sem esconder a tela: o que o técnico já
-digitou fica. Com a API de antes do cadastro V2 (`hasCadastroV2`), essas cinco telas e Formas de
-recebimento mostram "Indisponível no momento" / "O servidor ainda não tem esta parte do cadastro. Tente de novo mais
-tarde." com **Tentar de novo**
-([src/components/settings/CadastroUnavailable.tsx](src/components/settings/CadastroUnavailable.tsx)) e não gravam nada.
+digitou fica. Com a API de antes do cadastro V2 (`hasCadastroV2`), essas cinco telas e Formas de recebimento mostram
+"Indisponível no momento" / "O servidor ainda não tem esta parte do cadastro. Tente de novo mais tarde." com **Tentar
+de novo** ([src/components/settings/CadastroUnavailable.tsx](src/components/settings/CadastroUnavailable.tsx)) e não
+gravam nada.
 
 - **Dados pessoais**: o nome completo, o CPF, o RG e a data de nascimento; não pede senha. No fim, o link **Aviso de
   privacidade**.
@@ -715,8 +715,9 @@ tarde." com **Tentar de novo**
     digitou nem no gravado, mas esvazia o logradouro e o bairro que ainda são da busca anterior (o `stale` de
     `cepFill`, também no **Usar este endereço**). Número e complemento que o técnico não mexeu só ficam vazios quando a
     rua muda de fato (`sameStreet`: acento, maiúscula e espaços não contam). O que ele digitou fica e, se difere,
-    aparece "CEP de Rua Exemplo, Centro - Cidade Exemplo-SP." com **Usar este endereço**. Não achou: "CEP não encontrado."; sem rede, fora do ar, pedidos demais ou a
-    API de antes: "Busca de CEP indisponível. Preencha o endereço.". Nada trava o Salvar, e a resposta de um CEP já
+    aparece "CEP de Rua Exemplo, Centro - Cidade Exemplo-SP." com **Usar este endereço**. Não achou: "CEP não
+    encontrado."; sem rede, fora do ar, pedidos demais ou a API de antes: "Busca de CEP indisponível. Preencha o
+    endereço.". Nada trava o Salvar, e a resposta de um CEP já
     trocado é ignorada. Ao salvar, o CEP incompleto dá "CEP inválido: use os 8 números.".
 - **Contato**: o celular (WhatsApp), sempre com DDD; o **Telefone secundário**, opcional (10 ou 11 números: "Informe o
   telefone com DDD." e "Igual ao celular."); e o e-mail de login, conferido só quando muda.
@@ -758,9 +759,8 @@ tarde." com **Tentar de novo**
     titular e a ficha neutra "Preferencial". Tocar abre **Editar**, **Tornar preferencial** (menos na preferencial) e
     **Excluir**, num menu com a forma no título como ela é escrita (`plainTitle`: sem caixa alta, para a chave e-mail
     mascarada não virar maiúsculas). Vazio: "Nenhuma forma de recebimento" / "Adicione uma chave PIX ou uma conta
-    bancária.". No rodapé,
-    **Adicionar chave ou conta** (no limite, "Limite de 10 formas de recebimento. Exclua uma para incluir outra."); no
-    fim, o link **Aviso de privacidade**.
+    bancária.". No rodapé, **Adicionar chave ou conta** (no limite, "Limite de 10 formas de recebimento. Exclua uma para
+    incluir outra."); no fim, o link **Aviso de privacidade**.
   - **A folha** (adicionar e editar; editar não muda o tipo): Chave PIX ou Conta bancária. Na chave, o tipo (CPF, CNPJ,
     E-mail, Celular ou Chave aleatória, com o teclado e a máscara do tipo e **Colar** na aleatória) e a chave, que
     começa com o dado do cadastro (o CPF, o CNPJ da empresa, o e-mail que recebe mensagens ou o celular); celular do PIX
