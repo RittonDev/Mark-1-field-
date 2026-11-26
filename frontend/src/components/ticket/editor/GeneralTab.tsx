@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { AlertTriangle, ChevronDown, Hand, MapPin, Phone, Star, ThumbsUp, Users, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useConfirm } from "@/components/Confirm";
 import { LocationPicker } from "@/components/LocationPicker";
@@ -22,8 +22,10 @@ import {
   SuggestedTechnicians,
   unavailableCaution,
 } from "@/components/new-ticket/SuggestedTechnicians";
+import { TechnicianLink } from "@/components/technicians/TechnicianLink";
 import { AcceptedOfferLine, OfferDialog, OffersBlock } from "@/components/ticket/OffersCard";
 import { PayoutLine } from "@/components/ticket/PayoutsCard";
+import { RatingCard } from "@/components/ticket/RatingCard";
 import { busyTitle, isVersionConflict } from "@/components/ticket/useConflictHandler";
 import { useNow } from "@/components/useNow";
 import { Button, buttonClassName, Card, CardHeader, ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
@@ -60,6 +62,7 @@ import type {
   TicketStatus,
   TicketUpdatePayload,
   User,
+  UserRef,
   UUID,
 } from "@/lib/types";
 import { copyText } from "@/lib/whatsapp";
@@ -288,6 +291,22 @@ function FieldLabel({ id, children }: { id: string; children: React.ReactNode })
   );
 }
 
+const NAME_LINK =
+  "rounded underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none";
+
+/**
+ * O nome de quem está na OS: o técnico vira o link da ficha dele (com acesso a Técnicos; Ctrl/⌘+clique e o botão do
+ * meio abrem outra aba); a equipe interna fica em texto.
+ */
+function PersonName({ person, canTechnicians }: { person: UserRef; canTechnicians: boolean }) {
+  if (!canTechnicians || person.role !== "technician") return <>{person.name}</>;
+  return (
+    <TechnicianLink id={person.id} className={NAME_LINK}>
+      {person.name}
+    </TechnicianLink>
+  );
+}
+
 /** Endereço da loja numa linha (rua, bairro, cidade - UF, CEP). */
 function storeAddressOf(loc: IntakeContext["location"]): string {
   if (!loc) return "";
@@ -381,6 +400,8 @@ export function GeneralTab({
   const { user } = useAuth();
   // A ficha do cliente é da tela Clientes: sem ela, o "Ver cliente" levaria a "Sem acesso".
   const canCustomers = useCan("base.customers");
+  // Idem a ficha do técnico, da tela Técnicos.
+  const canTechnicians = useCan("base.technicians");
   const now = useNow(30_000);
   const formRef = useRef<HTMLFormElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
@@ -901,699 +922,716 @@ export function GeneralTab({
     : null;
 
   return (
-    <form ref={formRef} id={formId} onSubmit={onSubmit} noValidate className="@container flex flex-col gap-4">
-      {notice && dirty ? (
-        <div
-          role="status"
-          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
-        >
-          <p className="flex items-center gap-1.5 font-semibold">
-            <AlertTriangle className="size-4 shrink-0" />
-            Esta OS foi atualizada enquanto você editava.
-          </p>
-          <p className="mt-0.5">
-            Suas alterações continuam aqui; o resto já mostra a versão nova.
-            {notice.length ? ` Também mudaram por fora: ${notice.join(", ")}.` : ""}
-          </p>
-          <button
-            type="button"
-            onClick={async () => {
-              if (await confirm(DISCARD_CONFIRM)) discard();
-            }}
-            disabled={save.isPending}
-            className="mt-1.5 text-xs font-semibold underline underline-offset-2 hover:no-underline disabled:opacity-50"
+    <>
+      <form ref={formRef} id={formId} onSubmit={onSubmit} noValidate className="@container flex flex-col gap-4">
+        {notice && dirty ? (
+          <div
+            role="status"
+            className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
           >
-            Descartar minhas alterações
-          </button>
-        </div>
-      ) : null}
-      {saveError && !conflicts ? (
-        <div ref={errorRef}>
-          <ErrorBox message={saveError} />
-        </div>
-      ) : null}
-
-      {/* Na ordem da abertura da OS (Nova OS): cliente, localização, tipo de OS, escopo, agendamento,
-          colaborador e etiquetas. O resto fica em "Mais detalhes". */}
-      <Card>
-        <CardHeader title="Dados da OS" />
-        <div className="grid grid-cols-12 gap-4 p-5">
-          <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-5">
-            <FieldLabel id={fieldId("customer")}>Cliente</FieldLabel>
-            <Combobox
-              items={customerItems}
-              value={form.customerId}
-              valueLabel={customerName ?? undefined}
-              onChange={(c) => setCustomer(c?.id ?? "")}
-              loading={customers.isLoading}
-              labelledBy={fieldId("customer")}
-              placeholder="Buscar cliente por nome ou CNPJ"
-              emptyText="Nenhum cliente com esse nome ou CNPJ"
-              clearLabel="Tirar o cliente"
-              renderItem={(c) => (
-                <span className="flex flex-col">
-                  <span className="font-medium">
-                    {c.name}
-                    {c.is_active ? null : <span className="ml-1.5 text-[11px] font-medium text-ink-muted">(inativo)</span>}
-                  </span>
-                  {c.document ? <span className="text-xs text-ink-muted tabular-nums">{formatDocument(c.document)}</span> : null}
-                </span>
-              )}
-            />
-            {intakeCustomer ? (
-              <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
-                <span>
-                  Total de OS: <b className="text-ink">{intakeCustomer.total_tickets}</b>
-                </span>
-                {intakeCustomer.rating_average != null ? (
-                  <span className="inline-flex items-center gap-1">
-                    <Star className="size-3" /> Média de avaliação: <b className="text-ink">{intakeCustomer.rating_average}</b>
-                  </span>
-                ) : null}
-                {intakeCustomer.rating_last != null ? (
-                  <span className="inline-flex items-center gap-1">
-                    <ThumbsUp className="size-3" /> Última avaliação: <b className="text-ink">{intakeCustomer.rating_last}</b>
-                  </span>
-                ) : null}
-                {canCustomers ? (
-                  <Link href={`/clientes/${intakeCustomer.id}`} className="font-medium text-brand-ink hover:underline">
-                    Ver cliente
-                  </Link>
-                ) : null}
-              </p>
-            ) : null}
-          </div>
-
-          {/* Rótulo fora de <label>: dentro dele, o clique no texto acionaria o "Trocar". A busca já
-              trata Enter (escolhe a loja, não salva a OS) e Esc (fecha só a lista). */}
-          <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-7">
-            <FieldLabel id={fieldId("location")}>Localização</FieldLabel>
-            {changingLocation || !form.locationId ? (
-              <>
-                <LocationPicker
-                  labelledBy={fieldId("location")}
-                  customerId={form.customerId || null}
-                  // Como na Nova OS: só as lojas do cliente escolhido (para outra rede, troque o cliente antes).
-                  requireCustomer
-                  customerName={customerName}
-                  value={null}
-                  onChange={(loc: Location | null) => {
-                    if (!loc) return;
-                    setForm((f) => ({
-                      ...f,
-                      locationId: loc.id,
-                      locationLabel: [loc.name, loc.code].filter(Boolean).join(" - "),
-                      customerId: loc.customer_id ?? f.customerId,
-                    }));
-                    setChangingLocation(false);
-                  }}
-                />
-                {form.locationId ? (
-                  <button type="button" onClick={() => setChangingLocation(false)} className={buttonClassName("ghost", "sm", "self-start")}>
-                    Manter {form.locationLabel}
-                  </button>
-                ) : null}
-              </>
-            ) : (
-              <div className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface pr-1 pl-3 text-sm shadow-elev-1">
-                <MapPin className="size-4 shrink-0 text-ink-subtle" />
-                <span className="min-w-0 flex-1 truncate text-ink">{form.locationLabel}</span>
-                <button
-                  type="button"
-                  onClick={() => setChangingLocation(true)}
-                  className={buttonClassName("ghost", "sm", "h-7 px-2")}
-                  aria-label={`Trocar a loja (${form.locationLabel})`}
-                >
-                  Trocar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setForm((f) => ({ ...f, locationId: "", locationLabel: "" }))}
-                  className="inline-flex size-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-                  aria-label="Tirar a localização"
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-            )}
-            {/* Onde o técnico vai e com quem falar na loja (o endereço do atendimento muda em "Mais detalhes"). */}
-            {!changingLocation && (address || intakeLocation?.contact_phone) ? (
-              <div className="flex flex-col gap-1 text-xs text-ink-muted">
-                {address ? (
-                  <p className="flex items-start gap-1.5">
-                    <MapPin aria-hidden className="mt-px size-3.5 shrink-0 text-ink-subtle" />
-                    <span className="min-w-0 break-words">
-                      {form.serviceAddress.trim() ? (
-                        <>
-                          Atendimento em: <span className="font-medium text-ink">{address}</span>
-                        </>
-                      ) : (
-                        address
-                      )}
-                    </span>
-                  </p>
-                ) : null}
-                {intakeLocation?.contact_phone ? (
-                  <p className="flex items-start gap-1.5">
-                    <Phone aria-hidden className="mt-px size-3.5 shrink-0 text-ink-subtle" />
-                    <span className="min-w-0 break-words">
-                      {intakeLocation.contact_phone}
-                      {intakeLocation.contact_name ? ` · ${intakeLocation.contact_name}` : ""}
-                    </span>
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="col-span-12 flex flex-col gap-1.5">
-            <FieldLabel id={fieldId("type")}>Tipo de OS</FieldLabel>
-            <Combobox
-              items={typeItems}
-              value={form.serviceTypeId}
-              valueLabel={typeLabel}
-              onChange={(t) => {
-                if ((t?.id ?? "") === form.serviceTypeId) return;
-                if (t) {
-                  // A categoria acompanha o tipo quando estava vazia ou era a padrão do tipo anterior; a escolhida à
-                  // mão fica. Tipo anterior fora da lista (inativo, de outro cliente): a API aplica a mesma regra.
-                  const previous = serviceTypes.data?.find((s) => s.id === form.serviceTypeId);
-                  if (!form.categoryId || (previous && (previous.category_id ?? "") === form.categoryId)) {
-                    set("categoryId", t.category_id ?? "");
-                  }
-                }
-                set("serviceTypeId", t?.id ?? "");
-                // O tipo traz a duração dele (ajustável no agendamento).
-                if (t) set("estimated", String(t.estimated_minutes));
-              }}
-              loading={serviceTypes.isLoading}
-              labelledBy={fieldId("type")}
-              placeholder="Buscar tipo de OS"
-              emptyText="Nenhum tipo de OS com esse nome"
-              clearLabel="Tirar o tipo de OS"
-              renderItem={(t) => (
-                <span className="flex flex-col">
-                  <span className="flex flex-wrap items-center gap-x-1.5 font-medium">
-                    {t.name}
-                    {t.customer ? (
-                      <span className="rounded bg-surface-3 px-1.5 text-[11px] font-medium text-ink-muted">{t.customer.name}</span>
-                    ) : null}
-                  </span>
-                  <span className="text-xs text-ink-muted">{serviceTypeTiming(t)}</span>
-                </span>
-              )}
-            />
-          </div>
-
-          <div className="col-span-12 flex flex-col gap-1">
-            <Field label="Escopo">
-              <Textarea
-                rows={4}
-                value={form.description}
-                onChange={(e) => set("description", e.target.value)}
-                maxLength={20000}
-                placeholder="O que deve ser feito no atendimento, de forma clara."
-              />
-            </Field>
-            <Counter value={form.description} max={20000} />
-          </div>
-
-          <Field label="Data do agendamento" className="col-span-6 @xl:col-span-4">
-            <Input
-              type="date"
-              value={form.date}
-              onChange={(e) => set("date", e.target.value)}
-              aria-invalid={errors.schedule && !form.date ? true : undefined}
-              aria-describedby={shown("schedule") ? fieldId("schedule") : undefined}
-            />
-          </Field>
-          <Field label="Hora do agendamento" className="col-span-6 @xl:col-span-4">
-            <Input
-              type="time"
-              value={form.time}
-              onChange={(e) => set("time", e.target.value)}
-              aria-invalid={errors.schedule && !form.time ? true : undefined}
-              aria-describedby={shown("schedule") ? fieldId("schedule") : undefined}
-            />
-          </Field>
-          <Field
-            label="Duração estimada (min)"
-            className="col-span-12 @xl:col-span-4"
-            hint={minutes ? formatMinutes(minutes) : undefined}
-            error={shown("estimated")}
-          >
-            <Input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={10080}
-              step={1}
-              value={form.estimated}
-              onChange={(e) => set("estimated", e.target.value)}
-              aria-invalid={errors.estimated ? true : undefined}
-            />
-          </Field>
-          {shown("schedule") ? (
-            <div className="col-span-12 -mt-2">
-              <FieldError id={fieldId("schedule")} message={errors.schedule} />
-            </div>
-          ) : null}
-          {unscheduledWarning ? (
-            <Caution className="col-span-12">Sem data e hora, a OS sai de Agendado e volta para Atribuído (fora da agenda do técnico).</Caution>
-          ) : null}
-
-          <Field label="Colaborador" className="col-span-12 @xl:col-span-6">
-            <Select value={form.assigneeId} onChange={(e) => setAssignee(e.target.value)}>
-              <option value="">Sem colaborador</option>
-              {favoriteCity && favoriteTechs.length ? (
-                <optgroup label={`Favoritos em ${favoriteCity.city}-${favoriteCity.state}`}>
-                  {favoriteTechs.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} · {p.open_tickets} em aberto{awaySuffix(p)}
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null}
-              {otherTechs.length ? (
-                <optgroup label="Técnicos">
-                  {otherTechs.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} · {p.open_tickets} em aberto{awaySuffix(p)}
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null}
-              {internal.length ? (
-                <optgroup label="Equipe interna">
-                  {internal.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({ROLE[p.role]}) · {p.open_tickets} em aberto
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null}
-              {offTechs.length ? (
-                // À vista com o motivo, sem poder escolher (o técnico já na OS continua aparecendo como escolhido).
-                <optgroup label="Inativos e bloqueados">
-                  {offTechs.map((p) => (
-                    <option key={p.id} value={p.id} disabled>
-                      {offText(p)}
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null}
-              {form.assigneeId && !assigneeListed ? (
-                <option value={form.assigneeId}>
-                  {assigneeName ?? "Técnico atual"}
-                  {noAccess.has(form.assigneeId) ? " · sem acesso ao app" : ""}
-                </option>
-              ) : null}
-            </Select>
-          </Field>
-          <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-6">
-            <span className="text-xs font-semibold text-ink/80">Outros colaboradores</span>
-            <HelpersField
-              hideLabel
-              options={technicians.map((p) => {
-                const away = awayOn(p);
-                return { id: p.id, name: p.name, unavailable: away ? `indisponível ${periodShort(away, todayKey)}` : undefined };
-              })}
-              assigneeId={form.assigneeId as UUID | ""}
-              helperIds={form.helperIds}
-              names={names}
-              noAccess={noAccess}
-              onChange={(ids) => set("helperIds", ids)}
-            />
-          </div>
-          {assigneeWarning ? <Caution className="col-span-12">{assigneeWarning.text}</Caution> : null}
-          {receiveCautions.map((c) => (
-            <Caution key={c.id} className="col-span-12">
-              {c.text}
-            </Caution>
-          ))}
-          {offersClosing ? (
-            <Caution className="col-span-12">
-              {openOffers === 1
-                ? "Ao salvar, a oferta em aberto é cancelada: o técnico vê no app que a OS foi atribuída."
-                : `Ao salvar, as ${openOffers} ofertas em aberto são canceladas: os técnicos veem no app que a OS foi atribuída.`}
-            </Caution>
-          ) : null}
-          {server.assignee ? (
-            // O valor (com Pagamentos) e, se o técnico entrou pela oferta, quando aceitou e leu o escopo (toda a gestão).
-            <div className="col-span-12 flex flex-col gap-2">
-              <PayoutLine ticket={server} />
-              <AcceptedOfferLine ticket={server} />
-            </div>
-          ) : (
-            // Sem técnico: as ofertas com preço (quem aceitar primeiro pelo app fica com a OS). Cada ação
-            // grava na hora, fora do FormState: nada daqui entra no Salvar nem conta como alteração.
-            <OffersBlock ticket={server} locked={dirty} onOffer={() => setOffering(true)} className="col-span-12" />
-          )}
-          {/* Fora do ternário: se a OS ganha técnico com o diálogo aberto, ele continua e diz por que travou
-              (e o erro de um envio em andamento não se perde). Portal no <body>: não ocupa a grade. */}
-          {offering ? <OfferDialog ticket={server} onClose={() => setOffering(false)} /> : null}
-
-          <div className="col-span-12">
-            {suggestionsShown ? (
-              <div className="rounded-xl border border-line bg-surface-2/40 p-3">
-                <SectionTitle
-                  wrap
-                  className="mb-2"
-                  aside={
-                    <>
-                      {form.locationId ? (
-                        <button type="button" onClick={() => void copyInvite()} className={buttonClassName("ghost", "sm", "h-7 px-2")}>
-                          Copiar convite para o grupo
-                        </button>
-                      ) : null}
-                      {suggestOpen ? (
-                        <button type="button" onClick={() => setSuggestOpen(false)} className={buttonClassName("ghost", "sm", "h-7 px-2")}>
-                          Recolher
-                        </button>
-                      ) : null}
-                    </>
-                  }
-                >
-                  Técnicos mais indicados para esta loja
-                </SectionTitle>
-                <SuggestedTechnicians
-                  items={suggestions.data}
-                  loading={suggestions.isLoading}
-                  hasPlace={Boolean(form.locationId)}
-                  scheduled={Boolean(lazyStart)}
-                  assigneeId={form.assigneeId as UUID | ""}
-                  helperIds={form.helperIds}
-                  onAssign={(t) => setAssignee(t?.id ?? "")}
-                  onToggleHelper={toggleHelper}
-                  invite={(t) => invite(t.name, t.id)}
-                  error={suggestions.error}
-                  onRetry={() => void suggestions.refetch()}
-                  favorites={favoriteCity}
-                />
-              </div>
-            ) : (
-              <button type="button" onClick={() => setSuggestOpen(true)} className={buttonClassName("secondary", "sm")}>
-                <Users className="size-3.5" />
-                Ver técnicos indicados para esta loja
-              </button>
-            )}
-          </div>
-
-          {conflicts ? (
-            <div ref={conflictRef} className="col-span-12">
-              <ConflictList tone="error" items={conflicts} title={conflictsTitle} />
-            </div>
-          ) : lazyStart && (form.assigneeId || form.helperIds.length) && (assigneeChanged || schedChanged || helpersChanged) ? (
-            <div className="col-span-12 flex flex-col gap-2">
-              {form.assigneeId ? (
-                <ConflictHint
-                  assigneeId={form.assigneeId}
-                  assigneeName={names[form.assigneeId]}
-                  start={lazyStart}
-                  estimatedMinutes={lazyMinutes}
-                  excludeId={ticket.id}
-                />
-              ) : null}
-              {form.helperIds.map((id) => (
-                <ConflictHint key={id} assigneeId={id} assigneeName={names[id]} start={lazyStart} estimatedMinutes={lazyMinutes} excludeId={ticket.id} />
-              ))}
-            </div>
-          ) : null}
-
-          <div className="col-span-12 flex flex-col gap-1.5">
-            <FieldLabel id={fieldId("tags")}>Etiquetas</FieldLabel>
-            <TagsInput
-              value={form.tags}
-              onChange={(tags) => set("tags", tags)}
-              labelledBy={fieldId("tags")}
-              describedBy={autoTags ? fieldId("tags-hint") : undefined}
-            />
-            {autoTags ? (
-              <span id={fieldId("tags-hint")} className="text-xs text-ink-subtle">
-                {autoTags}
-              </span>
-            ) : null}
-          </div>
-        </div>
-      </Card>
-
-      {/* Recolhido, o cartão é só o cabeçalho: sem a linha de baixo dele, que dobraria com a borda do cartão. */}
-      <Card className={moreOpen ? undefined : "[&>div:first-child]:border-b-0"}>
-        <CardHeader
-          title="Mais detalhes"
-          description={moreOpen ? undefined : "Título, prazo, analista, projeto, pedido do cliente, recado, endereço, situação, horários e conclusão."}
-          actions={
+            <p className="flex items-center gap-1.5 font-semibold">
+              <AlertTriangle className="size-4 shrink-0" />
+              Esta OS foi atualizada enquanto você editava.
+            </p>
+            <p className="mt-0.5">
+              Suas alterações continuam aqui; o resto já mostra a versão nova.
+              {notice.length ? ` Também mudaram por fora: ${notice.join(", ")}.` : ""}
+            </p>
             <button
               type="button"
-              onClick={toggleMore}
-              aria-expanded={moreOpen}
-              aria-controls={fieldId("more")}
-              aria-label={moreOpen ? "Recolher mais detalhes" : "Mostrar mais detalhes"}
-              className={buttonClassName("ghost", "sm")}
+              onClick={async () => {
+                if (await confirm(DISCARD_CONFIRM)) discard();
+              }}
+              disabled={save.isPending}
+              className="mt-1.5 text-xs font-semibold underline underline-offset-2 hover:no-underline disabled:opacity-50"
             >
-              {moreOpen ? "Recolher" : "Mostrar"}
-              <ChevronDown aria-hidden className={clsx("size-3.5 transition-transform duration-150", moreOpen && "rotate-180")} />
+              Descartar minhas alterações
             </button>
-          }
-        />
-        <div id={fieldId("more")} hidden={!moreOpen} className="divide-y divide-line">
-          <div className="p-5">
-            <SectionTitle className="mb-3">Identificação</SectionTitle>
-            <div className="grid grid-cols-12 gap-4">
-              <Field label="Identificador" className="col-span-12 @xl:col-span-3">
-                <Input value={ticket.code} readOnly className="bg-surface-2 font-mono text-ink-muted" />
-              </Field>
-              <Field label="Título" required error={shown("title")} className="col-span-12 @xl:col-span-9">
-                <Input
-                  value={form.title}
-                  onChange={(e) => set("title", e.target.value)}
-                  maxLength={200}
-                  aria-required="true"
-                  aria-invalid={errors.title ? true : undefined}
+          </div>
+        ) : null}
+        {saveError && !conflicts ? (
+          <div ref={errorRef}>
+            <ErrorBox message={saveError} />
+          </div>
+        ) : null}
+  
+        {/* Na ordem da abertura da OS (Nova OS): cliente, localização, tipo de OS, escopo, agendamento,
+            colaborador e etiquetas. O resto fica em "Mais detalhes". */}
+        <Card>
+          <CardHeader title="Dados da OS" />
+          <div className="grid grid-cols-12 gap-4 p-5">
+            <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-5">
+              <FieldLabel id={fieldId("customer")}>Cliente</FieldLabel>
+              <Combobox
+                items={customerItems}
+                value={form.customerId}
+                valueLabel={customerName ?? undefined}
+                onChange={(c) => setCustomer(c?.id ?? "")}
+                loading={customers.isLoading}
+                labelledBy={fieldId("customer")}
+                placeholder="Buscar cliente por nome ou CNPJ"
+                emptyText="Nenhum cliente com esse nome ou CNPJ"
+                clearLabel="Tirar o cliente"
+                renderItem={(c) => (
+                  <span className="flex flex-col">
+                    <span className="font-medium">
+                      {c.name}
+                      {c.is_active ? null : <span className="ml-1.5 text-[11px] font-medium text-ink-muted">(inativo)</span>}
+                    </span>
+                    {c.document ? <span className="text-xs text-ink-muted tabular-nums">{formatDocument(c.document)}</span> : null}
+                  </span>
+                )}
+              />
+              {intakeCustomer ? (
+                <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
+                  <span>
+                    Total de OS: <b className="text-ink">{intakeCustomer.total_tickets}</b>
+                  </span>
+                  {intakeCustomer.rating_average != null ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Star className="size-3" /> Média de avaliação: <b className="text-ink">{intakeCustomer.rating_average}</b>
+                    </span>
+                  ) : null}
+                  {intakeCustomer.rating_last != null ? (
+                    <span className="inline-flex items-center gap-1">
+                      <ThumbsUp className="size-3" /> Última avaliação: <b className="text-ink">{intakeCustomer.rating_last}</b>
+                    </span>
+                  ) : null}
+                  {canCustomers ? (
+                    <Link href={`/clientes/${intakeCustomer.id}`} className="font-medium text-brand-ink hover:underline">
+                      Ver cliente
+                    </Link>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
+  
+            {/* Rótulo fora de <label>: dentro dele, o clique no texto acionaria o "Trocar". A busca já
+                trata Enter (escolhe a loja, não salva a OS) e Esc (fecha só a lista). */}
+            <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-7">
+              <FieldLabel id={fieldId("location")}>Localização</FieldLabel>
+              {changingLocation || !form.locationId ? (
+                <>
+                  <LocationPicker
+                    labelledBy={fieldId("location")}
+                    customerId={form.customerId || null}
+                    // Como na Nova OS: só as lojas do cliente escolhido (para outra rede, troque o cliente antes).
+                    requireCustomer
+                    customerName={customerName}
+                    value={null}
+                    onChange={(loc: Location | null) => {
+                      if (!loc) return;
+                      setForm((f) => ({
+                        ...f,
+                        locationId: loc.id,
+                        locationLabel: [loc.name, loc.code].filter(Boolean).join(" - "),
+                        customerId: loc.customer_id ?? f.customerId,
+                      }));
+                      setChangingLocation(false);
+                    }}
+                  />
+                  {form.locationId ? (
+                    <button type="button" onClick={() => setChangingLocation(false)} className={buttonClassName("ghost", "sm", "self-start")}>
+                      Manter {form.locationLabel}
+                    </button>
+                  ) : null}
+                </>
+              ) : (
+                <div className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface pr-1 pl-3 text-sm shadow-elev-1">
+                  <MapPin className="size-4 shrink-0 text-ink-subtle" />
+                  <span className="min-w-0 flex-1 truncate text-ink">{form.locationLabel}</span>
+                  <button
+                    type="button"
+                    onClick={() => setChangingLocation(true)}
+                    className={buttonClassName("ghost", "sm", "h-7 px-2")}
+                    aria-label={`Trocar a loja (${form.locationLabel})`}
+                  >
+                    Trocar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, locationId: "", locationLabel: "" }))}
+                    className="inline-flex size-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                    aria-label="Tirar a localização"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              )}
+              {/* Onde o técnico vai e com quem falar na loja (o endereço do atendimento muda em "Mais detalhes"). */}
+              {!changingLocation && (address || intakeLocation?.contact_phone) ? (
+                <div className="flex flex-col gap-1 text-xs text-ink-muted">
+                  {address ? (
+                    <p className="flex items-start gap-1.5">
+                      <MapPin aria-hidden className="mt-px size-3.5 shrink-0 text-ink-subtle" />
+                      <span className="min-w-0 break-words">
+                        {form.serviceAddress.trim() ? (
+                          <>
+                            Atendimento em: <span className="font-medium text-ink">{address}</span>
+                          </>
+                        ) : (
+                          address
+                        )}
+                      </span>
+                    </p>
+                  ) : null}
+                  {intakeLocation?.contact_phone ? (
+                    <p className="flex items-start gap-1.5">
+                      <Phone aria-hidden className="mt-px size-3.5 shrink-0 text-ink-subtle" />
+                      <span className="min-w-0 break-words">
+                        {intakeLocation.contact_phone}
+                        {intakeLocation.contact_name ? ` · ${intakeLocation.contact_name}` : ""}
+                      </span>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+  
+            <div className="col-span-12 flex flex-col gap-1.5">
+              <FieldLabel id={fieldId("type")}>Tipo de OS</FieldLabel>
+              <Combobox
+                items={typeItems}
+                value={form.serviceTypeId}
+                valueLabel={typeLabel}
+                onChange={(t) => {
+                  if ((t?.id ?? "") === form.serviceTypeId) return;
+                  if (t) {
+                    // A categoria acompanha o tipo quando estava vazia ou era a padrão do tipo anterior; a escolhida à
+                    // mão fica. Tipo anterior fora da lista (inativo, de outro cliente): a API aplica a mesma regra.
+                    const previous = serviceTypes.data?.find((s) => s.id === form.serviceTypeId);
+                    if (!form.categoryId || (previous && (previous.category_id ?? "") === form.categoryId)) {
+                      set("categoryId", t.category_id ?? "");
+                    }
+                  }
+                  set("serviceTypeId", t?.id ?? "");
+                  // O tipo traz a duração dele (ajustável no agendamento).
+                  if (t) set("estimated", String(t.estimated_minutes));
+                }}
+                loading={serviceTypes.isLoading}
+                labelledBy={fieldId("type")}
+                placeholder="Buscar tipo de OS"
+                emptyText="Nenhum tipo de OS com esse nome"
+                clearLabel="Tirar o tipo de OS"
+                renderItem={(t) => (
+                  <span className="flex flex-col">
+                    <span className="flex flex-wrap items-center gap-x-1.5 font-medium">
+                      {t.name}
+                      {t.customer ? (
+                        <span className="rounded bg-surface-3 px-1.5 text-[11px] font-medium text-ink-muted">{t.customer.name}</span>
+                      ) : null}
+                    </span>
+                    <span className="text-xs text-ink-muted">{serviceTypeTiming(t)}</span>
+                  </span>
+                )}
+              />
+            </div>
+  
+            <div className="col-span-12 flex flex-col gap-1">
+              <Field label="Escopo">
+                <Textarea
+                  rows={4}
+                  value={form.description}
+                  onChange={(e) => set("description", e.target.value)}
+                  maxLength={20000}
+                  placeholder="O que deve ser feito no atendimento, de forma clara."
                 />
               </Field>
-              <Field label="Contrato de prazo (prioridade)" className="col-span-12 @xl:col-span-6">
-                <Select value={form.priority} onChange={(e) => set("priority", e.target.value as TicketPriority)}>
-                  {PRIORITY_ORDER.map((p) => (
-                    <option key={p} value={p}>
-                      {PRIORITY[p].code} - {PRIORITY[p].label}
+              <Counter value={form.description} max={20000} />
+            </div>
+  
+            <Field label="Data do agendamento" className="col-span-6 @xl:col-span-4">
+              <Input
+                type="date"
+                value={form.date}
+                onChange={(e) => set("date", e.target.value)}
+                aria-invalid={errors.schedule && !form.date ? true : undefined}
+                aria-describedby={shown("schedule") ? fieldId("schedule") : undefined}
+              />
+            </Field>
+            <Field label="Hora do agendamento" className="col-span-6 @xl:col-span-4">
+              <Input
+                type="time"
+                value={form.time}
+                onChange={(e) => set("time", e.target.value)}
+                aria-invalid={errors.schedule && !form.time ? true : undefined}
+                aria-describedby={shown("schedule") ? fieldId("schedule") : undefined}
+              />
+            </Field>
+            <Field
+              label="Duração estimada (min)"
+              className="col-span-12 @xl:col-span-4"
+              hint={minutes ? formatMinutes(minutes) : undefined}
+              error={shown("estimated")}
+            >
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={10080}
+                step={1}
+                value={form.estimated}
+                onChange={(e) => set("estimated", e.target.value)}
+                aria-invalid={errors.estimated ? true : undefined}
+              />
+            </Field>
+            {shown("schedule") ? (
+              <div className="col-span-12 -mt-2">
+                <FieldError id={fieldId("schedule")} message={errors.schedule} />
+              </div>
+            ) : null}
+            {unscheduledWarning ? (
+              <Caution className="col-span-12">Sem data e hora, a OS sai de Agendado e volta para Atribuído (fora da agenda do técnico).</Caution>
+            ) : null}
+  
+            {/* O "Ver ficha" do técnico gravado fica fora do <label> (o resumo do cabeçalho acha o campo pelo rótulo),
+                na linha do rótulo. Mesma aba: com alteração não salva, a guarda da Geral pergunta antes. */}
+            <div className="relative col-span-12 @xl:col-span-6">
+              <Field label="Colaborador">
+                <Select value={form.assigneeId} onChange={(e) => setAssignee(e.target.value)}>
+                  <option value="">Sem colaborador</option>
+                  {favoriteCity && favoriteTechs.length ? (
+                    <optgroup label={`Favoritos em ${favoriteCity.city}-${favoriteCity.state}`}>
+                      {favoriteTechs.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} · {p.open_tickets} em aberto{awaySuffix(p)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {otherTechs.length ? (
+                    <optgroup label="Técnicos">
+                      {otherTechs.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} · {p.open_tickets} em aberto{awaySuffix(p)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {internal.length ? (
+                    <optgroup label="Equipe interna">
+                      {internal.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({ROLE[p.role]}) · {p.open_tickets} em aberto
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {offTechs.length ? (
+                    // À vista com o motivo, sem poder escolher (o técnico já na OS continua aparecendo como escolhido).
+                    <optgroup label="Inativos e bloqueados">
+                      {offTechs.map((p) => (
+                        <option key={p.id} value={p.id} disabled>
+                          {offText(p)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {form.assigneeId && !assigneeListed ? (
+                    <option value={form.assigneeId}>
+                      {assigneeName ?? "Técnico atual"}
+                      {noAccess.has(form.assigneeId) ? " · sem acesso ao app" : ""}
                     </option>
-                  ))}
+                  ) : null}
                 </Select>
               </Field>
-              <Field label="Categoria" className="col-span-12 @xl:col-span-6">
-                <Select value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
-                  <option value="">Sem categoria</option>
-                  {(categories.data ?? [])
-                    .filter((c) => c.is_active || c.id === form.categoryId)
-                    .sort((a, b) => a.full_name.localeCompare(b.full_name))
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.full_name}
-                      </option>
-                    ))}
-                </Select>
-              </Field>
+              {canTechnicians && server.assignee?.role === "technician" ? (
+                <TechnicianLink
+                  id={server.assignee.id}
+                  label={`Ver ficha de ${server.assignee.name}`}
+                  className={clsx(NAME_LINK, "absolute top-0 right-0 text-xs leading-4 font-medium text-brand-ink")}
+                >
+                  Ver ficha
+                </TechnicianLink>
+              ) : null}
+            </div>
+            <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-6">
+              <span className="text-xs font-semibold text-ink/80">Outros colaboradores</span>
+              <HelpersField
+                hideLabel
+                options={technicians.map((p) => {
+                  const away = awayOn(p);
+                  return { id: p.id, name: p.name, unavailable: away ? `indisponível ${periodShort(away, todayKey)}` : undefined };
+                })}
+                assigneeId={form.assigneeId as UUID | ""}
+                helperIds={form.helperIds}
+                names={names}
+                noAccess={noAccess}
+                onChange={(ids) => set("helperIds", ids)}
+              />
+            </div>
+            {assigneeWarning ? <Caution className="col-span-12">{assigneeWarning.text}</Caution> : null}
+            {receiveCautions.map((c) => (
+              <Caution key={c.id} className="col-span-12">
+                {c.text}
+              </Caution>
+            ))}
+            {offersClosing ? (
+              <Caution className="col-span-12">
+                {openOffers === 1
+                  ? "Ao salvar, a oferta em aberto é cancelada: o técnico vê no app que a OS foi atribuída."
+                  : `Ao salvar, as ${openOffers} ofertas em aberto são canceladas: os técnicos veem no app que a OS foi atribuída.`}
+              </Caution>
+            ) : null}
+            {server.assignee ? (
+              // O valor (com Pagamentos) e, se o técnico entrou pela oferta, quando aceitou e leu o escopo (toda a gestão).
+              <div className="col-span-12 flex flex-col gap-2">
+                <PayoutLine ticket={server} />
+                <AcceptedOfferLine ticket={server} />
+              </div>
+            ) : (
+              // Sem técnico: as ofertas com preço (quem aceitar primeiro pelo app fica com a OS). Cada ação
+              // grava na hora, fora do FormState: nada daqui entra no Salvar nem conta como alteração.
+              <OffersBlock ticket={server} locked={dirty} onOffer={() => setOffering(true)} className="col-span-12" />
+            )}
+            {/* Fora do ternário: se a OS ganha técnico com o diálogo aberto, ele continua e diz por que travou
+                (e o erro de um envio em andamento não se perde). Portal no <body>: não ocupa a grade. */}
+            {offering ? <OfferDialog ticket={server} onClose={() => setOffering(false)} /> : null}
+  
+            <div className="col-span-12">
+              {suggestionsShown ? (
+                <div className="rounded-xl border border-line bg-surface-2/40 p-3">
+                  <SectionTitle
+                    wrap
+                    className="mb-2"
+                    aside={
+                      <>
+                        {form.locationId ? (
+                          <button type="button" onClick={() => void copyInvite()} className={buttonClassName("ghost", "sm", "h-7 px-2")}>
+                            Copiar convite para o grupo
+                          </button>
+                        ) : null}
+                        {suggestOpen ? (
+                          <button type="button" onClick={() => setSuggestOpen(false)} className={buttonClassName("ghost", "sm", "h-7 px-2")}>
+                            Recolher
+                          </button>
+                        ) : null}
+                      </>
+                    }
+                  >
+                    Técnicos mais indicados para esta loja
+                  </SectionTitle>
+                  <SuggestedTechnicians
+                    items={suggestions.data}
+                    loading={suggestions.isLoading}
+                    hasPlace={Boolean(form.locationId)}
+                    scheduled={Boolean(lazyStart)}
+                    assigneeId={form.assigneeId as UUID | ""}
+                    helperIds={form.helperIds}
+                    onAssign={(t) => setAssignee(t?.id ?? "")}
+                    onToggleHelper={toggleHelper}
+                    invite={(t) => invite(t.name, t.id)}
+                    error={suggestions.error}
+                    onRetry={() => void suggestions.refetch()}
+                    favorites={favoriteCity}
+                  />
+                </div>
+              ) : (
+                <button type="button" onClick={() => setSuggestOpen(true)} className={buttonClassName("secondary", "sm")}>
+                  <Users className="size-3.5" />
+                  Ver técnicos indicados para esta loja
+                </button>
+              )}
+            </div>
+  
+            {conflicts ? (
+              <div ref={conflictRef} className="col-span-12">
+                <ConflictList tone="error" items={conflicts} title={conflictsTitle} />
+              </div>
+            ) : lazyStart && (form.assigneeId || form.helperIds.length) && (assigneeChanged || schedChanged || helpersChanged) ? (
+              <div className="col-span-12 flex flex-col gap-2">
+                {form.assigneeId ? (
+                  <ConflictHint
+                    assigneeId={form.assigneeId}
+                    assigneeName={names[form.assigneeId]}
+                    start={lazyStart}
+                    estimatedMinutes={lazyMinutes}
+                    excludeId={ticket.id}
+                  />
+                ) : null}
+                {form.helperIds.map((id) => (
+                  <ConflictHint key={id} assigneeId={id} assigneeName={names[id]} start={lazyStart} estimatedMinutes={lazyMinutes} excludeId={ticket.id} />
+                ))}
+              </div>
+            ) : null}
+  
+            <div className="col-span-12 flex flex-col gap-1.5">
+              <FieldLabel id={fieldId("tags")}>Etiquetas</FieldLabel>
+              <TagsInput
+                value={form.tags}
+                onChange={(tags) => set("tags", tags)}
+                labelledBy={fieldId("tags")}
+                describedBy={autoTags ? fieldId("tags-hint") : undefined}
+              />
+              {autoTags ? (
+                <span id={fieldId("tags-hint")} className="text-xs text-ink-subtle">
+                  {autoTags}
+                </span>
+              ) : null}
             </div>
           </div>
-
-          <div className="p-5">
-            <SectionTitle className="mb-3">Central</SectionTitle>
-            <div className="grid grid-cols-12 gap-4">
-              <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-6">
-                <FieldLabel id={fieldId("owner")}>Analista responsável</FieldLabel>
-                <div className="flex items-center gap-2">
-                  <Select value={form.ownerId} onChange={(e) => set("ownerId", e.target.value)} className="flex-1" aria-labelledby={fieldId("owner")}>
-                    <option value="">Sem analista (fila geral)</option>
-                    {analysts.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
+        </Card>
+  
+        {/* Recolhido, o cartão é só o cabeçalho: sem a linha de baixo dele, que dobraria com a borda do cartão. */}
+        <Card className={moreOpen ? undefined : "[&>div:first-child]:border-b-0"}>
+          <CardHeader
+            title="Mais detalhes"
+            description={moreOpen ? undefined : "Título, prazo, analista, projeto, pedido do cliente, recado, endereço, situação, horários e conclusão."}
+            actions={
+              <button
+                type="button"
+                onClick={toggleMore}
+                aria-expanded={moreOpen}
+                aria-controls={fieldId("more")}
+                aria-label={moreOpen ? "Recolher mais detalhes" : "Mostrar mais detalhes"}
+                className={buttonClassName("ghost", "sm")}
+              >
+                {moreOpen ? "Recolher" : "Mostrar"}
+                <ChevronDown aria-hidden className={clsx("size-3.5 transition-transform duration-150", moreOpen && "rotate-180")} />
+              </button>
+            }
+          />
+          <div id={fieldId("more")} hidden={!moreOpen} className="divide-y divide-line">
+            <div className="p-5">
+              <SectionTitle className="mb-3">Identificação</SectionTitle>
+              <div className="grid grid-cols-12 gap-4">
+                <Field label="Identificador" className="col-span-12 @xl:col-span-3">
+                  <Input value={ticket.code} readOnly className="bg-surface-2 font-mono text-ink-muted" />
+                </Field>
+                <Field label="Título" required error={shown("title")} className="col-span-12 @xl:col-span-9">
+                  <Input
+                    value={form.title}
+                    onChange={(e) => set("title", e.target.value)}
+                    maxLength={200}
+                    aria-required="true"
+                    aria-invalid={errors.title ? true : undefined}
+                  />
+                </Field>
+                <Field label="Contrato de prazo (prioridade)" className="col-span-12 @xl:col-span-6">
+                  <Select value={form.priority} onChange={(e) => set("priority", e.target.value as TicketPriority)}>
+                    {PRIORITY_ORDER.map((p) => (
+                      <option key={p} value={p}>
+                        {PRIORITY[p].code} - {PRIORITY[p].label}
                       </option>
                     ))}
                   </Select>
-                  {user && form.ownerId !== user.id ? (
-                    <Button onClick={() => set("ownerId", user.id)}>
-                      <Hand className="size-3.5" />
-                      Assumir
-                    </Button>
-                  ) : null}
-                </div>
+                </Field>
+                <Field label="Categoria" className="col-span-12 @xl:col-span-6">
+                  <Select value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
+                    <option value="">Sem categoria</option>
+                    {(categories.data ?? [])
+                      .filter((c) => c.is_active || c.id === form.categoryId)
+                      .sort((a, b) => a.full_name.localeCompare(b.full_name))
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.full_name}
+                        </option>
+                      ))}
+                  </Select>
+                </Field>
               </div>
-              <Field label="Projeto" className="col-span-12 @xl:col-span-6">
-                <Select value={form.projectId} onChange={(e) => set("projectId", e.target.value)}>
-                  <option value="">Não é de projeto (OS avulsa)</option>
-                  {(projects.data ?? [])
-                    .filter((p) => p.status === "active" || p.status === "planning" || p.id === form.projectId)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.code} · {p.name}
-                      </option>
-                    ))}
-                </Select>
-              </Field>
             </div>
-          </div>
-
-          <div className="p-5">
-            <SectionTitle wrap className="mb-3" aside={<span className="text-xs text-ink-muted">Origem: {TICKET_SOURCE[server.source]}</span>}>
-              Pedido do cliente
-            </SectionTitle>
-            <div className="grid grid-cols-12 gap-4">
-              <Field label="Nº do chamado do cliente" className="col-span-12 @xl:col-span-4">
-                <Input
-                  value={form.clientReference}
-                  onChange={(e) => set("clientReference", e.target.value)}
-                  maxLength={80}
-                />
-              </Field>
-              <Field label="Quem pediu" className="col-span-12 @xl:col-span-4">
-                <Input
-                  value={form.requesterName}
-                  onChange={(e) => set("requesterName", e.target.value)}
-                  maxLength={160}
-                  placeholder="Nome de quem abriu o chamado"
-                />
-              </Field>
-              <Field label="Contato" className="col-span-12 @xl:col-span-4">
-                <Input
-                  value={form.requesterContact}
-                  onChange={(e) => set("requesterContact", e.target.value)}
-                  maxLength={160}
-                  inputMode="tel"
-                  placeholder="(11) 90000-0000"
-                />
-              </Field>
+  
+            <div className="p-5">
+              <SectionTitle className="mb-3">Central</SectionTitle>
+              <div className="grid grid-cols-12 gap-4">
+                <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-6">
+                  <FieldLabel id={fieldId("owner")}>Analista responsável</FieldLabel>
+                  <div className="flex items-center gap-2">
+                    <Select value={form.ownerId} onChange={(e) => set("ownerId", e.target.value)} className="flex-1" aria-labelledby={fieldId("owner")}>
+                      <option value="">Sem analista (fila geral)</option>
+                      {analysts.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name}
+                        </option>
+                      ))}
+                    </Select>
+                    {user && form.ownerId !== user.id ? (
+                      <Button onClick={() => set("ownerId", user.id)}>
+                        <Hand className="size-3.5" />
+                        Assumir
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                <Field label="Projeto" className="col-span-12 @xl:col-span-6">
+                  <Select value={form.projectId} onChange={(e) => set("projectId", e.target.value)}>
+                    <option value="">Não é de projeto (OS avulsa)</option>
+                    {(projects.data ?? [])
+                      .filter((p) => p.status === "active" || p.status === "planning" || p.id === form.projectId)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.code} · {p.name}
+                        </option>
+                      ))}
+                  </Select>
+                </Field>
+              </div>
             </div>
-          </div>
-
-          <div className="p-5">
-            <SectionTitle className="mb-3">Visita</SectionTitle>
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1">
-                <Field label="Recado para o técnico" hint="Aparece em destaque no app do técnico">
-                  <Textarea
-                    rows={2}
-                    value={form.visitNote}
-                    onChange={(e) => set("visitNote", e.target.value)}
-                    maxLength={5000}
-                    placeholder="Com quem falar, acesso, o que levar."
+  
+            <div className="p-5">
+              <SectionTitle wrap className="mb-3" aside={<span className="text-xs text-ink-muted">Origem: {TICKET_SOURCE[server.source]}</span>}>
+                Pedido do cliente
+              </SectionTitle>
+              <div className="grid grid-cols-12 gap-4">
+                <Field label="Nº do chamado do cliente" className="col-span-12 @xl:col-span-4">
+                  <Input
+                    value={form.clientReference}
+                    onChange={(e) => set("clientReference", e.target.value)}
+                    maxLength={80}
                   />
                 </Field>
-                <Counter value={form.visitNote} max={5000} />
+                <Field label="Quem pediu" className="col-span-12 @xl:col-span-4">
+                  <Input
+                    value={form.requesterName}
+                    onChange={(e) => set("requesterName", e.target.value)}
+                    maxLength={160}
+                    placeholder="Nome de quem abriu o chamado"
+                  />
+                </Field>
+                <Field label="Contato" className="col-span-12 @xl:col-span-4">
+                  <Input
+                    value={form.requesterContact}
+                    onChange={(e) => set("requesterContact", e.target.value)}
+                    maxLength={160}
+                    inputMode="tel"
+                    placeholder="(11) 90000-0000"
+                  />
+                </Field>
               </div>
-              <Field
-                label="Endereço do atendimento"
-                hint={storeAddress ? `Vazio, vale o endereço da loja: ${storeAddress}` : "Vazio, vale o endereço da loja."}
-              >
-                <Input
-                  value={form.serviceAddress}
-                  onChange={(e) => set("serviceAddress", e.target.value)}
-                  placeholder="Outro lugar para este atendimento"
-                  maxLength={255}
-                />
-              </Field>
             </div>
-          </div>
-
-          <div className="p-5">
-            <SectionTitle className="mb-1">Situação e horários</SectionTitle>
-            <p className="mb-3 text-xs text-ink-muted">Os horários reais vêm do app do técnico; aqui a central corrige, com o motivo.</p>
-            <div className="grid grid-cols-12 gap-4">
-              <Field
-                label="Situação"
-                className="col-span-12 @xl:col-span-4"
-                hint={dirty && statusOptions.length > 1 ? "Salve as alterações para mudar a situação" : undefined}
-              >
-                <Select
-                  value={server.status}
-                  onChange={(e) => e.target.value !== server.status && onTransition(e.target.value as TicketStatus)}
-                  disabled={statusOptions.length <= 1 || dirty}
-                >
-                  {statusOptions.map((s) => (
-                    <option key={s} value={s}>
-                      {STATUS[s].label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Data de início" className="col-span-6 @xl:col-span-2">
-                <Input
-                  type="date"
-                  value={form.startDate}
-                  max={today}
-                  disabled={!server.arrived_at}
-                  onChange={(e) => set("startDate", e.target.value)}
-                  aria-invalid={errors.start ? true : undefined}
-                  aria-describedby={shown("start") ? fieldId("start") : undefined}
-                />
-              </Field>
-              <Field label="Hora de início" className="col-span-6 @xl:col-span-2">
-                <Input
-                  type="time"
-                  value={form.startTime}
-                  disabled={!server.arrived_at}
-                  onChange={(e) => set("startTime", e.target.value)}
-                  aria-invalid={errors.start ? true : undefined}
-                  aria-describedby={shown("start") ? fieldId("start") : undefined}
-                />
-              </Field>
-              <Field label="Data de conclusão" className="col-span-6 @xl:col-span-2">
-                <Input
-                  type="date"
-                  value={form.endDate}
-                  max={today}
-                  disabled={!server.resolved_at}
-                  onChange={(e) => set("endDate", e.target.value)}
-                  aria-invalid={errors.end ? true : undefined}
-                  aria-describedby={shown("end") ? fieldId("end") : undefined}
-                />
-              </Field>
-              <Field label="Hora de conclusão" className="col-span-6 @xl:col-span-2">
-                <Input
-                  type="time"
-                  value={form.endTime}
-                  disabled={!server.resolved_at}
-                  onChange={(e) => set("endTime", e.target.value)}
-                  aria-invalid={errors.end ? true : undefined}
-                  aria-describedby={shown("end") ? fieldId("end") : undefined}
-                />
-              </Field>
-              {shown("start") || shown("end") ? (
-                <div className="col-span-12 -mt-2 flex flex-col gap-0.5">
-                  <FieldError id={fieldId("start")} message={shown("start") ? `Início: ${errors.start}` : undefined} />
-                  <FieldError id={fieldId("end")} message={shown("end") ? `Conclusão: ${errors.end}` : undefined} />
+  
+            <div className="p-5">
+              <SectionTitle className="mb-3">Visita</SectionTitle>
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-1">
+                  <Field label="Recado para o técnico" hint="Aparece em destaque no app do técnico">
+                    <Textarea
+                      rows={2}
+                      value={form.visitNote}
+                      onChange={(e) => set("visitNote", e.target.value)}
+                      maxLength={5000}
+                      placeholder="Com quem falar, acesso, o que levar."
+                    />
+                  </Field>
+                  <Counter value={form.visitNote} max={5000} />
                 </div>
-              ) : null}
-              {timesChanged ? (
                 <Field
-                  label="Motivo da correção do horário"
-                  required
-                  className="col-span-12"
-                  hint="Fica no histórico da OS (o técnico não vê)"
-                  error={shown("reason")}
+                  label="Endereço do atendimento"
+                  hint={storeAddress ? `Vazio, vale o endereço da loja: ${storeAddress}` : "Vazio, vale o endereço da loja."}
                 >
                   <Input
-                    value={form.timesReason}
-                    onChange={(e) => set("timesReason", e.target.value)}
-                    maxLength={500}
-                    aria-required="true"
-                    aria-invalid={errors.reason ? true : undefined}
+                    value={form.serviceAddress}
+                    onChange={(e) => set("serviceAddress", e.target.value)}
+                    placeholder="Outro lugar para este atendimento"
+                    maxLength={255}
                   />
                 </Field>
-              ) : null}
+              </div>
+            </div>
+  
+            <div className="p-5">
+              <SectionTitle className="mb-1">Situação e horários</SectionTitle>
+              <p className="mb-3 text-xs text-ink-muted">Os horários reais vêm do app do técnico; aqui a central corrige, com o motivo.</p>
+              <div className="grid grid-cols-12 gap-4">
+                <Field
+                  label="Situação"
+                  className="col-span-12 @xl:col-span-4"
+                  hint={dirty && statusOptions.length > 1 ? "Salve as alterações para mudar a situação" : undefined}
+                >
+                  <Select
+                    value={server.status}
+                    onChange={(e) => e.target.value !== server.status && onTransition(e.target.value as TicketStatus)}
+                    disabled={statusOptions.length <= 1 || dirty}
+                  >
+                    {statusOptions.map((s) => (
+                      <option key={s} value={s}>
+                        {STATUS[s].label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Data de início" className="col-span-6 @xl:col-span-2">
+                  <Input
+                    type="date"
+                    value={form.startDate}
+                    max={today}
+                    disabled={!server.arrived_at}
+                    onChange={(e) => set("startDate", e.target.value)}
+                    aria-invalid={errors.start ? true : undefined}
+                    aria-describedby={shown("start") ? fieldId("start") : undefined}
+                  />
+                </Field>
+                <Field label="Hora de início" className="col-span-6 @xl:col-span-2">
+                  <Input
+                    type="time"
+                    value={form.startTime}
+                    disabled={!server.arrived_at}
+                    onChange={(e) => set("startTime", e.target.value)}
+                    aria-invalid={errors.start ? true : undefined}
+                    aria-describedby={shown("start") ? fieldId("start") : undefined}
+                  />
+                </Field>
+                <Field label="Data de conclusão" className="col-span-6 @xl:col-span-2">
+                  <Input
+                    type="date"
+                    value={form.endDate}
+                    max={today}
+                    disabled={!server.resolved_at}
+                    onChange={(e) => set("endDate", e.target.value)}
+                    aria-invalid={errors.end ? true : undefined}
+                    aria-describedby={shown("end") ? fieldId("end") : undefined}
+                  />
+                </Field>
+                <Field label="Hora de conclusão" className="col-span-6 @xl:col-span-2">
+                  <Input
+                    type="time"
+                    value={form.endTime}
+                    disabled={!server.resolved_at}
+                    onChange={(e) => set("endTime", e.target.value)}
+                    aria-invalid={errors.end ? true : undefined}
+                    aria-describedby={shown("end") ? fieldId("end") : undefined}
+                  />
+                </Field>
+                {shown("start") || shown("end") ? (
+                  <div className="col-span-12 -mt-2 flex flex-col gap-0.5">
+                    <FieldError id={fieldId("start")} message={shown("start") ? `Início: ${errors.start}` : undefined} />
+                    <FieldError id={fieldId("end")} message={shown("end") ? `Conclusão: ${errors.end}` : undefined} />
+                  </div>
+                ) : null}
+                {timesChanged ? (
+                  <Field
+                    label="Motivo da correção do horário"
+                    required
+                    className="col-span-12"
+                    hint="Fica no histórico da OS (o técnico não vê)"
+                    error={shown("reason")}
+                  >
+                    <Input
+                      value={form.timesReason}
+                      onChange={(e) => set("timesReason", e.target.value)}
+                      maxLength={500}
+                      aria-required="true"
+                      aria-invalid={errors.reason ? true : undefined}
+                    />
+                  </Field>
+                ) : null}
+              </div>
+            </div>
+  
+            <div className="flex flex-col gap-1 p-5">
+              <SectionTitle className="mb-2">Conclusão</SectionTitle>
+              <Field label="Descrição da conclusão" hint="O que foi feito. Aparece no relatório do cliente.">
+                <Textarea rows={5} value={form.resolutionNotes} onChange={(e) => set("resolutionNotes", e.target.value)} maxLength={20000} />
+              </Field>
+              <Counter value={form.resolutionNotes} max={20000} />
             </div>
           </div>
-
-          <div className="flex flex-col gap-1 p-5">
-            <SectionTitle className="mb-2">Conclusão</SectionTitle>
-            <Field label="Descrição da conclusão" hint="O que foi feito. Aparece no relatório do cliente.">
-              <Textarea rows={5} value={form.resolutionNotes} onChange={(e) => set("resolutionNotes", e.target.value)} maxLength={20000} />
-            </Field>
-            <Counter value={form.resolutionNotes} max={20000} />
-          </div>
-        </div>
-      </Card>
-    </form>
+        </Card>
+      </form>
+      {/* Fora do formulário: tem o próprio Salvar (o do rodapé continua só da Geral). */}
+      <RatingCard ticket={server} className="mt-4" />
+    </>
   );
 }
 
@@ -1616,9 +1654,10 @@ const longText = (text: string | null | undefined) => (text?.trim() ? <span clas
  * (cliente, localização, tipo de OS, escopo, agendamento, colaborador, etiquetas) e depois o resto.
  */
 export function GeneralView({ ticket }: { ticket: TicketDetail }) {
+  const canTechnicians = useCan("base.technicians");
   const loc = ticket.location;
   const storeAddress = loc ? [loc.address_line, [loc.city, loc.state].filter(Boolean).join(" - ")].filter(Boolean).join(", ") : "";
-  const helpers = (ticket.helpers ?? []).map((h) => h.name).join(", ");
+  const helpers = ticket.helpers ?? [];
   const requester = ticket.requester?.name ?? ticket.requester_name;
   return (
     <div className="@container flex flex-col gap-4">

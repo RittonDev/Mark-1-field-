@@ -5,12 +5,16 @@
 //   tiram os caracteres de controle e de formatação (invisíveis, BOM, direção), como o servidor, para contarem igual.
 // - Disponibilidade: `toggleSlot`, `sameSlots`, `copyToWorkdays` e `canCopyToWorkdays` (a lista "dia:turno" da API).
 // - Transporte: `toggleMode`, `sameTransport`, `transportBody`, o nunca informado (`TRANSPORT_UNSET`, com
-//   `sameSavedTransport`) e o item "Nenhum" (`noneMarked`, `markNone`). Ferramental: `toggleId`, `sameSet`, `sortTools`
-//   e `filterTools`.
-// - Aptidões e Formação: os erros das folhas (`skillProblem`, `educationProblem`, com ponto final, como os do Meu
-//   cadastro; os do servidor vêm sem ponto), os corpos do PATCH (`skillsBody`, `educationBody`; montados com a lista
-//   gravada na hora em que a gravação sai da fila: `skillsWith`, `skillsWithout`, `educationWith`, `educationWithout`)
-//   e o que o leitor de tela fala de cada item.
+//   `sameSavedTransport`) e o item "Nenhum" (`noneMarked`, `markNone`). Ferramental e Áreas de atuação: `toggleId`,
+//   `sameSet`, `sortTools`, `filterTools` e a busca dos catálogos (`searchCatalog`).
+// - Aptidões, do catálogo da central (GET /technician-skills): a chave de cada uma (`skillKey`: o id ou, com o servidor
+//   de antes da gestão, o nome), o que a folha oferece (`availableSkills`) e os corpos do PATCH, montados com a lista
+//   gravada na hora em que a gravação sai da fila (`skillsAdd`, `skillsWith`, `skillsWithout`, `skillsBody`):
+//   `{skill_id, level}` com o catálogo no servidor, `{name, level}` sem ele.
+// - Formação: o erro da folha (`educationProblem`, com ponto final, como os do Meu cadastro; os do servidor vêm sem
+//   ponto) e o corpo do PATCH (`educationBody`, `educationWith`, `educationWithout`). O que o leitor de tela fala de
+//   cada item.
+// - O carimbo da central nas telas do perfil profissional (`centralStampText`).
 // - Folha do mês: `thisMonth` e `monthGrid`.
 // - Salvar ao tocar: o redutor `autoSaveStep`, que decide o que lib/autoSave.ts faz.
 
@@ -72,6 +76,8 @@ export function cleanText(text: string): string {
 
 /** Tamanho em caracteres, como o servidor conta (um emoji ocupa duas posições no texto do JavaScript). */
 const chars = (text: string) => Array.from(text).length;
+
+const pad = (n: number) => String(n).padStart(2, "0");
 
 // --------------------------------------------------------------------------- disponibilidade
 
@@ -180,78 +186,133 @@ export function filterTools<T extends { name: string }>(tools: readonly T[], que
   return wanted ? tools.filter((tool) => foldName(tool.name).includes(wanted)) : [...tools];
 }
 
-// --------------------------------------------------------------------------- aptidões
+/** As palavras de um texto, sem acento e maiúsculas (o que não é letra nem número separa). */
+const words = (text: string) => foldName(text).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
-export interface SkillDraft {
-  name: string;
-  level: SkillLevel | null;
+/** Ordem alfabética sem diferença de acento e maiúsculas (a do servidor e a de sortTools). */
+const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
+
+/**
+ * A busca dos catálogos (folha das Aptidões e Áreas de atuação): cada palavra da busca em alguma parte do nome, sem
+ * acento e maiúsculas. Primeiro os nomes que começam com a 1ª palavra, depois os que têm uma palavra começando com ela,
+ * depois o resto; dentro de cada grupo, em ordem alfabética. Busca vazia: todos, em ordem alfabética.
+ */
+export function searchCatalog<T extends { name: string }>(items: readonly T[], query: string): T[] {
+  const wanted = words(query);
+  if (!wanted.length) return [...items].sort(byName);
+  const [first] = wanted;
+  const rank = (name: string) => (foldName(name).startsWith(first) ? 0 : words(name).some((word) => word.startsWith(first)) ? 1 : 2);
+  return items
+    .filter((item) => {
+      const name = foldName(item.name);
+      return wanted.every((word) => name.includes(word));
+    })
+    .map((item) => ({ item, rank: rank(item.name) }))
+    .sort((a, b) => a.rank - b.rank || byName(a.item, b.item))
+    .map(({ item }) => item);
 }
 
-export type SkillErrors = Partial<Record<"name" | "level", string>>;
+// --------------------------------------------------------------------------- aptidões
 
 export const SKILL_MSG = {
-  name: "Informe a aptidão.",
-  repeated: "Você já tem esta aptidão.",
+  /** A folha "Adicionar aptidão" sem nenhuma marcada. */
+  pick: "Escolha ao menos uma aptidão.",
   level: "Escolha o nível.",
-  /** Mudou o nível de uma aptidão que uma gravação anterior excluiu. */
+  /** Mudou o nível de uma aptidão que uma gravação anterior excluiu (ou que a central desativou). */
   gone: "Esta aptidão foi excluída.",
 } as const;
 
 /**
- * Os erros da folha da aptidão ({} quando pode salvar). `others`: as outras aptidões do técnico (na edição, sem a
- * editada), para não repetir o nome sem diferença de maiúsculas e acentos, como o servidor confere.
+ * Uma aptidão da lista do técnico: com o catálogo no servidor (hasCadastroE2), ela vem com `skill_id`; o servidor de
+ * antes da gestão manda só o nome.
  */
-export function skillProblem(draft: SkillDraft, others: readonly { name: string }[]): SkillErrors {
-  const errors: SkillErrors = {};
-  const name = cleanText(draft.name);
-  if (chars(name) < TECH_PROFILE_LIMITS.textMin) errors.name = SKILL_MSG.name;
-  else if (others.some((other) => foldName(other.name) === foldName(name))) errors.name = SKILL_MSG.repeated;
-  if (!draft.level) errors.level = SKILL_MSG.level;
-  return errors;
+export type SkillRef = { skill_id?: string | null; name: string };
+
+/** A chave da aptidão na tela (lista, lixeira e edição): "id:{uuid}" pelo catálogo; sem o id, "nome:{foldName}". */
+export function skillKey(skill: SkillRef): string {
+  return skill.skill_id ? `id:${skill.skill_id}` : `nome:${foldName(skill.name)}`;
 }
 
-/** O corpo do PATCH: a lista inteira, só nome e nível (o "desde" é do servidor, que o mantém pelo nome). */
-export function skillsBody(list: readonly { name: string; level: SkillLevel }[]): TechnicianSkillIn[] {
-  return list.map(({ name, level }) => ({ name: cleanText(name), level }));
-}
-
-/** Excluir: o corpo com a lista gravada agora, sem a aptidão `name` (pelo nome sem acento e maiúsculas). */
-export function skillsWithout(list: readonly TechnicianSkill[], name: string): TechnicianSkillIn[] {
-  const key = foldName(name);
-  return skillsBody(list.filter((item) => foldName(item.name) !== key));
+/** A aptidão tem a chave? Uma chave pelo nome (de antes de o servidor ganhar o catálogo) vale também com o id. */
+function hasKey(skill: SkillRef, key: string): boolean {
+  return key.startsWith("nome:") ? `nome:${foldName(skill.name)}` === key : skillKey(skill) === key;
 }
 
 /**
- * Incluir (no fim) ou, com `editing` (o nome da editada), mudar só o nível, com o nome como está gravado: o corpo com a
- * lista gravada agora. null: a editada já saiu da lista (uma gravação anterior a excluiu).
+ * Um item do PATCH. `byId` (o servidor tem o catálogo): `{skill_id, level}`. Sem ele, ou na aptidão sem id, `{name,
+ * level}` com o nome limpo (o servidor casa o nome sem acento e maiúsculas). Nunca o `since`: o servidor o mantém.
+ */
+export function skillItemIn(skill: SkillRef & { level: SkillLevel }, byId: boolean): TechnicianSkillIn {
+  return byId && skill.skill_id ? { skill_id: skill.skill_id, level: skill.level } : { name: cleanText(skill.name), level: skill.level };
+}
+
+/** A chave de um item do PATCH (o servidor recusa a aptidão repetida, pelo id ou pelo nome). */
+const itemKey = (item: TechnicianSkillIn) => ("skill_id" in item ? `id:${item.skill_id}` : `nome:${foldName(item.name)}`);
+
+/** O corpo do PATCH: a lista inteira, sem repetir (fica a primeira). */
+export function skillsBody(list: readonly (SkillRef & { level: SkillLevel })[], byId: boolean): TechnicianSkillIn[] {
+  const seen = new Set<string>();
+  const body: TechnicianSkillIn[] = [];
+  for (const skill of list) {
+    const item = skillItemIn(skill, byId);
+    const key = itemKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    body.push(item);
+  }
+  return body;
+}
+
+/**
+ * O que a folha "Adicionar aptidão" oferece: as ativas do catálogo, fora as que o técnico já tem (pelo id e, na dele sem
+ * id, pelo nome sem acento e maiúsculas), na ordem do catálogo.
+ */
+export function availableSkills<T extends { id: string; name: string; is_active?: boolean | null }>(
+  catalog: readonly T[],
+  mine: readonly SkillRef[],
+): T[] {
+  const ids = new Set(mine.flatMap((skill) => (skill.skill_id ? [skill.skill_id] : [])));
+  const names = new Set(mine.filter((skill) => !skill.skill_id).map((skill) => foldName(skill.name)));
+  return catalog.filter((item) => item.is_active !== false && !ids.has(item.id) && !names.has(foldName(item.name)));
+}
+
+/**
+ * Incluir as escolhidas na folha, todas com o mesmo nível: o corpo com a lista gravada agora e elas no fim, sem as que o
+ * técnico já tem.
+ */
+export function skillsAdd(
+  list: readonly (SkillRef & { level: SkillLevel })[],
+  picked: readonly { id: string; name: string }[],
+  level: SkillLevel,
+  byId: boolean,
+): TechnicianSkillIn[] {
+  const fresh = availableSkills(picked, list).map((item) => ({ skill_id: item.id, name: item.name, level }));
+  return skillsBody([...list, ...fresh], byId);
+}
+
+/**
+ * Mudar o nível da aptidão `key` (skillKey): o corpo com a lista gravada agora. null: ela já saiu da lista (uma gravação
+ * anterior a excluiu ou a central a desativou).
  */
 export function skillsWith(
-  list: readonly TechnicianSkill[],
-  skill: TechnicianSkillIn,
-  editing: string | null = null,
+  list: readonly (SkillRef & { level: SkillLevel })[],
+  key: string,
+  level: SkillLevel,
+  byId: boolean,
 ): TechnicianSkillIn[] | null {
-  if (editing === null) return skillsBody([...list, skill]);
-  const key = foldName(editing);
-  if (!list.some((item) => foldName(item.name) === key)) return null;
-  return skillsBody(list.map((item) => (foldName(item.name) === key ? { name: item.name, level: skill.level } : item)));
+  if (!list.some((item) => hasKey(item, key))) return null;
+  return skillsBody(
+    list.map((item) => (hasKey(item, key) ? { ...item, level } : item)),
+    byId,
+  );
 }
 
-/**
- * Sugestões da folha "Adicionar aptidão": as que contêm o texto digitado (sem acento e sem maiúsculas), fora as que o
- * técnico já tem; no máximo `max`.
- */
-export function suggestionsFor(query: string, suggestions: readonly string[], taken: readonly string[], max = 12): string[] {
-  const wanted = foldName(query);
-  const have = new Set(taken.map(foldName));
-  const out: string[] = [];
-  for (const suggestion of suggestions) {
-    if (out.length >= max) break;
-    const key = foldName(suggestion);
-    if (!key || have.has(key) || !key.includes(wanted)) continue;
-    have.add(key);
-    out.push(suggestion);
-  }
-  return out;
+/** Excluir a aptidão `key` (skillKey): o corpo com a lista gravada agora, sem ela (a que já saiu não muda nada). */
+export function skillsWithout(list: readonly (SkillRef & { level: SkillLevel })[], key: string, byId: boolean): TechnicianSkillIn[] {
+  return skillsBody(
+    list.filter((item) => !hasKey(item, key)),
+    byId,
+  );
 }
 
 /** A linha de baixo da aptidão: "Avançado · desde 11/2026". */
@@ -383,8 +444,6 @@ export function educationSpoken(item: EducationItem): string {
 }
 
 // --------------------------------------------------------------------------- folha do mês
-
-const pad = (n: number) => String(n).padStart(2, "0");
 
 /** O mês atual no fuso do aparelho, "AAAA-MM": o último que a formação aceita. */
 export function thisMonth(now: Date = new Date()): string {

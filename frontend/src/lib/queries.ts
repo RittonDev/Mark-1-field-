@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, type Query, request } from "./api";
+import { DOCUMENT_REFRESH_MS } from "./documents";
+import { TECH_CATALOGS } from "./techCatalog";
 import type {
   AccessCatalog,
   AccessProfile,
@@ -20,7 +22,9 @@ import type {
   Page,
   ServiceType,
   Team,
-  TechnicianTool,
+  TechCatalogItem,
+  TechCatalogKind,
+  TechDocument,
   TrackingHistory,
   UnproductiveReason,
   User,
@@ -273,12 +277,39 @@ export function useUnproductiveReasons(active?: boolean) {
   });
 }
 
-/** Catálogo de ferramentas (Configurações › Técnicos e filtro de Técnicos): ordem alfabética, com quantos técnicos marcaram. */
-export function useTechnicianTools(active?: boolean) {
+/**
+ * Um catálogo de Configurações › Técnicos (Áreas de atuação, Aptidões ou Ferramental), em ordem alfabética, com quantos
+ * técnicos e fichas usam cada item e se já foi usado. `active`: só os ativos (as escolhas da ficha e os filtros). Chave
+ * [technician-areas | technician-skills | technician-tools, active ?? ""]: gravar no catálogo invalida pela primeira
+ * parte. A API de antes da Entrega 2 não tem áreas nem aptidões (404).
+ */
+export function useTechCatalog(kind: TechCatalogKind, active?: boolean) {
+  const { path, queryKey } = TECH_CATALOGS[kind];
   return useQuery({
-    queryKey: ["technician-tools", active ?? ""],
-    queryFn: ({ signal }) => api.get<TechnicianTool[]>("/technician-tools", { active }, { signal }),
+    queryKey: [queryKey, active ?? ""],
+    queryFn: ({ signal }) => api.get<TechCatalogItem[]>(path, { active }, { signal }),
     staleTime: LOOKUP_STALE,
+  });
+}
+
+/** O catálogo de ferramentas: o mesmo que useTechCatalog("tools", active) (o nome de antes, para quem ainda usa). */
+export function useTechnicianTools(active?: boolean) {
+  return useTechCatalog("tools", active);
+}
+
+/**
+ * Os documentos do técnico na ficha (Documentos, Currículo e Anexos internos; os internos só vêm com Técnicos Editar),
+ * cada um com o link assinado de 30 min: relê a cada DOCUMENT_REFRESH_MS e, passado esse tempo, ao voltar para a aba.
+ * Fica sob ["technicians"]: o tempo real (o técnico mandou pelo app) e o salvar da ficha mandam buscar de novo.
+ */
+export function useTechDocuments(technicianId: UUID, enabled = true) {
+  return useQuery({
+    queryKey: ["technicians", "documents", technicianId],
+    queryFn: ({ signal }) => api.get<TechDocument[]>(`/technicians/${technicianId}/documents`, undefined, { signal }),
+    staleTime: DOCUMENT_REFRESH_MS,
+    refetchInterval: DOCUMENT_REFRESH_MS,
+    refetchOnWindowFocus: true,
+    enabled,
   });
 }
 
