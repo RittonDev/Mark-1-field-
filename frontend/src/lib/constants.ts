@@ -287,9 +287,6 @@ export const PIX_KEY_TYPE: Record<PixKeyType, string> = {
 /** Os tipos na ordem dos chips do app. */
 export const PIX_KEY_TYPES: PixKeyType[] = ["cpf", "cnpj", "email", "phone", "random"];
 
-/** @deprecated Sai no fechamento da Entrega 1 (V1): use PAYOUT_RECENT_DAYS. */
-export const PIX_RECENT_DAYS = 7;
-
 /** "Nova" em Pagamentos e na ficha do técnico: o destino do pagamento mudou há menos destes dias. */
 export const PAYOUT_RECENT_DAYS = 7;
 

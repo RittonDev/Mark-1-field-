@@ -170,8 +170,7 @@ describe("formas de recebimento", () => {
     assert.equal(C.PAYOUT_RECENT_DAYS, 7);
   });
 
-  // Falha até o fechamento da Entrega 1: o PIX_RECENT_DAYS fica com @deprecated enquanto a central troca para
-  // PAYOUT_RECENT_DAYS (contrato §8: ele sai).
+  // Contrato §8: o PIX_RECENT_DAYS sai (a central usa PAYOUT_RECENT_DAYS).
   it("PIX_RECENT_DAYS saiu", () => {
     assert.ok(!("PIX_RECENT_DAYS" in C), "PIX_RECENT_DAYS ainda está em lib/constants.ts");
   });

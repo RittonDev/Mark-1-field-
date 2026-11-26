@@ -1136,10 +1136,6 @@ export interface Technician {
   tools?: Ref[] | null;
   education?: EducationItem[] | null;
   tech_profile_updated?: TechProfileStamps | null;
-  /** @deprecated Sai no fechamento da Entrega 1 (V1). API antiga: tem chave PIX. A nova manda payout_methods_count. */
-  has_pix?: boolean;
-  /** @deprecated Sai no fechamento da Entrega 1 (V1). API antiga: quando a chave PIX mudou. A nova manda payout_changed_at. */
-  pix_updated_at?: ISODate | null;
   /** Elo (o selo da lista): a conta guardada, de até 6 h atrás. Sem conta ainda: bronze, since null. */
   level?: LevelSummary;
   /** Situação na operação (só a central vê). Lista e detalhe; a API antiga não manda (vale "active"). */
@@ -2045,8 +2041,6 @@ export interface MyEarnings extends PayoutList {
  */
 export interface PayoutBoard extends PayoutList {
   payout_methods: Record<UUID, PayoutMethodSummary>;
-  /** @deprecated Sai no fechamento da Entrega 1 (V1). API antiga, com `with_pix=true`: a chave PIX de cada técnico. */
-  pix?: Record<UUID, PixInfo>;
 }
 
 /**
@@ -2251,8 +2245,6 @@ export interface MyProfileUpdate {
   address_district?: string | null;
   /** 8 dígitos; volta "00000-000". Vazio ou null tira o CEP. */
   address_zip?: string | null;
-  /** @deprecated Sai no fechamento da Entrega 1 (V1). A API nova recusa (422): as chaves ficam em payout-methods. */
-  pix?: PixIn | null;
   /**
    * Só com o CPF gravado vazio (de outro cadastro: 409 "Este CPF já está em outro cadastro"); gravado e diferente: 422
    * "O CPF já foi informado. Para corrigir, fale com a central pelo WhatsApp".
@@ -2291,15 +2283,6 @@ export interface MyProfileUpdate {
   /** A lista inteira (até 20); o fim não pode ser antes do início. [] ou null limpa. */
   education?: EducationItemIn[] | null;
   current_password?: string;
-}
-
-/** @deprecated Sai no fechamento da Entrega 1 (V1). O `pix` do PATCH /me/profile da API antiga; a nova usa PayoutMethodIn. */
-export interface PixIn {
-  key_type: PixKeyType;
-  /** Como a pessoa digitou: o servidor normaliza (e valida CPF, CNPJ, e-mail, celular com o 9 e chave aleatória). */
-  key: string;
-  /** 3 a 160 caracteres. */
-  holder_name: string;
 }
 
 // --------------------------------------------------------------------------- cadastro V2 (Entrega 1)

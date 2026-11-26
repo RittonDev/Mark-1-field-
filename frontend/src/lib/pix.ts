@@ -8,7 +8,7 @@
 import { useToast } from "@/components/Toaster";
 import { bankAccountText, formatPixKey, PAYOUT_RECENT_DAYS, payoutMethodText, PIX_KEY_TYPE } from "./constants";
 import { formatDocument, OPERATION_TZ } from "./format";
-import type { PayoutMethod, PixInfo } from "./types";
+import type { PayoutMethod } from "./types";
 import { copyText } from "./whatsapp";
 
 const DAY_MS = 86_400_000;
@@ -95,40 +95,6 @@ export function useCopyPayout() {
             description: `${shown}: copie à mão.`,
             tone: "error",
           },
-    );
-    return copied;
-  };
-}
-
-// --------------------------------------------------------------------------- chave PIX única (V1 apaga)
-
-/** @deprecated Sai no fechamento da Entrega 1 (V1): use PAYOUT_NEW_COLOR. Só o TechnicianPayment.tsx (o W1 apaga) usa. */
-export const PIX_NEW_COLOR = PAYOUT_NEW_COLOR;
-
-/** @deprecated Sai no fechamento da Entrega 1 (V1): use askPayoutText. Só o TechnicianPayment.tsx (o W1 apaga) usa. */
-export function askPixText(name: string): string {
-  return askPayoutText(name);
-}
-
-/** @deprecated Sai no fechamento da Entrega 1 (V1): use payoutRecent. Só o TechnicianPayment.tsx (o W1 apaga) usa. */
-export function pixRecent(updatedAt: string | null | undefined, now: number): boolean {
-  return payoutRecent(updatedAt, now);
-}
-
-/** @deprecated Sai no fechamento da Entrega 1 (V1): use useCopyPayout. Só o TechnicianPayment.tsx (o W1 apaga) usa. */
-export function useCopyPix() {
-  const { toast } = useToast();
-  return async (name: string, pix: PixInfo): Promise<boolean> => {
-    const shown = `${PIX_KEY_TYPE[pix.key_type] ?? pix.key_type} ${formatPixKey(pix.key_type, pix.key)}`;
-    const copied = await copyText(pix.key);
-    toast(
-      copied
-        ? {
-            title: `Chave PIX de ${name} copiada`,
-            description: pix.holder_name ? `${shown} · titular ${pix.holder_name}` : shown,
-            tone: "success",
-          }
-        : { title: "Não foi possível copiar a chave PIX", description: `${shown}: copie à mão.`, tone: "error" },
     );
     return copied;
   };
