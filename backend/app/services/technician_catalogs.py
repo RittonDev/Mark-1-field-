@@ -28,7 +28,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, text
+from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -300,7 +301,9 @@ async def public_lists(db: AsyncSession) -> "tuple[list[CatalogItem], list[Catal
     return out[0], out[1]
 
 
-def _stored(stored: Iterable[Any] | None, info: Mapping[str, CatalogInfo], *, inactive: bool):
+def _stored(
+    stored: Iterable[Any] | None, info: Mapping[str, CatalogInfo], *, inactive: bool
+) -> list[tuple[str, CatalogInfo]]:
     """Os itens guardados (ids) que estão no catálogo, sem repetir, em ordem alfabética; os
     desativados só com `inactive`."""
     seen: set[str] = set()
@@ -389,7 +392,7 @@ async def mark_used(db: AsyncSession, kind: Kind, ids: Iterable[Any]) -> None:
         return
     model = _spec(kind).model
     await db.execute(
-        update(model)
+        sql_update(model)
         .where(model.id.in_(keys), model.used_at.is_(None))
         .values(used_at=func.now(), updated_at=model.updated_at)
         .execution_options(synchronize_session=False)
@@ -510,7 +513,7 @@ async def _get(db: AsyncSession, spec: _Spec, item_id: uuid.UUID, *, lock: bool 
     return item
 
 
-async def update_item(
+async def update(
     db: AsyncSession, kind: Kind, item_id: uuid.UUID, data: TechCatalogItemUpdate
 ) -> TechCatalogItemOut:
     """Só o que vier muda (null é ignorado). Renomear muda para todos (o técnico e a ficha guardam
@@ -528,10 +531,6 @@ async def update_item(
         item.is_active = bool(fields["is_active"])
     await db.flush()
     return _out(item, await usage(db, kind))
-
-
-# O nome do desenho (D-B2 §4): `update` é também o de sqlalchemy, importado acima.
-update_ = update_item
 
 
 async def delete(db: AsyncSession, kind: Kind, item_id: uuid.UUID) -> None:

@@ -11,6 +11,17 @@ import * as C from "../src/lib/constants.ts";
 const TODAY = "2026-11-26";
 const unique = (list) => new Set(list).size === list.length;
 
+/** O inteiro de uma constante de um módulo Python: `NOME = 80`, `NOME: int = 80` ou `OUTRO, NOME = 2, 80`. */
+function pythonInt(text, name) {
+  for (const m of text.matchAll(/^([A-Z_][A-Z0-9_]*(?:\s*,\s*[A-Z_][A-Z0-9_]*)*)\s*(?::[^=\n]*)?=\s*([^\n#]+)/gm)) {
+    const names = m[1].split(",").map((part) => part.trim());
+    const values = m[2].split(",").map((part) => part.trim());
+    const i = names.indexOf(name);
+    if (i >= 0 && names.length === values.length && /^\d+$/.test(values[i])) return Number(values[i]);
+  }
+  return undefined;
+}
+
 describe("validade da certificação (os casos do pytest, hoje 2026-11-26)", () => {
   const cases = [
     ["2026-11-25", "expired", -1, "Vencida em 25/11/2026"],
@@ -142,6 +153,15 @@ describe("catálogos e tempo real", () => {
     for (const text of texts) assert.ok(!/skill|Ex\.:/i.test(text), text);
   });
 
+  it("pythonInt (a leitura do backend abaixo) entende as três formas", () => {
+    const text = 'NAME_MIN, NAME_MAX = 2, 80\nMAX_AREAS = 20\nLIMIT: int = 5  # comentário\nNAME_TOO_LONG = f"No máximo {NAME_MAX}"\n';
+    assert.equal(pythonInt(text, "NAME_MIN"), 2);
+    assert.equal(pythonInt(text, "NAME_MAX"), 80);
+    assert.equal(pythonInt(text, "MAX_AREAS"), 20);
+    assert.equal(pythonInt(text, "LIMIT"), 5);
+    assert.equal(pythonInt(text, "MAX_ITEMS"), undefined);
+  });
+
   const catalogs = new URL("../../backend/app/services/technician_catalogs.py", import.meta.url);
   it(
     "CATALOG_LIMITS e TECH_PROFILE_LIMITS.areas iguais a services/technician_catalogs.py",
@@ -153,8 +173,8 @@ describe("catálogos e tempo real", () => {
       const limits = Object.fromEntries([...items[1].matchAll(/"(\w+)":\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
       const { tools, areas, skills } = C.CATALOG_LIMITS;
       assert.deepEqual(limits, { tool: tools, area: areas, skill: skills });
-      assert.equal(Number(/^NAME_MAX[^=\n]*=\s*(\d+)/m.exec(text)?.[1]), C.CATALOG_LIMITS.name);
-      assert.equal(Number(/^MAX_AREAS[^=\n]*=\s*(\d+)/m.exec(text)?.[1]), C.TECH_PROFILE_LIMITS.areas);
+      assert.equal(pythonInt(text, "NAME_MAX"), C.CATALOG_LIMITS.name);
+      assert.equal(pythonInt(text, "MAX_AREAS"), C.TECH_PROFILE_LIMITS.areas);
     },
   );
 });
