@@ -68,7 +68,10 @@ export type TicketEventType =
   | "offer_sent"
   | "offer_accepted"
   | "offer_declined"
-  | "offer_cancelled";
+  | "offer_cancelled"
+  // Avaliação do cliente (só a gestão).
+  | "rating_set"
+  | "rating_removed";
 export type SlaStatus = "ok" | "at_risk" | "breached" | "paused" | "met";
 export type AttachmentKind = "file" | "photo" | "signature";
 
@@ -1010,10 +1013,14 @@ export interface CatalogItem {
 }
 
 export interface OnboardingCatalog {
+  /** As áreas de atuação ativas (`key` = id do catálogo). */
   service_areas: CatalogItem[];
   availability: CatalogItem[];
   skill_levels: CatalogItem[];
   vehicle_types: CatalogItem[];
+  /** As aptidões ativas (`key` = id do catálogo). */
+  skills: CatalogItem[];
+  /** @deprecated app de antes da Entrega 2: os nomes de `skills`. */
   skill_suggestions: string[];
   privacy_version: string;
 }
@@ -1041,7 +1048,10 @@ export interface ApplicationSummary {
   phone: string;
   city: string;
   state: string;
+  /** Ids do catálogo de áreas de atuação. */
   service_areas: string[];
+  /** As áreas gravadas, também as desativadas. */
+  areas: Ref[];
   years_experience: number | null;
   has_vehicle: boolean;
   created_at: ISODate;
@@ -1072,7 +1082,8 @@ export interface ApplicationDetail extends ApplicationSummary {
   company_trade_name: string | null;
   vehicle_model: string | null;
   vehicle_plate: string | null;
-  skills: { name: string; level: string }[];
+  /** As aptidões gravadas, com o nome atual do catálogo. */
+  skills: { skill_id: UUID; name: string; level: string }[];
   certifications: string | null;
   tools: string | null;
   vehicle_type: string | null;
@@ -1086,6 +1097,8 @@ export interface ApplicationDetail extends ApplicationSummary {
   review_note: string | null;
   invite_label: string | null;
   photo_url: string | null;
+  /** Os arquivos que o candidato enviou depois da ficha (certificações, documentos pessoais e currículo). */
+  documents: TechDocument[];
   /** O candidato criou a senha na ficha (sem ela, a boas-vindas leva o link para criar). */
   has_password: boolean;
   /** As análises, na ordem em que aconteceram. */
@@ -1127,9 +1140,19 @@ export interface Technician {
   avatar_url: string | null;
   on_shift: boolean;
   open_tickets: number;
-  service_areas: string[];
-  /** Aptidões do perfil técnico (as da ficha aprovada foram copiadas na migração), com o "desde". */
+  /** @deprecated Sai no fechamento da Entrega 2 (V1). */
+  service_areas?: string[];
+  /** Aptidões do perfil técnico (só as ativas do catálogo, com o nome dele), com o "desde". */
   skills: TechnicianSkill[];
+  /** Áreas de atuação: as ativas do catálogo, na ordem do nome. Lista e detalhe; a API de antes não manda. */
+  area_ids?: UUID[];
+  /** Só no detalhe: as mesmas áreas com o nome; null na lista. */
+  areas?: Ref[] | null;
+  /** A certificação atual mais urgente (vencida ou vencendo); null: nenhuma. */
+  certification_due?: CertificationDue | null;
+  /** Avaliações do cliente: a média com 1 casa (null sem avaliação) e quantas. */
+  rating_average?: number | null;
+  rating_count?: number;
   application_id: UUID | null;
   /** Perfil técnico (o técnico mantém no app; a central só vê). Lista e detalhe; servidor antigo não manda. */
   tool_ids?: UUID[];
@@ -2218,11 +2241,15 @@ export interface MyProfile {
   availability: AvailabilitySlot[];
   /** null: nunca informou. */
   transport: TransportInfo | null;
-  /** Mais novas primeiro (since), depois pelo nome. */
+  /** Só as ativas do catálogo, com o nome dele. Mais novas primeiro (since), depois pelo nome. */
   skills: TechnicianSkill[];
+  /** Áreas de atuação: as ativas do catálogo (GET /technician-areas), na ordem do nome. */
+  area_ids: UUID[];
   /** Em andamento primeiro, depois pelo fim e pelo início, das mais novas para as mais antigas. */
   education: EducationItem[];
   tech_profile_updated: TechProfileStamps;
+  /** Documentos pessoais, certificações e currículo (de qualquer `via`; nunca anexo interno). */
+  documents: MyDocument[];
 }
 
 /**
@@ -2286,8 +2313,13 @@ export interface MyProfileUpdate {
   availability?: AvailabilitySlot[] | null;
   /** Meios (até 6, sem repetir) e CNH juntos. null: 422 "Informe os meios de transporte". */
   transport?: TransportInfo;
-  /** A lista inteira (até 30), sem `since`: o servidor mantém o de quem já estava, pelo nome. [] ou null limpa. */
+  /** A lista inteira (até 30) de `{skill_id, level}`; o servidor mantém o `since`. [] ou null limpa. */
   skills?: TechnicianSkillIn[] | null;
+  /**
+   * Ids ativos de GET /technician-areas, a lista inteira (até 20). Desativada é ignorada; id que não existe: 422 "Área
+   * não encontrada. Atualize a lista".
+   */
+  area_ids?: UUID[] | null;
   /** A lista inteira (até 20); o fim não pode ser antes do início. [] ou null limpa. */
   education?: EducationItemIn[] | null;
   current_password?: string;
