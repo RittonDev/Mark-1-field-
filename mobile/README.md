@@ -733,20 +733,21 @@ tarde." com **Tentar de novo**
   ação sai pela rota própria, com a senha ([docs/MOBILE_SYNC.md](../docs/MOBILE_SYNC.md) §1).
   - **Lista**: a preferencial primeiro, depois as mais novas; cada cartão com o ícone de chave ou de banco,
     "Chave PIX · CPF" e a chave mascarada ("•••.456.789-••") ou o banco e "Conta corrente · Ag. 0001 · ••••5678-9", o
-    titular e a ficha neutra "Preferencial". Tocar abre **Editar**, **Tornar preferencial** e **Excluir**. Vazio:
-    "Nenhuma forma de recebimento" / "Adicione uma chave PIX ou uma conta bancária.". No rodapé, **Adicionar chave ou
-    conta** (no limite, "Limite de 10 formas de recebimento. Exclua uma para incluir outra."); no fim, o link **Aviso de
-    privacidade**.
+    titular e a ficha neutra "Preferencial". Tocar abre **Editar**, **Tornar preferencial** (menos na preferencial) e
+    **Excluir**. Vazio: "Nenhuma forma de recebimento" / "Adicione uma chave PIX ou uma conta bancária.". No rodapé,
+    **Adicionar chave ou conta** (no limite, "Limite de 10 formas de recebimento. Exclua uma para incluir outra."); no
+    fim, o link **Aviso de privacidade**.
   - **A folha** (adicionar e editar; editar não muda o tipo): Chave PIX ou Conta bancária. Na chave, o tipo (CPF, CNPJ,
-    E-mail, Celular ou Chave aleatória, com o teclado e a máscara do tipo e **Colar** na aleatória) e a chave, que começa
-    com o dado do cadastro (o CPF, o CNPJ da empresa, o e-mail que recebe mensagens ou o celular); celular do PIX com
-    DDD sem zero e o número com o 9, como no servidor. Na conta, o banco, com sugestões ao digitar (os 29 de
+    E-mail, Celular ou Chave aleatória, com o teclado e a máscara do tipo e **Colar** na aleatória) e a chave, que
+    começa com o dado do cadastro (o CPF, o CNPJ da empresa, o e-mail que recebe mensagens ou o celular); celular do PIX
+    com DDD sem zero e o número com o 9, como no servidor. Na conta, o banco, com sugestões ao digitar (os 29 de
     [src/lib/banks.ts](src/lib/banks.ts), pelo nome, apelido ou código; fora da lista, o **Código do banco**), a agência
     (até 4 números), a conta e o dígito (colar "12345-6" separa o dígito) e o tipo (Conta corrente, Conta poupança ou
     Conta de pagamento). Depois, o titular (começa com o nome; na chave CNPJ, a razão social) e, na conta e nas chaves
     e-mail, celular e aleatória, o **CPF ou CNPJ do titular** (nas chaves CPF e CNPJ, é a própria chave). Ao adicionar,
-    já havendo outra, **Usar como preferencial**. Editando, a chave ou a conta mostra "Alterada em 18/11/2026 às 14:30.".
-    A **Senha atual** vai na própria folha: recusada, volta limpa e com o foco, e o erro do servidor aparece no fim.
+    já havendo outra, **Usar como preferencial**. Editando, a chave ou a conta mostra "Alterada em 18/11/2026 às
+    14:30.". A **Senha atual** vai na própria folha: recusada, volta limpa e com o foco, e o erro do servidor aparece no
+    fim.
   - **Tornar preferencial** e **Excluir** pedem a senha numa folha que diz para onde os pagamentos passam a ir ("Os
     pagamentos passam a ir para PIX CPF •••.456.789-••."); excluir a preferencial passa a preferência para a mais nova
     das que ficam (a folha diz qual antes) ou avisa "Você fica sem forma de recebimento.".

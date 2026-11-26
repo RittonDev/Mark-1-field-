@@ -1969,8 +1969,9 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
 **Central** (Técnicos, ver).
 - `TechnicianOut`, na lista e no detalhe: `tool_ids` (só as ativas, na ordem do nome), `availability`, `transport`
   (null: nunca informou), `skills` (agora do perfil técnico, com o `since`), `education_count` e
-  `tech_profile_updated_at` (a parte mudada por último; null: nada informado). `service_areas` e `application_id`
-  continuam da ficha aprovada.
+  `tech_profile_updated_at` (a parte mudada por último; null: nada informado). `application_id` continua da ficha
+  aprovada; `service_areas`, desde 25/11/2026, vem do cadastro (`users.service_areas`, copiadas da ficha na aprovação e
+  na migração; vazias, as da ficha aprovada).
 - Só no detalhe (`GET /technicians/{id}` e as respostas de um técnico: `PATCH`, foto, redefinição de senha e criação;
   null na lista): `tools: Ref[]` (as ativas, em ordem alfabética), `education` e `tech_profile_updated` (as cinco
   datas).
@@ -1981,13 +1982,15 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
   "Turno"). Os filtros entram no `X-Total-Count`.
 - `PATCH /technicians/{id}` não edita o perfil técnico (ignora esses campos, como qualquer campo desconhecido).
 - Custo: +1 consulta (o catálogo, até 200 linhas) por chamada, e só quando algum técnico da página marcou ferramenta.
-- Na web (Técnicos), a ficha abre em abas: **Cadastro**, **Perfil técnico**, **Elo** e **Histórico**. A aba Perfil
-  técnico mostra cada parte com a data ("Informado pelo técnico em 19/11/2026", "Da ficha da homologação,
-  12/11/2026" ou "Não informado"), a grade de 7 dias × 4 turnos ("{n} de 28 turnos"), o ferramental, o transporte com
-  "Com CNH" ou "Sem CNH", as aptidões com o nível e "desde 11/2026", a formação com o período e as áreas da homologação
-  com o link para a ficha. A lista ganha os filtros "Ferramenta", "Disponível no dia" e "Disponível no turno" (com dia
-  ou turno, o aviso "Só quem informou a disponibilidade no app."; a ferramenta fica na URL, `?ferramenta={id}`) e, no
-  CSV, as colunas `ferramental`, `disponibilidade`, `transporte`, `cnh`, `aptidoes` e `perfil_tecnico_atualizado_em`.
+- Na web (Técnicos), desde 25/11/2026 a ficha é a página `/tecnicos/{id}`, e o perfil técnico fica nas seções do grupo
+  **Perfil profissional** (Dias e horários, Transporte, Formação, Aptidões e Ferramental; até 24/11/2026, a aba
+  **Perfil técnico** do diálogo). Cada parte aparece com a data ("Informado pelo técnico em 19/11/2026", "Da ficha da
+  homologação, 12/11/2026" ou "Não informado"): a grade de 7 dias × 4 turnos ("{n} de 28 turnos"), o ferramental, o
+  transporte com "Com CNH" ou "Sem CNH" (e o veículo), as aptidões com o nível e "desde 11/2026", a formação com o
+  período e as áreas da homologação com o link para a ficha. A lista ganha os filtros "Ferramenta", "Disponível no dia"
+  e "Disponível no turno" (com dia ou turno, o aviso "Só quem informou a disponibilidade no app."; os filtros ficam na
+  URL, como `?ferramenta={id}`) e, no CSV, as colunas `ferramental`, `disponibilidade`, `transporte`, `cnh`, `aptidoes`
+  e `perfil_tecnico_atualizado_em`.
   Os nomes do ferramental vêm do catálogo (a lista só traz os ids): enquanto ele carrega, o Exportar fica desligado;
   com erro, avisa "Não deu para carregar o ferramental", busca de novo e não baixa.
 
@@ -2005,11 +2008,12 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
   `{"field": "availability", "from": "seg · madrugada", "to": "sáb · tarde e noite"}`,
   `{"field": "transport", "from": null, "to": "Carro, Moto · com CNH"}`,
   `{"field": "skills", "from": "Linux (Básico)", "to": "Linux (Intermediário)"}`.
-- A aprovação da ficha não grava histórico. Na web: "Ferramental: incluiu Escada, Multímetro" e "Ferramental: tirou
+- A aprovação da ficha não grava linhas do perfil técnico (desde 25/11/2026, grava só a linha `application` "Aprovado
+  na homologação (HOM-…)", via ficha). Na web: "Ferramental: incluiu Escada, Multímetro" e "Ferramental: tirou
   Furadeira" (uma linha cada); "Transporte: não informado → Carro, Moto · com CNH". Rótulos: Ferramental,
   Disponibilidade, Transporte, Aptidões e Formação (`USER_CHANGE_LABEL`).
 - Cada envio do salvar ao tocar é uma linha (os toques de 0,6 s vão juntos), e o histórico cresce rápido: a central
-  chega até a primeira linha pelo `before`, no "Ver mais" da aba Histórico (ver "Central" em
+  chega até a primeira linha pelo `before`, no "Ver mais" da seção Histórico (ver "Central" em
   [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
 
 **Tempo real.** O `profile.changed` de sempre (só para quem tem Técnicos ou Pagamentos), com as partes em `data.fields`
@@ -2019,7 +2023,8 @@ ficha aberta e o histórico), as sugestões quando mudou a disponibilidade e as 
 ferramental; os outros eventos continuam relendo tudo o que depende do cadastro.
 
 **Aprovação da ficha** (`services/onboarding.approve`, com `tech_profile.from_ficha`). O técnico criado já vem com o
-perfil técnico da ficha, carimbado "ficha" com a hora em que a ficha chegou, sem histórico (o mesmo mapa da migração):
+perfil técnico da ficha, carimbado "ficha" com a hora em que a ficha chegou, sem linha própria no histórico (o mesmo
+mapa da migração; o resto do que a ficha coletou, desde 25/11/2026: ver [Cadastro V2](#cadastro-v2-2026-11-25)):
 
 | Parte | Da ficha |
 |---|---|
@@ -2028,7 +2033,8 @@ perfil técnico da ficha, carimbado "ficha" com a hora em que a ficha chegou, se
 | Aptidões | as de nível válido, com o nome limpo (de 2 a 80), sem repetir o nome (fica a primeira), até 30; `since` = o dia (Brasília) em que a ficha chegou |
 
 Parte vazia fica sem carimbo (não informada). O ferramental e a formação começam vazios: os textos livres de
-ferramentas e de certificações da ficha não viram lista. A ficha pública (`cadastro-tecnico`) não muda.
+ferramentas e de certificações da ficha não viram lista. A ficha pública (`cadastro-tecnico`) não mudou nesta entrega
+(a de 25/11/2026 trouxe os campos novos e as aptidões em cartões).
 
 **Sugestão de técnicos** (`services/suggestions.py`). Com horário na OS, a API calcula uma vez os turnos que a visita
 toca (`visit_slots`: `[início, fim)` no fuso da operação, com o fim informado, a estimativa ou 60 min; fim igual ou
@@ -2186,19 +2192,18 @@ quando a central registra) e a reabertura de OS resolvida ou fechada (`status_ch
   `CentralLevelOccurrence` = o mesmo com `ticket: {id|null, code|null, title, hidden}` e `waiver`.
 
 **Na central (web).** A ocorrência de OS de outra fila (`ticket.hidden`) aparece como "OS de outra fila", sem link e sem
-Desconsiderar ou Voltar a contar; a desconsiderada mostra só quem e quando. O motivo de Desconsiderar digitado e não
-enviado põe o ponto âmbar na aba Elo da ficha (para o leitor de tela, "motivo não enviado"). Fechar a ficha (X, Esc ou
-clique fora) pergunta antes, como com o Cadastro alterado ("Há alterações não salvas."). O Salvar (que grava o
-Cadastro e fecha) mostra a aba Elo e pergunta "Descartar o motivo não enviado?" ("O cadastro é salvo e a ocorrência
-continua contando no elo."; sem mudança no Cadastro, só "A ocorrência continua contando no elo."): "Voltar" fica na aba
-Elo, sem salvar; "Descartar" segue com o Salvar. O cadastro do técnico relê
+Desconsiderar ou Voltar a contar; a desconsiderada mostra só quem e quando. Desde 25/11/2026 o elo é a seção **Elo** do
+grupo Gestão da ficha do técnico (`/tecnicos/{id}?secao=elo`): o motivo de Desconsiderar digitado e não enviado segura a
+saída da página como um formulário não salvo ("O motivo de desconsiderar ainda não foi enviado."; recarregar ou fechar a
+aba, o Sair e os links internos perguntam antes). Até 24/11/2026, no diálogo da ficha, o motivo não enviado punha o
+ponto âmbar na aba Elo e o Salvar do Cadastro perguntava "Descartar o motivo não enviado?". O cadastro do técnico relê
 `GET /technicians/{id}/level` em evento de OS só quando o técnico é o responsável (`assignee_id`) ou entrou na visita
 (`data.added_ids`). Não relê em comentário, anexo, apontamento, decisão de pedido de peça, nem em `ticket.updated` só de
 `forms`, `signature`, `expenses`, `part_requests`, `payouts`, `quotes`, `offers`, `repairs` ou `tags`. Fora isso, relê ao
 voltar para a janela ou ao abrir o cadastro, quando a leitura tem mais de 1 min (cada leitura recalcula no servidor).
 Os atendimentos por mês da ficha (`GET /technicians/{id}/stats`) são relidos junto com o elo. A medalha
-(`LevelMedal`, a mesma arte do app) aparece no selo das listas e das sugestões, nos chips do filtro de Elo e no
-cabeçalho da aba Elo da ficha.
+(`LevelMedal`, a mesma arte do app) aparece no selo das listas e das sugestões, nos chips do filtro de Elo, no
+cabeçalho da ficha e na seção Elo.
 
 **Responsabilidade `technician`.** Valor novo de `Responsibility` (rótulo "Técnico" em `/meta`), para motivos de
 improdutiva e de violação. Nenhum motivo foi reclassificado: enquanto a gestão não marcar algum motivo de improdutiva
