@@ -340,7 +340,11 @@ def test_address_of_the_ficha_from_before_is_split() -> None:
         "Casa 2",
     )
     # Com o número, ou sem dar para separar, como veio.
-    assert approved(address="Rua Exemplo, 10", address_number="12") == ("Rua Exemplo, 10", "12", None)
+    assert approved(address="Rua Exemplo, 10", address_number="12") == (
+        "Rua Exemplo, 10",
+        "12",
+        None,
+    )
     assert approved(address="Rodovia SP-55, km 12") == ("Rodovia SP-55, km 12", None, None)
     assert approved(address=None, address_complement="Fundos") == (None, None, "Fundos")
     # Os dois complementos juntos passariam de 60: a linha fica inteira.

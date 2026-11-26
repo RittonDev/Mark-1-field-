@@ -875,7 +875,12 @@ async def test_technician_address_in_parts_on_every_import(
         "city": "São Paulo",
         "state": "São Paulo",
     }
-    staff[2]["address"] = {"street": "Avenida Exemplo", "number": "sn", "city": "Natal", "state": "RN"}
+    staff[2]["address"] = {
+        "street": "Avenida Exemplo",
+        "number": "sn",
+        "city": "Natal",
+        "state": "RN",
+    }
     _write(export, "colaboradores.json", staff)
     maker = async_sessionmaker(engine, expire_on_commit=False)
 
