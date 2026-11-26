@@ -437,17 +437,25 @@ def parse_before(before: str) -> tuple[datetime, uuid.UUID]:
 
 
 async def list_changes(
-    db: AsyncSession, user_id: uuid.UUID, limit: int = 50, before: str | None = None
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    limit: int = 50,
+    before: str | None = None,
+    field: str | None = None,
 ) -> list[UserChange]:
     """O histórico do cadastro, do mais novo para o mais antigo, `limit` linhas por vez. Com
     `before` (parse_before), só as linhas mais antigas que a última recebida: a página seguinte,
-    sem repetir nem pular linha, também com várias no mesmo instante (o id desempata)."""
+    sem repetir nem pular linha, também com várias no mesmo instante (o id desempata). Com `field`
+    (o nome cru, "operational_status"), só as linhas que mudaram esse campo (a linha vem
+    inteira)."""
     stmt = (
         select(UserChange)
         .where(UserChange.user_id == user_id)
         .order_by(UserChange.created_at.desc(), UserChange.id.desc())
         .limit(limit)
     )
+    if field:
+        stmt = stmt.where(UserChange.changes.contains([{"field": field}]))
     if before:
         at, row_id = parse_before(before)
         stmt = stmt.where(
@@ -461,11 +469,12 @@ def _hidden(value: str | None) -> str | None:
     return None if value is None else PIX_HIDDEN
 
 
-def hide_pix(rows: list[UserChange]) -> list[UserChangeOut]:
-    """O histórico para quem tem Técnicos mas não Pagamentos: sem o titular e com a chave como "***"
-    (null continua null: "cadastrada" e "removida" seguem legíveis). A troca só do titular vira
-    "***" → "***" na chave, para a linha não ficar vazia. Devolve cópias: os objetos do banco ficam
-    como estão."""
+def hide_payout(rows: list[UserChange]) -> list[UserChangeOut]:
+    """O histórico para quem tem Técnicos mas não Pagamentos: as formas de recebimento (e a chave
+    PIX das linhas antigas) como "***" e sem o titular (null continua null: "cadastrada" e
+    "removida" seguem legíveis; a tela diz "Formas de recebimento alteradas"). A troca só do
+    titular de uma linha antiga vira "***" → "***" na chave, para a linha não ficar vazia. Devolve
+    cópias: os objetos do banco ficam como estão."""
     out: list[UserChangeOut] = []
     for row in rows:
         full = UserChangeOut.model_validate(row)
@@ -477,7 +486,7 @@ def hide_pix(rows: list[UserChange]) -> list[UserChangeOut]:
                     hidden = {"field": "pix", "from": PIX_HIDDEN, "to": PIX_HIDDEN}
                     changes.append(UserChangeItem.model_validate(hidden))
                     has_pix = True
-            elif item.field == "pix":
+            elif item.field in _PAYOUT_FIELDS:
                 update = {"from_": _hidden(item.from_), "to": _hidden(item.to)}
                 changes.append(item.model_copy(update=update))
             else:
@@ -487,19 +496,20 @@ def hide_pix(rows: list[UserChange]) -> list[UserChangeOut]:
 
 
 def for_viewer(rows: list[UserChange], viewer: User) -> list[UserChange] | list[UserChangeOut]:
-    """GET /technicians/{id}/changes: como está para quem tem Pagamentos (o cadastro mostra a
-    seção Pagamento); para quem só tem Técnicos, `hide_pix`."""
+    """GET /technicians/{id}/changes: como está para quem tem Pagamentos (a ficha mostra as Formas
+    de recebimento); para quem só tem Técnicos, `hide_payout`."""
     if permissions.of(viewer).can("commercial.payouts"):
         return rows
-    return hide_pix(rows)
+    return hide_payout(rows)
 
 
 async def after_reset(
     db: AsyncSession, user: User, changes: list[dict[str, Any]]
 ) -> dict[str, str] | None:
-    """Para o aviso da troca de e-mail ou de chave PIX pelo app: a redefinição de senha pela
-    central (Técnicos ou Usuários) mais recente nas últimas 72 h, como {"by": quem redefiniu,
-    "at": ISO}. None sem ela ou quando a troca não é de e-mail nem de PIX."""
+    """Para o aviso da troca de e-mail (ou do pedido de troca), de forma de recebimento ou do CNPJ
+    pelo app: a redefinição de senha pela central (Técnicos ou Usuários) mais recente nas últimas
+    72 h, como {"by": quem redefiniu, "at": ISO}. None sem ela ou quando a troca não é de nenhum
+    desses campos."""
     if not _RESET_ALERT_FIELDS.intersection(event_fields(changes)):
         return None
     row = await db.scalar(
