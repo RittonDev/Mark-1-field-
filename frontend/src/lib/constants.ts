@@ -24,9 +24,11 @@ import type {
   PayoutMethod,
   PayoutMethodKind,
   PixKeyType,
+  RatingSource,
   Responsibility,
   SkillLevel,
   SlaStatus,
+  TechDocumentKind,
   TechProfilePart,
   TechSectionKey,
   TicketEventType,
@@ -213,6 +215,8 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   offer_accepted: "aceitou a oferta",
   offer_declined: "recusou a oferta",
   offer_cancelled: "cancelou a oferta",
+  rating_set: "registrou a avaliação do cliente",
+  rating_removed: "excluiu a avaliação do cliente",
 };
 
 export const SLA_STATUS: Record<SlaStatus, { label: string; color: string }> = {
@@ -601,14 +605,15 @@ export const TECH_SECTION_GROUPS: readonly {
       { key: "transporte", label: "Transporte", delivery: 1 },
       { key: "curriculo", label: "Currículo", delivery: 2 },
       { key: "formacao", label: "Formação", delivery: 1 },
+      { key: "areas-de-atuacao", label: "Áreas de atuação", delivery: 2 },
       { key: "aptidoes", label: "Aptidões", delivery: 1 },
       { key: "ferramental", label: "Ferramental", delivery: 1 },
     ],
   },
 ];
 
-/** A entrega no ar: seções com `delivery` maior ficam fora dos menus (a E2 sobe para 2). */
-export const CADASTRO_DELIVERY = 1;
+/** A entrega no ar: seções com `delivery` maior ficam fora dos menus. Desempenho, da E3, é do GESTAO_GROUP da web. */
+export const CADASTRO_DELIVERY = 2;
 
 /** Rótulo de cada campo do histórico do cadastro (GET /technicians/{id}/changes). */
 export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
@@ -655,6 +660,11 @@ export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
   email_verified: "Validação do e-mail",
   password_link: "Link para nova senha",
   application: "Homologação",
+  areas: "Áreas de atuação",
+  documents: "Documentos",
+  internal_attachments: "Anexos internos",
+  favorites: "Favoritos",
+  ratings: "Avaliações",
 };
 
 // --------------------------------------------------------------------------- perfil técnico (o técnico mantém no app; a central vê)
@@ -831,12 +841,15 @@ export const TECH_PROFILE_PART: Record<TechProfilePart, string> = {
   transport: "Transporte",
   skills: "Aptidões",
   education: "Formação",
+  areas: "Áreas de atuação",
 };
 
 /** Limites do perfil técnico (os mesmos de backend/app/services/tech_profile.py). */
 export const TECH_PROFILE_LIMITS = {
   tools: 200,
   toolName: 80,
+  /** Áreas de atuação por técnico (= technician_catalogs.MAX_AREAS). */
+  areas: 20,
   slots: 28,
   modes: 6,
   skills: 30,
@@ -848,6 +861,75 @@ export const TECH_PROFILE_LIMITS = {
   /** Primeiro mês aceito na formação (o último é o mês atual). */
   firstMonth: "1950-01",
 } as const;
+
+// --------------------------------------------------------------------------- gestão dos técnicos (Entrega 2)
+
+/** Limites dos catálogos de Configurações › Técnicos (= services/technician_catalogs.py). */
+export const CATALOG_LIMITS = { tools: 200, areas: 100, skills: 300, name: 80 } as const;
+
+export const DOCUMENT_KIND: Record<TechDocumentKind, string> = {
+  certification: "Certificação",
+  personal: "Documento pessoal",
+  resume: "Currículo",
+  internal: "Anexo interno",
+};
+/** Sugestões de título; o técnico e a central podem escrever outro. */
+export const DOCUMENT_TITLE_SUGGESTIONS: Record<"certification" | "personal", readonly string[]> = {
+  certification: ["NR10", "NR35", "NR33", "NR12"],
+  personal: ["RG", "CNH", "CPF", "Comprovante de residência"],
+};
+/** = services/technician_documents.py. perTechnician: certificações e documentos pessoais; internal: anexos internos. */
+export const DOCUMENT_LIMITS = { maxMb: 10, titleMin: 2, titleMax: 80, perTechnician: 30, internal: 30, perFicha: 10, versions: 3 } as const;
+/** O seletor de arquivo (o servidor confere pelo conteúdo). */
+export const DOCUMENT_ACCEPT = "application/pdf,image/jpeg,image/png,image/webp";
+/** O aviso de vencimento: vencidas e as que vencem em até tantos dias. */
+export const DOCUMENT_WARN_DAYS = 30;
+
+export interface DocumentDue { state: "expired" | "soon" | "ok"; days: number }
+
+/** Milissegundos UTC de um "AAAA-MM-DD" que existe; null se não existe ("2026-02-30"). */
+function isoDayMs(iso: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const ms = Date.UTC(y, mo - 1, d);
+  const back = new Date(ms);
+  return back.getUTCFullYear() === y && back.getUTCMonth() === mo - 1 && back.getUTCDate() === d ? ms : null;
+}
+
+/** Dias até a validade (hoje no fuso da operação): < 0 expired; 0 a DOCUMENT_WARN_DAYS soon; mais, ok. null sem validade. */
+export function documentDue(expiresOn: string | null | undefined, today: string): DocumentDue | null {
+  const end = expiresOn ? isoDayMs(expiresOn) : null;
+  const now = isoDayMs(today);
+  if (end === null || now === null) return null;
+  const days = Math.round((end - now) / 86_400_000);
+  return { state: days < 0 ? "expired" : days <= DOCUMENT_WARN_DAYS ? "soon" : "ok", days };
+}
+
+/** "Vencida em 25/11/2026" | "Vence hoje" | "Vence amanhã" | "Vence em 12 dias" | "Válida até 27/12/2026"; null sem validade. */
+export function documentDueText(expiresOn: string | null | undefined, today: string): string | null {
+  const due = documentDue(expiresOn, today);
+  if (!due || !expiresOn) return null;
+  if (due.state === "expired") return `Vencida em ${isoDayText(expiresOn)}`;
+  if (due.state === "ok") return `Válida até ${isoDayText(expiresOn)}`;
+  return due.days === 0 ? "Vence hoje" : due.days === 1 ? "Vence amanhã" : `Vence em ${due.days} dias`;
+}
+
+/** "PDF" ou "Foto", pelo tipo do arquivo. */
+export function documentFileKind(contentType: string): "PDF" | "Foto" {
+  return contentType === "application/pdf" ? "PDF" : "Foto";
+}
+
+export const RATING_LIMITS = { comment: 1000, rater: 120 } as const;
+export const RATING_SOURCE: Record<RatingSource, string> = { central: "Registrada pela central", client: "Enviada pelo cliente" };
+
+/** A média com uma casa e vírgula: 4.6 → "4,6"; 4 → "4,0" (o servidor já arredonda). */
+export function ratingText(average: number): string {
+  return average.toFixed(1).replace(".", ",");
+}
+
+/** Tempo real só para o técnico: a central mudou algo que o app mostra (o app relê /me/profile). */
+export const ME_PROFILE_EVENT = "me.profile_changed";
 
 // --------------------------------------------------------------------------- notas fiscais dos técnicos
 
