@@ -327,7 +327,8 @@ ficha, ver [Perfil técnico](#perfil-técnico-2026-11-19), e a boas-vindas vai p
 
 ### Técnicos (gestão do acesso)
 Analistas e gestores, e só sobre usuários técnicos: `GET /technicians?q=&team_id=&active=&state=&city=&tool_id=&day=&period=`
-(com jornada, OS abertas, foto, as áreas da ficha aprovada e o resumo do perfil técnico; `q` busca por palavras em
+(com jornada, OS abertas, foto, as áreas de atuação, do cadastro desde 25/11/2026 (antes, da ficha aprovada), e o
+resumo do perfil técnico; `q` busca por palavras em
 nome, e-mail e telefone; `on_shift` é a jornada aberta e dentro do limite de 14 h, a mesma regra do mapa: a esquecida
 aberta não fica "em jornada"; `tool_id`, `day` e `period` filtram pelo perfil técnico, ver
 [Perfil técnico](#perfil-técnico-2026-11-19); paginada por `limit`, 1 a 5000, padrão 2000, e `offset`, com o total
