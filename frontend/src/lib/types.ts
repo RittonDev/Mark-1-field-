@@ -2442,7 +2442,7 @@ export interface PasswordResetDone { email: string; app_url: string | null }
 export type TechSectionKey =
   | "foto" | "dados-pessoais" | "endereco" | "contato" | "credenciais" | "documentos" | "mini-biografia"
   | "dados-empresariais" | "recebimento"
-  | "dias-e-horarios" | "transporte" | "curriculo" | "formacao" | "aptidoes" | "ferramental";
+  | "dias-e-horarios" | "transporte" | "curriculo" | "formacao" | "areas-de-atuacao" | "aptidoes" | "ferramental";
 
 /** app: o técnico; central; ficha: a aprovação na Homologação; link: o técnico pelo link do e-mail. */
 export type UserChangeVia = "app" | "central" | "ficha" | "link";
@@ -2479,8 +2479,8 @@ export type SkillLevel = "basico" | "intermediario" | "avancado";
 /** Nível da formação (EDUCATION_LEVEL). */
 export type EducationLevel = "high_school" | "technical" | "undergraduate" | "postgraduate" | "certification" | "free_course";
 
-/** As cinco partes do perfil técnico, cada uma com a própria data (TECH_PROFILE_PART). */
-export type TechProfilePart = "tools" | "availability" | "transport" | "skills" | "education";
+/** As seis partes do perfil técnico, cada uma com a própria data (TECH_PROFILE_PART). */
+export type TechProfilePart = "tools" | "availability" | "transport" | "skills" | "education" | "areas";
 
 /** Meios de transporte e CNH, informados juntos. */
 export interface TransportInfo {
@@ -2488,18 +2488,20 @@ export interface TransportInfo {
   driver_license: boolean;
 }
 
-/** Uma aptidão. `since` ("AAAA-MM-DD") é o dia em que entrou no perfil: o servidor grava e mantém pelo nome. */
+/** Uma aptidão do catálogo. `since` ("AAAA-MM-DD") é o dia em que entrou no perfil: o servidor grava e mantém pelo id. */
 export interface TechnicianSkill {
+  skill_id: UUID;
+  /** O nome atual no catálogo. */
   name: string;
   level: SkillLevel;
   since: string;
 }
 
-/** Aptidão no PATCH /me/profile: 2 a 80 caracteres, sem repetir o nome (sem diferença de maiúsculas e acentos). */
-export interface TechnicianSkillIn {
-  name: string;
-  level: SkillLevel;
-}
+/**
+ * Aptidão no PATCH (app e central): `{skill_id, level}`, id ativo de GET /technician-skills, sem repetir. `{name,
+ * level}` é do app sem o catálogo (o servidor casa o nome sem acento e maiúsculas).
+ */
+export type TechnicianSkillIn = { skill_id: UUID; level: SkillLevel } | { name: string; level: SkillLevel };
 
 /** Um curso. Meses em "AAAA-MM"; `end` null: em andamento. */
 export interface EducationItem {
@@ -2521,35 +2523,23 @@ export interface EducationItemIn {
   end?: string | null;
 }
 
-/** Quando a parte mudou e por onde: o técnico no app ou a ficha da homologação (na aprovação). */
+/** Quando a parte mudou e por onde: o técnico no app, a ficha da homologação (na aprovação) ou a central. */
 export interface TechProfileStamp {
   at: ISODate;
-  via: "app" | "ficha";
+  via: "app" | "ficha" | "central";
 }
 
 /** Uma data por parte; null: nunca informada. */
 export type TechProfileStamps = Record<TechProfilePart, TechProfileStamp | null>;
 
 /** GET /technician-tools: o catálogo de ferramentas (a central mantém em Configurações › Técnicos). */
-export interface TechnicianTool {
-  id: UUID;
-  name: string;
-  is_active: boolean;
-  /** Só para a gestão: quantos técnicos marcaram. null para o técnico. */
-  technicians: number | null;
-}
+export type TechnicianTool = TechCatalogItem;
 
 /** POST /technician-tools. */
-export interface TechnicianToolCreate {
-  /** 2 a 80 caracteres; nome repetido (sem acento e maiúsculas): 409. */
-  name: string;
-}
+export type TechnicianToolCreate = TechCatalogItemCreate;
 
 /** PATCH /technician-tools/{id}: só o que mudou. */
-export interface TechnicianToolUpdate {
-  name?: string;
-  is_active?: boolean;
-}
+export type TechnicianToolUpdate = TechCatalogItemUpdate;
 
 /** Campos do histórico do cadastro (USER_CHANGE_LABEL). */
 export type UserChangeField =
@@ -2617,7 +2607,17 @@ export type UserChangeField =
   /** "enviado para {email}". */
   | "password_link"
   /** "Aprovado na homologação (HOM-XXXXXXXX)". */
-  | "application";
+  | "application"
+  /** Como `tools`: `to` as que entraram e `from` as que saíram (os nomes do catálogo). */
+  | "areas"
+  /** Documentos pessoais, certificações e currículo; a frase em `to` ("incluiu Certificação NR10 (vence 25/11/2027)"). */
+  | "documents"
+  /** A frase em `to`, como `documents`. Para quem não tem Técnicos Editar, "***". */
+  | "internal_attachments"
+  /** A frase em `to` ("fixado em Cidade Exemplo-SP"); a nota do pedido em UserChange.note. */
+  | "favorites"
+  /** A frase em `to` ("registrou OS-000123: 4 de 5"). */
+  | "ratings";
 
 /** Uma mudança, com o texto pronto para a tela (team: o nome do grupo; is_active: "Liberado" ou "Sem acesso"). */
 export interface UserChangeItem {
@@ -2653,6 +2653,126 @@ export interface ProfileChangedData {
    * Usuários): quem redefiniu ("Sistema" sem autor) e quando. Ausente nos outros casos.
    */
   after_reset?: { by: string; at: ISODate } | null;
+}
+
+// --------------------------------------------------------------------------- gestão dos técnicos (Entrega 2)
+
+/** Os catálogos de Configurações › Técnicos. */
+export type TechCatalogKind = "areas" | "skills" | "tools";
+
+/** GET /technician-areas | /technician-skills | /technician-tools, em ordem alfabética. O técnico recebe só os ativos, com as contagens e `in_use` null. */
+export interface TechCatalogItem {
+  id: UUID;
+  name: string;
+  is_active: boolean;
+  /** Técnicos (com ou sem acesso) com o item guardado, ativo ou não. */
+  technicians: number | null;
+  /** Fichas da homologação que citam o item (Ferramental: 0). */
+  applications: number | null;
+  /** Já foi usado: não exclui, desativa. */
+  in_use: boolean | null;
+}
+/** POST: 2 a 80 caracteres; repetido (sem acento e maiúsculas, também os inativos): 409. */
+export interface TechCatalogItemCreate { name: string }
+export interface TechCatalogItemUpdate { name?: string; is_active?: boolean }
+
+/** Anexo interno: só a central, com Técnicos Editar. */
+export type TechDocumentKind = "certification" | "personal" | "resume" | "internal";
+/** Quem mandou o arquivo: o técnico no app, a ficha da homologação ou a central. */
+export type TechDocumentVia = "app" | "central" | "ficha";
+
+/** MyProfile.documents: nunca anexo interno; sem link (GET /me/profile/documents/{id}/link). */
+export interface MyDocument {
+  id: UUID;
+  kind: Exclude<TechDocumentKind, "internal">;
+  /** 2 a 80; o currículo é "Currículo". */
+  title: string;
+  /** "AAAA-MM-DD"; só na certificação. */
+  expires_on: string | null;
+  file_name: string;
+  /** Pelo conteúdo: application/pdf, image/jpeg, image/png ou image/webp. */
+  content_type: string;
+  /** Bytes. */
+  size: number;
+  /** Quando o arquivo atual chegou. */
+  uploaded_at: ISODate;
+  via: TechDocumentVia;
+}
+
+/** Link assinado de 30 min, relativo à API (foto abre na tela; PDF baixa). */
+export interface DocumentLink { url: string; expires_at: ISODate }
+
+/** Um arquivo na central: o atual ou uma versão anterior. `url`: link assinado de 30 min, relativo à API. */
+export interface TechDocumentFile {
+  id: UUID;
+  file_name: string;
+  content_type: string;
+  size: number;
+  uploaded_at: ISODate;
+  /** null: o candidato, pela ficha. */
+  uploaded_by: Ref | null;
+  via: TechDocumentVia;
+  url: string;
+}
+
+/** GET /technicians/{id}/documents e ApplicationDetail.documents. */
+export interface TechDocument {
+  id: UUID;
+  kind: TechDocumentKind;
+  title: string;
+  expires_on: string | null;
+  /** O arquivo atual (file.id === id). */
+  file: TechDocumentFile;
+  /** As versões substituídas, a mais nova primeiro (até 3). */
+  previous: TechDocumentFile[];
+  created_at: ISODate;
+  updated_at: ISODate;
+}
+
+/** PATCH …/documents/{id} (app e central): só o que mudou; expires_on null tira a validade. O tipo não muda. */
+export interface TechDocumentUpdate { title?: string; expires_on?: string | null }
+
+/** A certificação atual mais urgente: vencida ou vencendo em até DOCUMENT_WARN_DAYS dias; `count`: quantas estão assim. */
+export interface CertificationDue { document_id: UUID; title: string; expires_on: string; count: number }
+
+/** POST /public/onboarding-documents: o arquivo recebido na ficha já enviada. */
+export interface FichaDocument {
+  id: UUID;
+  kind: Exclude<TechDocumentKind, "internal">;
+  title: string;
+  expires_on: string | null;
+  file_name: string;
+  size: number;
+}
+
+/** "central": registrada pela central; "client": o formulário do cliente (módulo de OS, depois). */
+export type RatingSource = "central" | "client";
+
+/** Avaliação do cliente sobre um técnico numa OS concluída: só a central (nada no app; fora do Elo). */
+export interface TechnicianRating {
+  id: UUID;
+  ticket: { id: UUID; code: string; title: string; location: string | null; resolved_at: ISODate | null };
+  technician: Ref;
+  /** 1 a 5. */
+  score: number;
+  comment: string | null;
+  /** Quem avaliou, no cliente. */
+  rater_name: string | null;
+  source: RatingSource;
+  created_at: ISODate;
+  created_by: Ref | null;
+  updated_at: ISODate;
+  /** null: nunca corrigida. */
+  updated_by: Ref | null;
+}
+/** PUT /tickets/{id}/ratings/{technician_id}: vazio vira null. */
+export interface TechnicianRatingIn { score: number; comment?: string | null; rater_name?: string | null }
+/** GET /technicians/{id}/ratings: média com 1 casa (null sem avaliação), quantas e a página (mais nova primeiro). */
+export interface TechnicianRatings { average: number | null; count: number; items: TechnicianRating[] }
+/** GET /tickets/{id}/ratings: o responsável, os auxiliares e quem saiu da OS com avaliação. */
+export interface TicketRatings {
+  concluded: boolean;
+  technicians: { technician: Ref; role: "assignee" | "helper" | "former"; rating: TechnicianRating | null }[];
 }
 
 // --------------------------------------------------------------------------- ofertas de OS
