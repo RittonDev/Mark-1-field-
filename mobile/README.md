@@ -1236,7 +1236,7 @@ docker start -a mc-mobile-check
   senha atual". A API nova com o app antigo funciona, com três diferenças: ela ainda manda a chave PIX (a preferencial,
   quando é PIX), mas gravar a chave recebe "Atualize o app: a chave PIX agora fica em Configurações › Formas de
   recebimento"; o e-mail novo fica pendente até o link (o aviso do app antigo diz para entrar com ele antes disso); e o
-  endereço numa linha só vira o logradouro e limpa o número e o complemento.
+  endereço numa linha só, quando muda, vira o logradouro e limpa o número e o complemento.
 - **Envio de e-mail desligado** (servidor sem SMTP, `mail_enabled` falso): tudo funciona, mas o e-mail de Contato fica
   só leitura e sem o estado da validação, o "Esqueci minha senha" manda pedir à central pelo WhatsApp e o "Esqueci a
   senha atual" não aparece. A troca de e-mail e a senha nova ficam com a central (senha provisória).

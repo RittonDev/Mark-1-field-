@@ -2217,7 +2217,8 @@ dele, sem gravar nada (seção seguinte). As linhas caem junto com o usuário ou
 ## Perfil do técnico: estatísticas e histórico (2026-11-19)
 
 **Por quê.** A aba Perfil do app mostra o total de atendimentos desde sempre e a medalha do elo; as telas Estatísticas
-e Histórico de atendimentos detalham. A central vê o gráfico "Atendimentos por mês" na aba Elo da ficha do técnico.
+e Histórico de atendimentos detalham. A central vê o gráfico "Atendimentos por mês" na seção Elo da ficha do técnico
+(até 24/11/2026, a aba Elo).
 Código: `services/technician_levels.py` (`attended_clause`, `month_key`, `local_month`, `last_months`, `metrics_of` e
 `stats`), `services/my_history.py`, `api/routes/technician_levels.py`, `schemas/technician_level.py` e
 `schemas/my_history.py`. Só leitura: nada é gravado, não há evento e não há migração.
@@ -2264,7 +2265,7 @@ lifetime, metrics, months}`:
 **`GET /technicians/{id}/stats`** (Técnicos, ver; sem a tela: 403 `MODULE_FORBIDDEN`; técnico: 403 "Sem permissão
 para esta ação") → `TechnicianStats` = `MyStats` + `technician: Ref`. 404 "Técnico não encontrado" (também para quem
 não é técnico). Só contagens, sem OS nenhuma: a fila de quem pede não muda nada, como nas contagens do elo. Na web, o
-gráfico "Atendimentos por mês" da aba Elo ("143 nos últimos 12 meses · 1.284 no total"), com as séries "Maxx Field" e
+gráfico "Atendimentos por mês" da seção Elo ("143 nos últimos 12 meses · 1.284 no total"), com as séries "Maxx Field" e
 "Field Control" (a segunda só quando algum mês tem atendimento do Field Control), o mês atual tracejado e a tabela "Ver
 em tabela"; a resposta fica guardada por 60 s e é relida junto com o elo do técnico. O "143 nos últimos 12 meses" é o
 `metrics.services` (365 dias corridos), o mesmo número da linha "Últimos 12 meses" do Elo, logo acima; a soma das barras
@@ -2477,9 +2478,9 @@ Os mesmos valores fora dessas telas:
 - Eventos de OS ganham `owner_id`; a `audience` interna ganha `owner_id`, `previous_owner_id` e `unowned`. Na
   troca de analista, `data` traz `from_id` e `to_id` (além dos nomes).
 - Quem só vê a própria fila recebe só eventos das OS dele (responsável atual ou anterior, executor) e, com a
-  opção, das sem analista. `quote.decided` só vai para quem tem Orçamentos; `onboarding.submitted`, para quem
-  tem Homologação; `technician.location` e `technician.shift`, para quem tem o Mapa ao vivo; `profile.changed`, para
-  quem tem Técnicos ou Pagamentos (basta uma das duas).
+  opção, das sem analista. `quote.decided` só vai para quem tem Orçamentos; `onboarding.submitted` e
+  `onboarding.updated` (desde 25/11/2026), para quem tem Homologação; `technician.location` e `technician.shift`, para
+  quem tem o Mapa ao vivo; `profile.changed`, para quem tem Técnicos ou Pagamentos (basta uma das duas).
 - `{"type": "access.changed"}` vai só para a pessoa afetada; logo depois o servidor fecha o socket com 4401 e o
   cliente renova o token e reconecta com o acesso novo. O vigia de 5 minutos também fecha quando o acesso muda.
 
@@ -2497,13 +2498,13 @@ V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
 | `commercial.projects` | V: `GET /projects/{id}`. E: `POST /projects`, `PUT /projects/{id}` |
 | `commercial.expenses` | V: `GET /tickets/{id}/expenses` (só a gestão; o técnico como antes). E: `POST /tickets/{id}/expenses`, `PATCH`/`DELETE /expenses/{id}`, `POST /expenses/mark-paid` |
 | `commercial.expenses` \| `commercial.payouts` | V: `GET /expenses` |
-| `commercial.payouts` | V: `GET /payouts`, `GET /tickets/{id}/offers`, `GET /technician-invoices`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay`, `POST /tickets/{id}/offers`, `POST /tickets/{id}/offers/{offer_id}/cancel`, `DELETE /technicians/{id}/pix`, `POST /technician-invoices/{id}/check`, `/uncheck`, `/reject` |
+| `commercial.payouts` | V: `GET /payouts`, `GET /tickets/{id}/offers`, `GET /technician-invoices`, `GET /technicians/{id}/payout-methods`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay`, `POST /tickets/{id}/offers`, `POST /tickets/{id}/offers/{offer_id}/cancel`, `DELETE /technicians/{id}/payout-methods/{method_id}` (até 24/11/2026, `DELETE /technicians/{id}/pix`), `POST /technician-invoices/{id}/check`, `/uncheck`, `/reject` |
 | `base.customers` | V: `GET /customers/{id}`, `GET /assets`, `/assets/{id}`. E: `POST /customers`, `PATCH /customers/{id}`, `POST`/`PATCH /assets` |
 | `base.locations` | E: `POST /customers/{id}/locations`, `PATCH /locations/{id}`, `POST /locations/import` |
-| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`, `/technicians/{id}`, `/technicians/{id}/changes`, `/technicians/{id}/level`, `/technicians/{id}/stats`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}`, `POST /technicians/{id}/level/waivers`, `DELETE /technicians/{id}/level/waivers/{waiver_id}`, `POST /technicians/levels/refresh` |
+| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`, `/technicians/{id}`, `/technicians/{id}/changes`, `/technicians/{id}/level`, `/technicians/{id}/stats`, `/technicians/{id}/emails`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST /technicians/{id}/operational-status`, `POST /technicians/{id}/email-verification`, `POST /technicians/{id}/password-reset-link`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}`, `POST /technicians/{id}/level/waivers`, `DELETE /technicians/{id}/level/waivers/{waiver_id}`, `POST /technicians/levels/refresh` |
 | `base.technicians` \| `base.onboarding` | V: `GET /technicians/regions` |
 | `base.technicians` \| `base.locations` | V: `GET /technicians/nearby` |
-| `base.onboarding` | V: `GET /onboarding/invites`, `/onboarding/applications`, `/applications/pending-count`, `/applications/{id}`. E: `POST`/`DELETE /onboarding/invites`, `POST .../approve`, `.../reject`; `DELETE /onboarding/applications/{id}` (E e só admin e supervisor) |
+| `base.onboarding` | V: `GET /onboarding/invites`, `/onboarding/applications`, `/applications/pending-count`, `/applications/{id}`. E: `POST`/`DELETE /onboarding/invites`, `POST .../approve`, `.../reject`, `.../reopen`, `.../email-verification`; `DELETE /onboarding/applications/{id}` (E e só admin e supervisor) |
 | `analysis.dashboard` | V: `GET /dashboard/summary` |
 | `analysis.dashboard` \| `analysis.reports` | V: `GET /reports/sla-violations`, `GET /reports/daily` |
 | `analysis.reports` | V: `GET /reports/monthly` |
@@ -2524,5 +2525,11 @@ responde ao técnico (só as ferramentas ativas). `PUT /sla-policies` continua s
 improdutiva continuam com toda a gestão.
 
 Só do técnico (o papel; fora da matriz, gestão e cliente recebem 403): as rotas `/me/*` de sempre (ofertas, cadastro
-e foto, notas fiscais, elo) e, desde 2026-11-19, `GET /me/stats`, `GET /me/history` e `GET /me/earnings/months`. O
-inventário completo está em `backend/tests/test_access_routes.py` (rota nova sem classificação faz o teste falhar).
+e foto, notas fiscais, elo), desde 2026-11-19 `GET /me/stats`, `GET /me/history` e `GET /me/earnings/months` e, desde
+25/11/2026, `POST /me/profile/email/verification`, `DELETE /me/profile/email/pending`, `POST /me/profile/payout-methods`,
+`PUT /me/profile/payout-methods/{method_id}` e `POST /me/profile/payout-methods/{method_id}/preferred` e `/remove`.
+
+Sem login (desde 25/11/2026, além das públicas de antes): `GET /public/cep/{cep}` (com sessão, o limite é por pessoa;
+o inventário a vê como pública), `POST /auth/forgot-password`, `/auth/password-reset/check`, `/auth/password-reset` e
+`/auth/verify-email` (ver [Cadastro V2](#cadastro-v2-2026-11-25)). O inventário completo está em
+`backend/tests/test_access_routes.py` (rota nova sem classificação faz o teste falhar).

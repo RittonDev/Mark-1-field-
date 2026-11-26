@@ -121,7 +121,8 @@ ferramentas ativas, em ordem alfabética) e as sugestões de aptidão, de `skill
   mostram "Indisponível no momento" sem gravar nada, Dias e horários fica só com os turnos e o Transporte, sem o
   veículo. A API nova com o app antigo funciona: o `GET` ainda manda `pix` (a preferencial, quando é PIX); gravar `pix`
   recebe 422 "Atualize o app: a chave PIX agora fica em Configurações › Formas de recebimento"; o e-mail novo fica
-  pendente até o link; e o `address_line` sem `address_number` vira o logradouro e limpa o número e o complemento.
+  pendente até o link; e o `address_line` que muda sem `address_number` vira o logradouro e limpa o número e o
+  complemento.
 
 ## 2. Download (pull)
 
