@@ -779,7 +779,7 @@ gravam nada.
     pode estar velha, o app relê o cadastro (`payoutListStale`): a falha sem resposta (o servidor pode ter gravado a
     forma), a forma que a central excluiu com a tela aberta ("Esta forma de recebimento não existe mais. Atualize a
     lista"), a repetida (409) e o limite (422). Assim, depois de uma queda de rede, a forma que entrou aparece na lista
-    e a folha passa a dizer "Esta chave PIX já está na lista." no campo.
+    e a folha passa a dizer no campo "Esta chave PIX já está na lista." (ou "Esta conta já está na lista.").
   - O técnico não vê nada interno da central: nem o "Nova" nem o "Titular diferente".
 - **Senha atual** (folha "Confirme com sua senha"): mudar o e-mail e os dados da empresa; as formas de recebimento pedem
   a senha na própria folha (conta invadida não desvia o pagamento). A senha não fica guardada. Senha errada e o
