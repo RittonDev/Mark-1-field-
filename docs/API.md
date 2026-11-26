@@ -2407,9 +2407,11 @@ profissional; no app, "Credenciais" é "Senha"; o grupo Gestão é só da centra
   Todos os técnicos começam Ativos.
 - Downgrade: a preferencial que é PIX volta às colunas `pix_*` (a data é a mais nova entre `changed_at` e
   `preferred_since`), o endereço volta a uma linha ("rua, número - complemento"; na ficha, também o bairro), "Sem
-  acesso" volta a "Bloqueado" e as linhas `via` "ficha" e "link" viram "central" e "app" (o código de antes só conhece
-  esses dois). Contas, chaves não preferenciais, situação, indisponibilidade, os dados pessoais novos, as análises, os
-  links e a fila se perdem.
+  acesso" volta a "Bloqueado", as linhas `via` "ficha" e "link" viram "central" e "app" (o código de antes só conhece
+  esses dois) e, no histórico, os itens das formas de recebimento (`payout_methods` e `payout_preferred`, com a chave ou
+  a conta mascarada e o titular) viram um item `pix` com "***" (o código de antes só esconde `pix` de quem não tem
+  Pagamentos). Contas, chaves não preferenciais, situação, indisponibilidade, os dados pessoais novos, as análises, os
+  links e a fila se perdem. A ordem para voltar uma publicação está em **Publicação**, no fim desta seção.
 
 **Rotas** (prefixo `/api/v1`; a classificação está em `tests/test_access_routes.py`; V = Visualizar, E = Editar).
 
@@ -2434,9 +2436,10 @@ profissional; no app, "Credenciais" é "Senha"; o grupo Gestão é só da centra
 | `POST /technicians/{user_id}/email-verification` · `…/password-reset-link` | Técnicos E | → 202 `EmailQueued` |
 | `GET /technicians/{user_id}/emails` | Técnicos V | `limit` 1 a 50 (padrão 20) → `EmailLog[]` |
 | `DELETE /technicians/{user_id}/pix` | **saiu** | |
-| `GET /users/assignable`, `/technicians/favorites…`, `/technicians/nearby` | como antes | + a situação (e, em `assignable`, a indisponibilidade) |
+| `GET /users/assignable`, `/technicians/favorites…`, `/technicians/nearby` | como antes | + a situação e o motivo (e, em `assignable`, a indisponibilidade) |
+| `GET /tracking/live`, `GET /tracking/distances` | como antes (Mapa) | + `operational_status` e `operational_reason` |
 | `GET /onboarding/applications`, `…/{application_id}` | Homologação V | campos novos |
-| `POST /onboarding/applications/{application_id}/approve` | Homologação E | corpo opcional → `ApplicationApproved {technician, welcome}` |
+| `POST /onboarding/applications/{application_id}/approve` | Homologação E | corpo opcional → `ApplicationApproved {technician, welcome, password_link}` |
 | `POST /onboarding/applications/{application_id}/reopen` | Homologação E | `{reason}` → `ApplicationDetail` |
 | `POST /onboarding/applications/{application_id}/email-verification` | Homologação E | → 202 `EmailQueued` |
 | `POST /public/onboarding/{token}` | sem login | + campos novos → `{protocol, email_verification}` |
@@ -2449,7 +2452,8 @@ reagem pelo `code` e mostram o `detail`. Os 422 de regra sem código continuam `
 
 | HTTP | `code` | `detail` |
 |---|---|---|
-| 410 | `LINK_GONE` | senha: "Este link expirou ou já foi usado. Peça outro em “Esqueci minha senha”, no app, ou fale com a central pelo WhatsApp"; validação: "Este link de validação expirou ou já foi usado. Peça um novo no app, em Configurações › Contato, ou à central pelo WhatsApp"; link de senha com o acesso cortado: "Seu acesso ao app está desativado. Fale com a central pelo WhatsApp" |
+| 410 | `LINK_GONE` | senha: "Este link expirou ou já foi usado. Peça outro em “Esqueci minha senha”, no app, ou fale com a central pelo WhatsApp"; validação: "Este link de validação expirou ou já foi usado. Peça um novo no app, em Configurações › Contato, ou à central pelo WhatsApp" |
+| 410 | `ACCESS_CUT` | link de senha que ainda vale, com o acesso ao app cortado (`password-reset/check` e `password-reset`): "Seu acesso ao app está desativado. Fale com a central pelo WhatsApp" |
 | 409 | `EMAIL_IN_USE` | "Este e-mail já está em uso em outro cadastro. Fale com a central pelo WhatsApp" |
 | 503 | `MAIL_DISABLED` | "O envio de e-mail está desligado. Peça à central pelo WhatsApp para redefinir sua senha" (Esqueci minha senha) / "O envio de e-mail está desligado. Fale com a central pelo WhatsApp" (link de validação pelo app) |
 | 404 / 503 | `CEP_NOT_FOUND` / `CEP_UNAVAILABLE` | "CEP não encontrado" / "Busca de CEP indisponível" |
@@ -2464,6 +2468,9 @@ reagem pelo `code` e mostram o `detail`. Os 422 de regra sem código continuam `
 | 409 | `APPLICATION_NOT_REJECTED` / `EMAIL_TAKEN` / `APPLICATION_DUPLICATE` | "Só a ficha reprovada pode ser reaberta" / "Já existe um usuário com este e-mail" / "Há outra ficha desta pessoa em análise ou aprovada" |
 | 409 | `APPLICATION_NOT_PENDING` | "Reenvio só para ficha em análise" |
 
+Sem `code`: 503 "Outra gravação ao mesmo tempo. Tente de novo" em qualquer rota, quando o banco desfaz a gravação por
+causa de outra ao mesmo tempo (40P01 ou 40001; ver o começo deste documento).
+
 **Dados pessoais** (`schemas/personal.py`: as mesmas regras na ficha pública, no app e na central; o servidor responde
 sem ponto final, as telas com).
 
@@ -2472,13 +2479,15 @@ sem ponto final, as telas com).
 | `cpf` | 11 números ("123.456.789-09" vale), com os dígitos verificadores; grava só os números | "CPF inválido" |
 | `company_document` | CNPJ de 14 caracteres (aceita o alfanumérico); grava sem pontuação, em maiúsculas | "CNPJ inválido" |
 | `rg_number` | maiúsculas, só números, letras, ".", "/", "-" e espaço; 5 a 20 com pelo menos 4 números ("12.345.678-X", "MG-12.345.678") | "Confira o número do RG" |
-| `rg_issuer` | letras sem acento e espaço, em maiúsculas (a "/" sai: "SSP/SP" vira "SSPSP"); 2 a 20 | "Confira o órgão emissor" |
+| `rg_issuer` | letras sem acento, espaço, "/" e "-", em maiúsculas; com a UF no fim ("SSP/SP", "ssp-sp", "SSP / SP"), grava o órgão e a UF separados ("SSP" e "SP"; a UF do campo, quando vem, vale mais e o fim sai); o fim que não é UF vira espaço ("SSP/XX" → "SSP XX"); 2 a 20 no órgão já separado (`split_issuer` = `splitIssuer`) | "Confira o órgão emissor" |
 | `rg_state` | uma das 27 UFs | "UF inválida" |
-| RG em grupo | os três ou nenhum; o número vazio limpa os três | "Informe o número, o órgão emissor e a UF do RG" |
+| RG em grupo | os três ou nenhum; o número vazio limpa os três; a UF vazia aceita a que veio no fim do órgão | "Informe o número, o órgão emissor e a UF do RG" |
 | `vehicle_plate` | antiga (ABC1234) ou Mercosul (ABC1D23); grava sem hífen ("abc-1234" → "ABC1234") e mostra "ABC-1234" | "Placa inválida: confira as letras e os números" |
 | `phone_secondary` | 10 a 13 números; grava como o celular, "(11) 98888-7777" | "Informe o telefone com DDD" |
-| `birth_date` | de 18 a 90 anos completos no dia de Brasília | "O cadastro é para maiores de 18 anos: confira a data de nascimento"; acima de 90 ou data que não existe: "Confira a data de nascimento" |
-| `bio` | texto limpo (sem invisíveis; espaços e quebras de linha viram um espaço), até 500 | "No máximo 500 caracteres" |
+| `birth_date` | de 18 a 90 anos completos no dia de Brasília; só "AAAA-MM-DD" ou data (um número viraria data sem passar pela idade) | "O cadastro é para maiores de 18 anos: confira a data de nascimento"; acima de 90, data que não existe ou número: "Confira a data de nascimento" |
+| `bio` | com os parágrafos (= `normalizeBio`): `\r\n` vira `\n`, sem espaços no fim das linhas, três ou mais quebras viram duas (uma linha em branco entre os parágrafos), sem quebras nem espaços nas pontas; os espaços do meio da linha ficam e saem os invisíveis; os 500 contam depois disso | "No máximo 500 caracteres" |
+| `address_number` | texto limpo, em maiúsculas ("100a" → "100A"); "SN" e "S / N" viram "S/N"; até 10 (`address_number`; o mesmo na importação do Field Control) | "No máximo 10 caracteres" |
+| `full_name` (ficha) e `name` (app) | só letras (com acento), espaço, apóstrofo, hífen e ponto, sem "www", "http" nem endereço colado ("site.com"): o nome vai aos textos do cliente e à saudação dos e-mails | "Use só letras no nome" |
 | empresa em grupo | razão social ou nome fantasia pedem o CNPJ | "Informe o CNPJ" |
 
 Os tamanhos (número 10, complemento 60, bairro 120, modelo do veículo 60, razão social e nome fantasia 160) dão "No
