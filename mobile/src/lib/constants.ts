@@ -24,9 +24,11 @@ import type {
   PayoutMethod,
   PayoutMethodKind,
   PixKeyType,
+  RatingSource,
   Responsibility,
   SkillLevel,
   SlaStatus,
+  TechDocumentKind,
   TechProfilePart,
   TechSectionKey,
   TicketEventType,
@@ -213,6 +215,8 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   offer_accepted: "aceitou a oferta",
   offer_declined: "recusou a oferta",
   offer_cancelled: "cancelou a oferta",
+  rating_set: "registrou a avaliação do cliente",
+  rating_removed: "excluiu a avaliação do cliente",
 };
 
 export const SLA_STATUS: Record<SlaStatus, { label: string; color: string }> = {
@@ -601,14 +605,15 @@ export const TECH_SECTION_GROUPS: readonly {
       { key: "transporte", label: "Transporte", delivery: 1 },
       { key: "curriculo", label: "Currículo", delivery: 2 },
       { key: "formacao", label: "Formação", delivery: 1 },
+      { key: "areas-de-atuacao", label: "Áreas de atuação", delivery: 2 },
       { key: "aptidoes", label: "Aptidões", delivery: 1 },
       { key: "ferramental", label: "Ferramental", delivery: 1 },
     ],
   },
 ];
 
-/** A entrega no ar: seções com `delivery` maior ficam fora dos menus (a E2 sobe para 2). */
-export const CADASTRO_DELIVERY = 1;
+/** A entrega no ar: seções com `delivery` maior ficam fora dos menus. Desempenho, da E3, é do GESTAO_GROUP da web. */
+export const CADASTRO_DELIVERY = 2;
 
 /** Rótulo de cada campo do histórico do cadastro (GET /technicians/{id}/changes). */
 export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
@@ -655,6 +660,11 @@ export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
   email_verified: "Validação do e-mail",
   password_link: "Link para nova senha",
   application: "Homologação",
+  areas: "Áreas de atuação",
+  documents: "Documentos",
+  internal_attachments: "Anexos internos",
+  favorites: "Favoritos",
+  ratings: "Avaliações",
 };
 
 // --------------------------------------------------------------------------- perfil técnico (o técnico mantém no app; a central vê)
@@ -831,12 +841,15 @@ export const TECH_PROFILE_PART: Record<TechProfilePart, string> = {
   transport: "Transporte",
   skills: "Aptidões",
   education: "Formação",
+  areas: "Áreas de atuação",
 };
 
 /** Limites do perfil técnico (os mesmos de backend/app/services/tech_profile.py). */
 export const TECH_PROFILE_LIMITS = {
   tools: 200,
   toolName: 80,
+  /** Áreas de atuação por técnico (= technician_catalogs.MAX_AREAS). */
+  areas: 20,
   slots: 28,
   modes: 6,
   skills: 30,
@@ -848,6 +861,75 @@ export const TECH_PROFILE_LIMITS = {
   /** Primeiro mês aceito na formação (o último é o mês atual). */
   firstMonth: "1950-01",
 } as const;
+
+// --------------------------------------------------------------------------- gestão dos técnicos (Entrega 2)
+
+/** Limites dos catálogos de Configurações › Técnicos (= services/technician_catalogs.py). */
+export const CATALOG_LIMITS = { tools: 200, areas: 100, skills: 300, name: 80 } as const;
+
+export const DOCUMENT_KIND: Record<TechDocumentKind, string> = {
+  certification: "Certificação",
+  personal: "Documento pessoal",
+  resume: "Currículo",
+  internal: "Anexo interno",
+};
+/** Sugestões de título; o técnico e a central podem escrever outro. */
+export const DOCUMENT_TITLE_SUGGESTIONS: Record<"certification" | "personal", readonly string[]> = {
+  certification: ["NR10", "NR35", "NR33", "NR12"],
+  personal: ["RG", "CNH", "CPF", "Comprovante de residência"],
+};
+/** = services/technician_documents.py. perTechnician: certificações e documentos pessoais; internal: anexos internos. */
+export const DOCUMENT_LIMITS = { maxMb: 10, titleMin: 2, titleMax: 80, perTechnician: 30, internal: 30, perFicha: 10, versions: 3 } as const;
+/** O seletor de arquivo (o servidor confere pelo conteúdo). */
+export const DOCUMENT_ACCEPT = "application/pdf,image/jpeg,image/png,image/webp";
+/** O aviso de vencimento: vencidas e as que vencem em até tantos dias. */
+export const DOCUMENT_WARN_DAYS = 30;
+
+export interface DocumentDue { state: "expired" | "soon" | "ok"; days: number }
+
+/** Milissegundos UTC de um "AAAA-MM-DD" que existe; null se não existe ("2026-02-30"). */
+function isoDayMs(iso: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const ms = Date.UTC(y, mo - 1, d);
+  const back = new Date(ms);
+  return back.getUTCFullYear() === y && back.getUTCMonth() === mo - 1 && back.getUTCDate() === d ? ms : null;
+}
+
+/** Dias até a validade (hoje no fuso da operação): < 0 expired; 0 a DOCUMENT_WARN_DAYS soon; mais, ok. null sem validade. */
+export function documentDue(expiresOn: string | null | undefined, today: string): DocumentDue | null {
+  const end = expiresOn ? isoDayMs(expiresOn) : null;
+  const now = isoDayMs(today);
+  if (end === null || now === null) return null;
+  const days = Math.round((end - now) / 86_400_000);
+  return { state: days < 0 ? "expired" : days <= DOCUMENT_WARN_DAYS ? "soon" : "ok", days };
+}
+
+/** "Vencida em 25/11/2026" | "Vence hoje" | "Vence amanhã" | "Vence em 12 dias" | "Válida até 27/12/2026"; null sem validade. */
+export function documentDueText(expiresOn: string | null | undefined, today: string): string | null {
+  const due = documentDue(expiresOn, today);
+  if (!due || !expiresOn) return null;
+  if (due.state === "expired") return `Vencida em ${isoDayText(expiresOn)}`;
+  if (due.state === "ok") return `Válida até ${isoDayText(expiresOn)}`;
+  return due.days === 0 ? "Vence hoje" : due.days === 1 ? "Vence amanhã" : `Vence em ${due.days} dias`;
+}
+
+/** "PDF" ou "Foto", pelo tipo do arquivo. */
+export function documentFileKind(contentType: string): "PDF" | "Foto" {
+  return contentType === "application/pdf" ? "PDF" : "Foto";
+}
+
+export const RATING_LIMITS = { comment: 1000, rater: 120 } as const;
+export const RATING_SOURCE: Record<RatingSource, string> = { central: "Registrada pela central", client: "Enviada pelo cliente" };
+
+/** A média com uma casa e vírgula: 4.6 → "4,6"; 4 → "4,0" (o servidor já arredonda). */
+export function ratingText(average: number): string {
+  return average.toFixed(1).replace(".", ",");
+}
+
+/** Tempo real só para o técnico: a central mudou algo que o app mostra (o app relê /me/profile). */
+export const ME_PROFILE_EVENT = "me.profile_changed";
 
 // --------------------------------------------------------------------------- notas fiscais dos técnicos
 
@@ -1175,9 +1257,10 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
  * "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" (as versões se comparam como texto). 2026-11-26 (a
  * publicação da Entrega 1): RG, nascimento e CPF no cadastro, veículo, dados da empresa, formas de recebimento,
  * biografia, e-mail validado, indisponibilidade, situação na operação, e-mails do cadastro e a reabertura da ficha
- * reprovada.
+ * reprovada. 2026-11-26.2 (a Entrega 2; publicada noutro dia, vira a data do dia, nos três lugares): documentos,
+ * certificações e currículo; avaliações e anexos internos; perfil técnico também pela central.
  */
-export const PRIVACY_VERSION = "2026-11-26";
+export const PRIVACY_VERSION = "2026-11-26.2";
 
 /** A data da versão para mostrar ("26/11/2026"): os 10 primeiros caracteres, sem um ".2". */
 export const PRIVACY_DATE = PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/");
@@ -1190,15 +1273,19 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Quais dados",
-    body: "Os do seu cadastro: identificação (nome, CPF, RG com órgão emissor e UF, nascimento e foto), contato (celular, telefone secundário e e-mail, com a validação de que o e-mail é seu), endereço, região de atendimento, mini biografia (se escrever), experiência, veículo (modelo e placa, se informar), dados da sua empresa (CNPJ, razão social e nome fantasia, se tiver), as formas de recebimento que você cadastrar no app (chaves PIX e contas bancárias, com o nome e o CPF ou CNPJ do titular) e a senha do app (que ninguém da equipe consegue ver). O seu perfil técnico, informado na ficha ou no app: áreas de atuação, aptidões, formação (curso, nível, instituição e período), ferramental, meios de transporte e CNH, os dias e turnos em que você atende e os períodos em que avisar que está indisponível. E os registros das ofertas de OS no app: quando você vê a oferta, abre o escopo e aceita ou recusa.",
+    body: "Os do seu cadastro: identificação (nome, CPF, RG com órgão emissor e UF, nascimento e foto), contato (celular, telefone secundário e e-mail, com a validação de que o e-mail é seu), endereço, região de atendimento, mini biografia (se escrever), experiência, veículo (modelo e placa, se informar), dados da sua empresa (CNPJ, razão social e nome fantasia, se tiver), as formas de recebimento que você cadastrar no app (chaves PIX e contas bancárias, com o nome e o CPF ou CNPJ do titular) e a senha do app (que ninguém da equipe consegue ver). Os documentos que você enviar na ficha ou no app: documentos pessoais, certificações (com a validade, se informar) e o currículo. O seu perfil técnico, informado na ficha, no app ou pela central: áreas de atuação, aptidões, formação (curso, nível, instituição e período), ferramental, meios de transporte e CNH, os dias e turnos em que você atende e os períodos em que avisar que está indisponível. E os registros das ofertas de OS no app: quando você vê a oferta, abre o escopo e aceita ou recusa.",
   },
   {
     title: "Para quê",
-    body: "Homologação técnica, conferência da sua identidade, cadastro na base de técnicos, distribuição de ordens de serviço (o perfil técnico, a disponibilidade e a indisponibilidade ajudam a central a escolher quem convidar para cada OS), contato sobre os atendimentos e pagamento dos chamados na forma de recebimento que você marcar como preferencial. Não vendemos nem compartilhamos seus dados para marketing.",
+    body: "Homologação técnica, conferência da sua identidade e das suas certificações, cadastro na base de técnicos, distribuição de ordens de serviço (o perfil técnico, a disponibilidade e a indisponibilidade ajudam a central a escolher quem convidar para cada OS), contato sobre os atendimentos e pagamento dos chamados na forma de recebimento que você marcar como preferencial. Não vendemos nem compartilhamos seus dados para marketing.",
   },
   {
     title: "Situação na operação",
     body: "A equipe registra a sua situação na operação (ativo, inativo ou bloqueado), com o motivo, quem mudou e quando. Só quem está ativo recebe novas OS. A situação, sozinha, não tira o seu acesso ao app. Você pode pedir à central a revisão.",
+  },
+  {
+    title: "Avaliações e anexos internos",
+    body: "A equipe pode registrar no seu cadastro a avaliação que o cliente fizer de um atendimento concluído (nota de 1 a 5 e comentário) e anexar documentos internos da parceria. Esses registros ficam só com a equipe, não aparecem no app e não mudam o seu Elo. Você pode pedir à central para consultá-los ou revisá-los.",
   },
   {
     title: "Com quem compartilhamos",
@@ -1222,10 +1309,10 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Por quanto tempo",
-    body: "Enquanto você fizer parte da base técnica e pelo prazo exigido em lei (os dados de pagamento, pelo prazo da legislação fiscal). A ficha reprovada fica guardada por 180 dias contados da última análise: nesse prazo, a equipe pode reabri-la para uma nova análise; depois, ela é excluída com a foto. O registro dos e-mails enviados fica 180 dias.",
+    body: "Enquanto você fizer parte da base técnica e pelo prazo exigido em lei (os dados de pagamento, pelo prazo da legislação fiscal). A ficha reprovada fica guardada por 180 dias contados da última análise: nesse prazo, a equipe pode reabri-la para uma nova análise; depois, ela é excluída com a foto e os arquivos enviados. Ao substituir um documento, as três versões anteriores mais recentes ficam guardadas junto dele; ao excluir o documento, saem todas. O registro dos e-mails enviados fica 180 dias.",
   },
   {
     title: "Seus direitos",
-    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field. Se aprovado, você mesmo atualiza no app, em Configurações, os seus dados, o perfil técnico e as formas de recebimento (o CPF, depois de informado, só a central corrige).",
+    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field. Se aprovado, você mesmo atualiza no app, em Configurações, os seus dados, os documentos, o perfil técnico e as formas de recebimento (o CPF, depois de informado, só a central corrige).",
   },
 ];

@@ -1257,9 +1257,10 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
  * "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" (as versões se comparam como texto). 2026-11-26 (a
  * publicação da Entrega 1): RG, nascimento e CPF no cadastro, veículo, dados da empresa, formas de recebimento,
  * biografia, e-mail validado, indisponibilidade, situação na operação, e-mails do cadastro e a reabertura da ficha
- * reprovada.
+ * reprovada. 2026-11-26.2 (a Entrega 2; publicada noutro dia, vira a data do dia, nos três lugares): documentos,
+ * certificações e currículo; avaliações e anexos internos; perfil técnico também pela central.
  */
-export const PRIVACY_VERSION = "2026-11-26";
+export const PRIVACY_VERSION = "2026-11-26.2";
 
 /** A data da versão para mostrar ("26/11/2026"): os 10 primeiros caracteres, sem um ".2". */
 export const PRIVACY_DATE = PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/");
@@ -1272,15 +1273,19 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Quais dados",
-    body: "Os do seu cadastro: identificação (nome, CPF, RG com órgão emissor e UF, nascimento e foto), contato (celular, telefone secundário e e-mail, com a validação de que o e-mail é seu), endereço, região de atendimento, mini biografia (se escrever), experiência, veículo (modelo e placa, se informar), dados da sua empresa (CNPJ, razão social e nome fantasia, se tiver), as formas de recebimento que você cadastrar no app (chaves PIX e contas bancárias, com o nome e o CPF ou CNPJ do titular) e a senha do app (que ninguém da equipe consegue ver). O seu perfil técnico, informado na ficha ou no app: áreas de atuação, aptidões, formação (curso, nível, instituição e período), ferramental, meios de transporte e CNH, os dias e turnos em que você atende e os períodos em que avisar que está indisponível. E os registros das ofertas de OS no app: quando você vê a oferta, abre o escopo e aceita ou recusa.",
+    body: "Os do seu cadastro: identificação (nome, CPF, RG com órgão emissor e UF, nascimento e foto), contato (celular, telefone secundário e e-mail, com a validação de que o e-mail é seu), endereço, região de atendimento, mini biografia (se escrever), experiência, veículo (modelo e placa, se informar), dados da sua empresa (CNPJ, razão social e nome fantasia, se tiver), as formas de recebimento que você cadastrar no app (chaves PIX e contas bancárias, com o nome e o CPF ou CNPJ do titular) e a senha do app (que ninguém da equipe consegue ver). Os documentos que você enviar na ficha ou no app: documentos pessoais, certificações (com a validade, se informar) e o currículo. O seu perfil técnico, informado na ficha, no app ou pela central: áreas de atuação, aptidões, formação (curso, nível, instituição e período), ferramental, meios de transporte e CNH, os dias e turnos em que você atende e os períodos em que avisar que está indisponível. E os registros das ofertas de OS no app: quando você vê a oferta, abre o escopo e aceita ou recusa.",
   },
   {
     title: "Para quê",
-    body: "Homologação técnica, conferência da sua identidade, cadastro na base de técnicos, distribuição de ordens de serviço (o perfil técnico, a disponibilidade e a indisponibilidade ajudam a central a escolher quem convidar para cada OS), contato sobre os atendimentos e pagamento dos chamados na forma de recebimento que você marcar como preferencial. Não vendemos nem compartilhamos seus dados para marketing.",
+    body: "Homologação técnica, conferência da sua identidade e das suas certificações, cadastro na base de técnicos, distribuição de ordens de serviço (o perfil técnico, a disponibilidade e a indisponibilidade ajudam a central a escolher quem convidar para cada OS), contato sobre os atendimentos e pagamento dos chamados na forma de recebimento que você marcar como preferencial. Não vendemos nem compartilhamos seus dados para marketing.",
   },
   {
     title: "Situação na operação",
     body: "A equipe registra a sua situação na operação (ativo, inativo ou bloqueado), com o motivo, quem mudou e quando. Só quem está ativo recebe novas OS. A situação, sozinha, não tira o seu acesso ao app. Você pode pedir à central a revisão.",
+  },
+  {
+    title: "Avaliações e anexos internos",
+    body: "A equipe pode registrar no seu cadastro a avaliação que o cliente fizer de um atendimento concluído (nota de 1 a 5 e comentário) e anexar documentos internos da parceria. Esses registros ficam só com a equipe, não aparecem no app e não mudam o seu Elo. Você pode pedir à central para consultá-los ou revisá-los.",
   },
   {
     title: "Com quem compartilhamos",
@@ -1304,10 +1309,10 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Por quanto tempo",
-    body: "Enquanto você fizer parte da base técnica e pelo prazo exigido em lei (os dados de pagamento, pelo prazo da legislação fiscal). A ficha reprovada fica guardada por 180 dias contados da última análise: nesse prazo, a equipe pode reabri-la para uma nova análise; depois, ela é excluída com a foto. O registro dos e-mails enviados fica 180 dias.",
+    body: "Enquanto você fizer parte da base técnica e pelo prazo exigido em lei (os dados de pagamento, pelo prazo da legislação fiscal). A ficha reprovada fica guardada por 180 dias contados da última análise: nesse prazo, a equipe pode reabri-la para uma nova análise; depois, ela é excluída com a foto e os arquivos enviados. Ao substituir um documento, as três versões anteriores mais recentes ficam guardadas junto dele; ao excluir o documento, saem todas. O registro dos e-mails enviados fica 180 dias.",
   },
   {
     title: "Seus direitos",
-    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field. Se aprovado, você mesmo atualiza no app, em Configurações, os seus dados, o perfil técnico e as formas de recebimento (o CPF, depois de informado, só a central corrige).",
+    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field. Se aprovado, você mesmo atualiza no app, em Configurações, os seus dados, os documentos, o perfil técnico e as formas de recebimento (o CPF, depois de informado, só a central corrige).",
   },
 ];
