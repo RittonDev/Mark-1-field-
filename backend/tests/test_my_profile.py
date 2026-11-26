@@ -1,6 +1,7 @@
 """Meu cadastro do técnico: o próprio cadastro no app, o e-mail e as formas de recebimento com a
 senha, o histórico do cadastro e o aviso à central. (As regras das formas de recebimento ficam em
-test_payout_methods.py; os dados pessoais novos e o e-mail pendente, em test_cadastro_v2_profile.py.)
+test_payout_methods.py; os dados pessoais novos e o e-mail pendente, em
+test_cadastro_v2_profile.py.)
 
 Só dados fictícios: CPF 12345678909, "Tecnico Alfa", @exemplo.com.
 """

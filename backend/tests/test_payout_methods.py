@@ -1,5 +1,5 @@
-"""Formas de recebimento do técnico (chaves PIX e contas): o técnico cadastra no app com a senha, uma
-é a preferencial, a central vê e remove em Pagamentos, e o histórico e o pagamento guardam só o
+"""Formas de recebimento do técnico (chaves PIX e contas): o técnico cadastra no app com a senha,
+uma é a preferencial, a central vê e remove em Pagamentos, e o histórico e o pagamento guardam só o
 texto mascarado.
 
 Só dados fictícios: Tecnico Alfa, CPF 12345678909, CNPJ 12.345.678/0001-95, Banco Exemplo 999.
@@ -523,9 +523,7 @@ async def test_central_sees_with_payouts_only_and_flags_holder(
     assert [m["holder_differs"] for m in listed] == [False, True, True]
     # A empresa dele também é ele.
     body(
-        await patch(
-            client, world, company_document="12.345.678/0001-95", current_password=PASSWORD
-        )
+        await patch(client, world, company_document="12.345.678/0001-95", current_password=PASSWORD)
     )
     company_key = {**CPF_KEY, "pix_key_type": "cnpj", "pix_key": "12.345.678/0001-95"}
     me = body(await add_method(client, h, company_key))
@@ -556,7 +554,8 @@ async def test_central_sees_with_payouts_only_and_flags_holder(
     # Técnico, quem não tem Pagamentos e quem não é técnico.
     assert (await client.get(url, headers=h)).status_code == 403
     r = await client.get(
-        f"{API}/technicians/{world.analyst.user.id}/payout-methods", headers=world.supervisor.headers
+        f"{API}/technicians/{world.analyst.user.id}/payout-methods",
+        headers=world.supervisor.headers,
     )
     assert r.status_code == 404
     await restrict_analyst(

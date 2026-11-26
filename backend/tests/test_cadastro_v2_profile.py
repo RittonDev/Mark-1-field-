@@ -162,9 +162,7 @@ async def test_new_fields_round_trip(
     start = personal.local_today() + timedelta(days=10)
     period = {"start": start.isoformat(), "end": (start + timedelta(days=5)).isoformat()}
     me = ok(
-        await patch(
-            client, world, **NEW_FIELDS, unavailability=[period], current_password=PASSWORD
-        )
+        await patch(client, world, **NEW_FIELDS, unavailability=[period], current_password=PASSWORD)
     )
     expected = {
         "cpf": CPF,
@@ -282,9 +280,7 @@ async def test_cpf_only_while_empty(client: AsyncClient, world: World, engine: A
 
 @requires_db
 async def test_cpf_is_unique(client: AsyncClient, world: World, engine: AsyncEngine) -> None:
-    r = await client.patch(
-        f"{API}/me/profile", json={"cpf": CPF}, headers=world.tech_other.headers
-    )
+    r = await client.patch(f"{API}/me/profile", json={"cpf": CPF}, headers=world.tech_other.headers)
     assert r.status_code == 200, r.text
     r = await patch(client, world, cpf="123.456.789-09", name="Tecnico Alfa")
     assert coded(r) == (409, "Este CPF já está em outro cadastro", "CPF_TAKEN")
@@ -294,7 +290,9 @@ async def test_cpf_is_unique(client: AsyncClient, world: World, engine: AsyncEng
 
 
 @requires_db
-async def test_rg_and_company_groups(client: AsyncClient, world: World, engine: AsyncEngine) -> None:
+async def test_rg_and_company_groups(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
     r = await patch(client, world, rg_number="12.345.678-9")
     assert r.status_code == 422 and messages(r) == [personal.RG_INCOMPLETE]
     r = await patch(client, world, rg_number="12.345.678-9", rg_issuer="SSP")
@@ -326,7 +324,9 @@ async def test_rg_and_company_groups(client: AsyncClient, world: World, engine: 
         "Empresa Exemplo",
         None,
     )
-    me = ok(await patch(client, world, company_trade_name="Loja Exemplo", current_password=PASSWORD))
+    me = ok(
+        await patch(client, world, company_trade_name="Loja Exemplo", current_password=PASSWORD)
+    )
     assert (me["company_document"], me["company_trade_name"]) == (CNPJ, "Loja Exemplo")
     # Tirar o CNPJ com os nomes ainda lá não vale; os três vazios limpam.
     r = await patch(client, world, company_document=None, current_password=PASSWORD)
@@ -352,9 +352,7 @@ async def test_company_needs_password(client: AsyncClient, world: World) -> None
     r = await patch(client, world, company_document="12.345.678/0001-95", current_password="x")
     assert r.status_code == 422 and messages(r) == [my_profile.WRONG_PASSWORD]
     me = ok(
-        await patch(
-            client, world, company_document="12.345.678/0001-95", current_password=PASSWORD
-        )
+        await patch(client, world, company_document="12.345.678/0001-95", current_password=PASSWORD)
     )
     assert me["company_document"] == CNPJ
     # O mesmo de novo não pede a senha (nada muda); o resto do cadastro também não.
@@ -385,9 +383,7 @@ async def test_email_waits_for_the_link(
     assert len(await history(client, world)) == count and len(mail_box.soon) == 1
 
     # Outro e-mail: o pedido anterior sai (o link dele deixa de valer).
-    me = ok(
-        await patch(client, world, email="outro.alfa@exemplo.com", current_password=PASSWORD)
-    )
+    me = ok(await patch(client, world, email="outro.alfa@exemplo.com", current_password=PASSWORD))
     assert me["email_pending"] == "outro.alfa@exemplo.com"
     async with maker() as db:
         tokens = list(await db.scalars(select(AccountToken)))
@@ -439,7 +435,9 @@ async def test_resend_and_cancel(
         ok(await client.post(url, headers=th))
     r = await client.post(url, headers=th)
     assert r.status_code == 429 and int(r.headers["retry-after"]) > 0
-    assert r.json()["detail"].startswith("Aguarde ") and "para pedir outro link" in r.json()["detail"]
+    assert (
+        r.json()["detail"].startswith("Aguarde ") and "para pedir outro link" in r.json()["detail"]
+    )
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         rows = list(await db.scalars(select(EmailOutbox)))
@@ -458,9 +456,7 @@ async def test_resend_and_cancel(
     assert ok(await client.delete(f"{API}/me/profile/email/pending", headers=th)) == me
     assert len(await history(client, world)) == count
     async with maker() as db:
-        statuses = {
-            r.to_email: r.status for r in await db.scalars(select(EmailOutbox))
-        }
+        statuses = {r.to_email: r.status for r in await db.scalars(select(EmailOutbox))}
     assert statuses["novo.alfa@exemplo.com"] == EmailStatus.EXPIRED
 
     # Validado e sem pedido: 409; endereço que não recebe mensagens: 422 (os dois antes do limite).
