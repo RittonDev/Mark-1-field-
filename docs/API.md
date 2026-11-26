@@ -927,9 +927,9 @@ Até 3 técnicos por cidade pela regra automática, mais os que a central fixar.
   - `visits` = OS distintas atendidas nas lojas da cidade na janela (uma OS com 2 técnicos conta 1);
   - `others_count` = quantos mais atenderam na janela sem ser favoritos nem tirados.
 - `FavoriteTechnician {id, name, email, phone, avatar_url, is_active, operational_status, operational_reason, on_shift,
-  open_tickets, base_city, base_state, visits, last_visit_at, rank, automatic, pinned, hidden, note, set_by: Ref |
-  null, set_at}`. `visits` e
-  `last_visit_at` são da cidade, na janela; `rank` é a posição no ranking da cidade (`null` sem OS na janela).
+  open_tickets, base_city, base_state, visits, last_visit_at, rank, automatic, pinned, hidden, note,
+  set_by: Ref | null, set_at}`. `visits` e `last_visit_at` são da cidade, na janela; `rank` é a posição no ranking da
+  cidade (`null` sem OS na janela).
 - `GET /technicians/favorites/city?location_id=` ou `?state=SP&city=Santos` → `FavoriteCityDetail` =
   `FavoriteCity` + `hidden: [FavoriteTechnician]` + `others` (até 10, pelo ranking).
 - `PUT /technicians/favorites/{technician_id}` `{state, city, favorite: true, note?}` → `FavoriteCityDetail`.
@@ -1404,7 +1404,8 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
   /technicians/suggest` com `exclude_ticket_id` e `limit=10`, mais a busca: `GET /technicians` com a tela Técnicos,
   senão os técnicos de `GET /users/assignable`; sem acesso ao app e já na OS aparecem travados, e desde 25/11/2026
   também Inativo e Bloqueado, com os chips e o motivo no título, e o indisponível nos dias da visita (do dia do início
-  ao do fim, `unavailableBetween`: a mesma conta da API), com "Indisponível até 30/11"; o sugerido fora da disponibilidade informada ganha o chip âmbar "Fora da disponibilidade (sáb · tarde)"), o valor (começa no
+  ao do fim, `unavailableBetween`: a mesma conta da API), com "Indisponível até 30/11"; o sugerido fora da
+  disponibilidade informada ganha o chip âmbar "Fora da disponibilidade (sáb · tarde)"), o valor (começa no
   `technician_fee` do tipo de serviço), o prazo (sem prazo, 30 min, 1 h, 2 h, 4 h ou até o fim do dia; o `expires_at` é
   calculado no clique) e o recado. Depois do envio, o aviso "Oferta enviada" com "Copiar texto para o grupo". Sem
   texto de exemplo nem explicação fixa nos campos. Escopo ou recado que cita o cliente ou a loja (os nomes que a API
@@ -2583,9 +2584,8 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
 - `POST /technicians/{user_id}/operational-status` `{status: "active" | "inactive" | "blocked", reason (3 a 500),
   cut_access?}` → `Technician`. A mesma situação: 409 `OPERATIONAL_STATUS_UNCHANGED`; motivo curto: 422 "Informe o
   motivo"; situação ausente, nula ou desconhecida: 422 "Escolha a situação" (`label` "Situação"; o "Status" das OS
-  continua). Para Inativo ou Bloqueado, as ofertas
-  em aberto para ele fecham antes (`offer_cancelled` com a nota "Técnico inativo na operação" ou "Técnico bloqueado na
-  operação"). Grava a situação, o motivo, quem e quando; `cut_access` (só fora de Ativo e com o acesso liberado) corta
+  continua). Para Inativo ou Bloqueado, as ofertas em aberto para ele fecham antes (`offer_cancelled` com a nota
+  "Técnico inativo na operação" ou "Técnico bloqueado na operação"). Grava a situação, o motivo, quem e quando; `cut_access` (só fora de Ativo e com o acesso liberado) corta
   também o acesso ao app, encerra as sessões e revoga os links de senha. Histórico via "central", com o motivo em
   `note`, e `profile.changed`. Reativar não devolve o acesso (isso é o "Liberar acesso").
 - A situação é separada do acesso ao app (`is_active`, "Acesso ao app: Liberado / Sem acesso"): Inativo e Bloqueado
@@ -2836,7 +2836,7 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   API de antes do cadastro V2 (o detalhe sem a chave `address_number`, `isLegacyDetail`), Endereço, Mini biografia e
   Dados empresariais ficam só de leitura com "Indisponível no momento.", e também CPF, RG e nascimento ("CPF, RG e
   nascimento: indisponível no momento."; o nome segue editável) e o telefone secundário: a API de antes descartaria
-  esses campos calada (e o endereço dela, numa linha só, perderia o número e o complemento).
+  esses campos calada (no endereço, que nela é uma linha só, o número e o complemento sumiriam).
 - Lista de Técnicos: o nome e a linha são links reais para a ficha (Ctrl/⌘+clique e o botão do meio abrem outra aba),
   os filtros ficam na URL, o `?tecnico=` antigo redireciona para a ficha, os selos "Inativo"/"Bloqueado" (o motivo no
   título) e "Indisponível {periodShort}", o filtro "Acesso ao app" (Liberado / Sem acesso), o chip "Sem forma de
@@ -2894,8 +2894,8 @@ Os links dos e-mails usam o `WEB_URL` de sempre. Configure SPF e DKIM do domíni
    `-f` e o `cp` evitam o `>` do PowerShell, que estraga arquivo binário).
 2. **A migração roda só no start da API nova, com a antiga parada** (o comando do contêiner é
    `alembic upgrade head && uvicorn …`, e há uma instância só). Não rode `alembic upgrade head` à parte com a API antiga
-   no ar, nem o comando de checagem do README (`docker compose run --rm api sh -c "alembic upgrade head && alembic
-   check"`), que neste ambiente usa o banco real.
+   no ar, nem o comando de checagem do README, que neste ambiente usa o banco real:
+   `docker compose run --rm api sh -c "alembic upgrade head && alembic check"`.
 3. **Para voltar** (a API nova não sobe ou dá um erro grave):
    1. com o código **novo** ainda no contêiner da API (nele mesmo, com `docker exec`; um contêiner novo da imagem pode
       ter o código antigo), `alembic downgrade f5a7c9e1b3d6`. Perde as contas, as chaves PIX não preferenciais, a
