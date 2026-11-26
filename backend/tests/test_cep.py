@@ -217,7 +217,7 @@ async def test_cep_leaves_the_log(services: Services, caplog: pytest.LogCaptureF
     )
     redact.filter(outgoing)
     assert CEP not in outgoing.getMessage() and "viacep.com.br/ws/***" in outgoing.getMessage()
-    other = httpx.URL("https://login.microsoftonline.com/x/discovery/v2.0/keys")
+    other = httpx.URL("https://api.exemplo.com/outra/rota")
     record = logging.LogRecord("httpx", logging.INFO, __file__, 1, "%s", (other,), None)
     redact.filter(record)
     assert record.args == (other,)  # o que não muda fica como estava

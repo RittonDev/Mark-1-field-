@@ -179,6 +179,9 @@ describe("reviewPersonal (Dados pessoais)", () => {
     assert.equal(form.cpfLocked, true);
     assert.deepEqual(personalReview({ cpf: "111.444.777-35" }, withCpf), UNCHANGED);
     assert.equal(PERSONAL_SECTION.fromProfile(PROFILE).cpfLocked, false);
+    // A central gravou o CPF com a tela aberta (a releitura trouxe o gravado): o digitado não vai.
+    const typed = { ...PERSONAL_SECTION.fromProfile(PROFILE), cpf: "123.456.789-09" };
+    assert.deepEqual(reviewPersonal(typed, form, TODAY), UNCHANGED);
   });
 
   it("RG só com o número: faltam o órgão emissor e a UF", () => {

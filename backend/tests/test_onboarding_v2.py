@@ -9,7 +9,7 @@ Dados fictícios (Tecnico Alfa, Cidade Exemplo, @exemplo.com, CPF 12345678909, C
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
@@ -324,16 +324,16 @@ async def test_reopen_rules(client: AsyncClient, world: World, engine: AsyncEngi
     await submit(client, token, ficha(email="a@exemplo.com", document=same_cpf, photo=None))
     a_id = await application_id(client, world, "a@exemplo.com")
 
-    def reopen(app_id: str, reason: str = "Documentação nova chegou") -> object:
-        return client.post(f"{APPS}/{app_id}/reopen", json={"reason": reason}, headers=an)
+    async def reopen(app_id: str, reason: str = "Documentação nova chegou") -> Response:
+        return await client.post(f"{APPS}/{app_id}/reopen", json={"reason": reason}, headers=an)
 
-    r = await reopen(a_id)  # type: ignore[misc]
+    r = await reopen(a_id)
     assert r.status_code == 409 and r.json() == {
         "detail": "Só a ficha reprovada pode ser reaberta",
         "code": "APPLICATION_NOT_REJECTED",
     }
     await reject(client, world, a_id, "Sem experiência comprovada")
-    r = await reopen(a_id, " x ")  # type: ignore[misc]
+    r = await reopen(a_id, " x ")
     assert r.status_code == 422 and r.json()["detail"][0]["msg"] == "Informe o motivo"
     r = await client.post(
         f"{APPS}/{a_id}/reopen", json={"reason": "Nova análise", "note": "x"}, headers=an
@@ -347,12 +347,12 @@ async def test_reopen_rules(client: AsyncClient, world: World, engine: AsyncEngi
     # Outra ficha da mesma pessoa (o mesmo CPF) em análise: 409.
     await submit(client, token, ficha(email="b@exemplo.com", document=same_cpf, photo=None))
     b_id = await application_id(client, world, "b@exemplo.com")
-    r = await reopen(a_id)  # type: ignore[misc]
+    r = await reopen(a_id)
     assert r.status_code == 409 and r.json()["code"] == "APPLICATION_DUPLICATE"
     assert r.json()["detail"] == "Há outra ficha desta pessoa em análise ou aprovada"
     await reject(client, world, b_id, "Ficha repetida")
 
-    r = await reopen(a_id)  # type: ignore[misc]
+    r = await reopen(a_id)
     assert r.status_code == 200, r.text
     detail = r.json()
     assert detail["status"] == "pending" and detail["reopened_at"] is not None
@@ -370,7 +370,7 @@ async def test_reopen_rules(client: AsyncClient, world: World, engine: AsyncEngi
     listed = {a["id"]: a for a in (await client.get(APPS, headers=an)).json()}
     assert listed[a_id]["reopened_at"] == detail["reopened_at"]
     # Agora é a B que tem a mesma pessoa em análise.
-    r = await reopen(b_id)  # type: ignore[misc]
+    r = await reopen(b_id)
     assert r.status_code == 409 and r.json()["code"] == "APPLICATION_DUPLICATE"
 
     # O CPF virou o de um usuário: 409.
@@ -381,7 +381,7 @@ async def test_reopen_rules(client: AsyncClient, world: World, engine: AsyncEngi
         await conn.execute(
             update(User).where(User.id == world.tech.user.id).values(cpf=cpf("400500600"))
         )
-    r = await reopen(c_id)  # type: ignore[misc]
+    r = await reopen(c_id)
     assert r.status_code == 409 and r.json() == {
         "detail": "Este CPF já está em outro cadastro",
         "code": "CPF_TAKEN",
@@ -395,7 +395,7 @@ async def test_reopen_rules(client: AsyncClient, world: World, engine: AsyncEngi
         await conn.execute(
             update(User).where(User.id == world.tech_other.user.id).values(email="d@exemplo.com")
         )
-    r = await reopen(d_id)  # type: ignore[misc]
+    r = await reopen(d_id)
     assert r.status_code == 409 and r.json() == {
         "detail": "Já existe um usuário com este e-mail",
         "code": "EMAIL_TAKEN",

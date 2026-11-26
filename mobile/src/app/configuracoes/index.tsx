@@ -77,6 +77,9 @@ const GROUPS = TECH_SECTION_GROUPS.map((group) => ({
 /** Itens de uma lista do perfil técnico. */
 const size = (list: readonly unknown[] | null | undefined) => (Array.isArray(list) ? list.length : 0);
 
+/** Quanto da biografia o leitor de tela fala na linha. */
+const SPOKEN_MAX = 60;
+
 function contactRow(p: MyProfile): RowSummary {
   const { value, tone } = contactRowSummary(p);
   return { value, valueTone: tone };
@@ -119,7 +122,11 @@ export default function SettingsScreen() {
       case "contato":
         return fromCadastro(contactRow);
       case "mini-biografia":
-        return fromCadastro((p) => ({ value: bioSummary(p.bio) }));
+        return fromCadastro((p) => {
+          const value = bioSummary(p.bio);
+          // O leitor de tela fala o começo do texto, não a biografia inteira a cada passada pela linha.
+          return { value, accessibilityLabel: `${label}, ${value.length > SPOKEN_MAX ? `${value.slice(0, SPOKEN_MAX).trimEnd()}…` : value}` };
+        });
       case "dados-empresariais":
         return fromCadastro((p) => ({ value: companySummary(p) }));
       case "recebimento":

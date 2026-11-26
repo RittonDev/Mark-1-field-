@@ -21,7 +21,7 @@ import { useStyles, type Palette } from "../../theme/theme";
 export default function PersonalDataScreen() {
   const styles = useStyles(makeStyles);
   const state = useProfileForm(PERSONAL_SECTION);
-  const { errors, update, saving } = state;
+  const { base, errors, update, saving } = state;
   // Os limites do seletor do nascimento, pelo dia em que a tela abriu.
   const [limits] = useState(() => birthLimits(todayIso()));
   const cpfRef = useRef<TextInputInstance>(null);
@@ -47,12 +47,13 @@ export default function PersonalDataScreen() {
                 maxLength={160}
                 returnKeyType="next"
                 submitBehavior="submit"
-                onSubmitEditing={() => (form.cpfLocked ? rgRef : cpfRef).current?.focus()}
+                onSubmitEditing={() => (base?.cpfLocked ? rgRef : cpfRef).current?.focus()}
               />
             </Field>
-            {form.cpfLocked ? (
+            {base?.cpfLocked ? (
+              // O gravado, só leitura: quem corrige é a central.
               <Field label="CPF" hint="Para corrigir, fale com a central.">
-                <Input value={form.cpf} editable={false} accessibilityLabel="CPF" style={styles.readOnly} />
+                <Input value={base.cpf} editable={false} accessibilityLabel="CPF" style={styles.readOnly} />
               </Field>
             ) : (
               <Field label="CPF" error={errors.cpf}>

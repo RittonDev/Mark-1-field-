@@ -172,7 +172,8 @@ export function reviewPersonal(form: PersonalForm, base: PersonalForm, today: st
   const { body, errors: nameErrors } = reviewName(form, base);
   const errors: Partial<Record<PersonalField, string>> = { ...nameErrors };
 
-  if (!form.cpfLocked) {
+  // O CPF gravado (o servidor diz) não vai mais pelo app, nem se a central o gravou com a tela aberta.
+  if (!base.cpfLocked) {
     const cpf = onlyDigits(form.cpf);
     if (cpf && cpf !== onlyDigits(base.cpf)) {
       body.cpf = cpf;
