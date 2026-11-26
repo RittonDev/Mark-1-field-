@@ -454,9 +454,7 @@ async def _render(db: AsyncSession, row: EmailOutbox) -> Rendered:
     # O técnico como está agora no banco (o acesso, a senha e a validação podem ter mudado depois
     # do pedido).
     user = (
-        await db.get(User, row.user_id, populate_existing=True)
-        if row.user_id is not None
-        else None
+        await db.get(User, row.user_id, populate_existing=True) if row.user_id is not None else None
     )
     if user is None:
         raise MailError("E-mail sem o técnico", permanent=True)

@@ -16,6 +16,7 @@ import {
 import { cleanDocument, documentError, UFS, zipError } from "@/components/LocationDialog";
 import { useToast } from "@/components/Toaster";
 import { Button, Checkbox, Dialog, ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
+import { tidyLine } from "@/lib/address";
 import { ApiError, api, errorMessage } from "@/lib/api";
 import { formatDocument } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
@@ -58,7 +59,7 @@ export function customerContacts(customer: Customer | null): ContactEntry[] {
   ];
 }
 
-/** Os campos como a API recebe (texto em branco vira null). */
+/** Os campos como a API recebe (texto em branco vira null; a linha sem a vírgula do "{logradouro}, " sem número). */
 function bodyOf(form: FormState): Record<string, unknown> {
   const valueOf = (v: string) => v.trim() || null;
   return {
@@ -66,7 +67,7 @@ function bodyOf(form: FormState): Record<string, unknown> {
     document: cleanDocument(form.document) || null,
     notes: valueOf(form.notes),
     is_active: form.is_active,
-    address_line: valueOf(form.address_line),
+    address_line: tidyLine(form.address_line) || null,
     district: valueOf(form.district),
     city: valueOf(form.city),
     state: form.state || null,

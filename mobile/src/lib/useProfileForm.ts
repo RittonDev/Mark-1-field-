@@ -1,12 +1,14 @@
 // Estado das telas do cadastro em Configurações. `useProfileLoad`: o cadastro da memória e a releitura do servidor ao
-// abrir (o menu, a Foto do perfil e os formulários). `useProfileForm`: um formulário que salva só a sua parte, com o
-// comportamento que o Meu cadastro já tinha: abre com o cadastro da memória e relê sem apagar o que foi digitado; os
-// erros aparecem depois do primeiro "Salvar" (o primeiro vai para o rodapé); sem rede, avisa antes de enviar; a tela
-// pode perguntar antes de enviar ("Confira o CPF"); e-mail e dados da empresa pedem a senha numa folha; salvou, avisa e
-// sai; sair com alteração pergunta. Tudo só online (lib/profile.ts).
+// abrir, ao puxar e quando o app volta para o primeiro plano (o menu, a Foto do perfil e os formulários).
+// `useProfileForm`: um formulário que salva só a sua parte, com o comportamento que o Meu cadastro já tinha: abre com o
+// cadastro da memória e relê sem apagar o que foi digitado; os erros aparecem depois do primeiro "Salvar" (o primeiro
+// vai para o rodapé); sem rede, avisa antes de enviar; a tela pode perguntar antes de enviar ("Confira o CPF"); e-mail e
+// dados da empresa pedem a senha numa folha; salvou, avisa e sai; sair com alteração pergunta. Tudo só online
+// (lib/profile.ts).
 
 import { router, usePreventRemove } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import type { PasswordSheetProps } from "../components/settings/PasswordSheet";
 import type { ProfileLoad } from "../components/settings/ProfileGate";
 import { errorMessage } from "./api";
@@ -50,7 +52,11 @@ export interface ProfileLoadState {
   refreshing: boolean;
 }
 
-/** Relê o cadastro ao abrir a tela (a leitura em andamento é compartilhada) e em "Tentar de novo" e puxar. */
+/**
+ * Relê o cadastro ao abrir a tela (a leitura em andamento é compartilhada), em "Tentar de novo", ao puxar e quando o app
+ * volta para o primeiro plano. O link do e-mail abre no navegador, fora do app: na volta, o Contato (e a linha dele no
+ * menu) já mostra o login validado, em vez de agir sobre o estado de antes.
+ */
 export function useProfileLoad(): ProfileLoadState {
   const profile = useProfile();
   const [load, setLoad] = useState<ProfileLoad>({ status: "loading" });
@@ -76,6 +82,31 @@ export function useProfileLoad(): ProfileLoadState {
     };
   }, [attempt]);
 
+  // De volta ao app (do navegador, do e-mail, do WhatsApp): relê sem esconder o que está na tela; o formulário guarda o
+  // que foi digitado (rebase).
+  useEffect(() => {
+    let alive = true;
+    let current: string = AppState.currentState ?? "active";
+    const sub = AppState.addEventListener("change", (next) => {
+      const back = next === "active" && current !== "active";
+      current = next;
+      if (!back) return;
+      loadProfile().then(
+        () => {
+          if (alive) setLoad({ status: "ok" });
+        },
+        async (error: unknown) => {
+          const offline = await offlineFailure(error);
+          if (alive) setLoad({ status: "error", offline, message: errorMessage(error) });
+        },
+      );
+    });
+    return () => {
+      alive = false;
+      sub.remove();
+    };
+  }, []);
+
   const retry = useCallback(() => {
     setLoad({ status: "loading" });
     setAttempt((n) => n + 1);
@@ -94,6 +125,9 @@ export interface ProfileFormState<F extends object, K extends string> {
   profile: MyProfile | null;
   load: ProfileLoad;
   retry: () => void;
+  /** Puxar para atualizar (ProfileFormScreen): relê sem apagar o que foi digitado. */
+  refresh: () => void;
+  refreshing: boolean;
   /** O formulário (null sem o cadastro na memória). */
   form: F | null;
   /** O mesmo formulário montado do cadastro gravado (para comparar e voltar ao gravado). */
@@ -118,7 +152,7 @@ function leaveScreen() {
 
 /** Um formulário do cadastro. `spec` é uma constante do módulo (lib/profileForm.ts). */
 export function useProfileForm<F extends object, K extends string>(spec: ProfileFormSpec<F, K>): ProfileFormState<F, K> {
-  const { profile, load, retry } = useProfileLoad();
+  const { profile, load, retry, refresh, refreshing } = useProfileLoad();
   // O cadastro de que o formulário partiu (para acompanhar uma releitura sem perder o que foi digitado).
   const [shown, setShown] = useState<MyProfile | null>(profile);
   const [form, setForm] = useState<F | null>(() => (profile ? spec.fromProfile(profile) : null));
@@ -290,6 +324,8 @@ export function useProfileForm<F extends object, K extends string>(spec: Profile
     profile,
     load,
     retry,
+    refresh,
+    refreshing,
     form,
     base,
     review,

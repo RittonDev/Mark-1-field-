@@ -15,7 +15,7 @@ import {
 } from "@/components/ContactList";
 import { useToast } from "@/components/Toaster";
 import { Button, Checkbox, Dialog, ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
-import { cepDigits } from "@/lib/address";
+import { cepDigits, tidyLine } from "@/lib/address";
 import { api, errorMessage } from "@/lib/api";
 import { CEP_TEXT } from "@/lib/constants";
 import { formatDocument } from "@/lib/format";
@@ -177,7 +177,7 @@ function initialForm(location: Location | null, customerId: UUID | null): FormSt
   };
 }
 
-/** Os campos como a API recebe (texto em branco vira null). */
+/** Os campos como a API recebe (texto em branco vira null; a linha sem a vírgula do "{logradouro}, " sem número). */
 function bodyOf(form: FormState): Record<string, unknown> {
   const coords = checkCoords(form.latitude, form.longitude);
   const valueOf = (v: string) => v.trim() || null;
@@ -185,7 +185,7 @@ function bodyOf(form: FormState): Record<string, unknown> {
     name: form.name.trim(),
     code: valueOf(form.code),
     document: cleanDocument(form.document) || null,
-    address_line: valueOf(form.address_line),
+    address_line: tidyLine(form.address_line) || null,
     district: valueOf(form.district),
     city: valueOf(form.city),
     state: form.state || null,
@@ -265,7 +265,10 @@ export function LocationDialog({
   const invalid = Object.values(errors).some(Boolean) || contactsInvalid(contacts);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial) || !sameContacts(contacts, initialContacts);
   const showCoordsError = Boolean(errors.coords) && (tried || (form.latitude.trim() !== "" && form.longitude.trim() !== ""));
-  const address = [form.address_line, form.district, form.city, form.state, form.zip_code].map((v) => v.trim()).filter(Boolean).join(", ");
+  const address = [tidyLine(form.address_line), form.district, form.city, form.state, form.zip_code]
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .join(", ");
   const mapsSearch = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || form.name.trim() || "Brasil")}`;
 
   const mutation = useMutation({

@@ -1,6 +1,7 @@
 // Estados do técnico no mapa ao vivo (espelha LiveState em backend/app/schemas/tracking.py).
 
 import { formatMinutes } from "./format";
+import { isOutOfActive } from "./technicians";
 import type { ActivityState, LivePosition, LiveState, LiveTechnician } from "./types";
 
 /**
@@ -16,6 +17,22 @@ export const LIVE_STATE: Record<LiveState, { label: string; color: string; hint:
 };
 
 export const LIVE_STATE_ORDER: LiveState[] = ["in_progress", "en_route", "available", "no_signal", "offline"];
+
+/** Em jornada e sem OS em campo, mas Inativo ou Bloqueado: neutro (o selo da situação diz por quê). */
+export const LIVE_IDLE = { label: "Em jornada", color: "#6b7280", hint: "Em jornada, sem OS em campo: fora de Ativo, não recebe OS" };
+
+/**
+ * "Disponível" pede Ativo: Inativo ou Bloqueado em jornada e sem OS em campo não recebe OS, então não conta nem aparece
+ * como disponível (nem no filtro "Disponível"). Sem `operational_status` (API antiga): Ativo.
+ */
+export function idleOutOfActive(tech: Pick<LiveTechnician, "state" | "operational_status">): boolean {
+  return tech.state === "available" && isOutOfActive(tech);
+}
+
+/** O estado na tela (cor do pino e do avatar, rótulo e dica): LIVE_STATE, com "Disponível" só para quem está Ativo. */
+export function liveLook(tech: Pick<LiveTechnician, "state" | "operational_status">): { label: string; color: string; hint: string } {
+  return idleOutOfActive(tech) ? LIVE_IDLE : LIVE_STATE[tech.state];
+}
 
 // Tolerância entre o relógio do celular e o início da jornada (a mesma CLOCK_TOLERANCE da API).
 const SHIFT_CLOCK_TOLERANCE_MS = 2 * 60_000;

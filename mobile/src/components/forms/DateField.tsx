@@ -1,6 +1,7 @@
 import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { useState } from "react";
 import { Platform, Pressable, StyleSheet, View } from "react-native";
+import { isDayTap } from "../../lib/dateField";
 import { Text } from "../Text";
 import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Button } from "../ui";
@@ -13,7 +14,10 @@ const label = (s: string) => s.split("-").reverse().join("/");
 /**
  * Data sem hora ("YYYY-MM-DD"), para campos de formulário. Quase sempre é o dia da visita: o atalho "Hoje" preenche
  * com um toque (`todayShortcut`; só aparece com hoje entre `min` e `max`). `min` e `max` limitam o seletor; `initial` é
- * onde ele abre com o campo vazio (nascimento: 30 anos atrás). Na web: DateField.web.tsx.
+ * onde ele abre com o campo vazio (nascimento: 30 anos atrás). No iPhone o seletor abre abaixo do campo e cada mudança
+ * grava: o calendário (`iosDisplay` "inline") fecha no toque num dia do mês à vista (trocar o mês ou o ano pelo
+ * cabeçalho não fecha); as rodas ("spinner", o nascimento) ficam abertas. Os dois fecham no "OK" e tocando no campo. No
+ * Android, o diálogo do sistema (com o OK dele). Na web: DateField.web.tsx.
  */
 export function DateField({
   value,
@@ -24,6 +28,7 @@ export function DateField({
   max,
   todayShortcut = true,
   initial,
+  iosDisplay = "inline",
 }: {
   value: string | null;
   onChange: (value: string | null) => void;
@@ -38,6 +43,8 @@ export function DateField({
   todayShortcut?: boolean;
   /** O dia em que o seletor abre com o campo vazio ("YYYY-MM-DD"; padrão: hoje). */
   initial?: string;
+  /** iPhone: o calendário ("inline", padrão) ou as rodas de dia, mês e ano ("spinner": datas longe de hoje). */
+  iosDisplay?: "inline" | "spinner";
 }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
@@ -67,6 +74,22 @@ export function DateField({
     }
   }
 
+  /**
+   * iPhone: cada mudança grava (o campo mostra o que o seletor mostra). O calendário manda mudança também ao trocar o
+   * mês ou o ano pelo cabeçalho: só o toque num dia do mês à vista fecha. As rodas mandam uma por roda: só o "OK" fecha.
+   */
+  function pickIos(d: Date) {
+    const next = toIso(d);
+    onChange(next);
+    if (iosDisplay === "inline" && isDayTap(opensAt, next)) setIosOpen(false);
+  }
+
+  /** "OK": fecha; com o campo vazio, fica a data que o seletor mostra. */
+  function confirmIos() {
+    if (!isDay(value)) onChange(opensAt);
+    setIosOpen(false);
+  }
+
   const spoken = value ? `${fieldLabel ? `${fieldLabel}: ` : "Data: "}${label(value)}` : `${fieldLabel ? `${fieldLabel}: ` : ""}selecionar data`;
 
   return (
@@ -94,19 +117,19 @@ export function DateField({
         {value && !disabled ? <Button compact title="Limpar" variant="ghost" onPress={() => onChange(null)} /> : null}
       </View>
       {Platform.OS === "ios" && iosOpen ? (
-        <DateTimePicker
-          mode="date"
-          display="inline"
-          locale="pt-BR"
-          themeVariant={c.scheme}
-          accentColor={c.primary}
-          value={pickerValue}
-          {...limits}
-          onValueChange={(_e, d) => {
-            onChange(toIso(d));
-            setIosOpen(false);
-          }}
-        />
+        <>
+          <DateTimePicker
+            mode="date"
+            display={iosDisplay}
+            locale="pt-BR"
+            themeVariant={c.scheme}
+            accentColor={c.primary}
+            value={pickerValue}
+            {...limits}
+            onValueChange={(_e, d) => pickIos(d)}
+          />
+          <Button compact title="OK" onPress={confirmIos} style={styles.ok} />
+        </>
       ) : null}
     </View>
   );
@@ -115,6 +138,7 @@ export function DateField({
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     row: { flexDirection: "row", alignItems: "center", gap: 8 },
+    ok: { alignSelf: "flex-end", minWidth: 72 },
     input: {
       flex: 1,
       minHeight: 46,

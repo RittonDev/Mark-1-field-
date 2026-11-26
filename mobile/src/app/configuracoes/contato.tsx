@@ -1,6 +1,8 @@
 // Configurações › Contato: o celular (WhatsApp, por onde a central fala com o técnico), o telefone secundário e o e-mail
 // de login. Trocar o e-mail pede a senha atual e não troca o login na hora: o e-mail novo fica pendente até o técnico abrir
 // o link que chega nele (aqui, "Reenviar link" e "Cancelar troca"). O login que ainda não foi validado tem "Enviar link".
+// O link abre no navegador: na volta ao app, a tela relê o cadastro (useProfileLoad; e puxar para atualizar), e as duas
+// ações conferem o que o servidor devolve (o link já aberto: "Seu e-mail já foi validado" / "já está validado").
 // Com o envio de e-mail desligado no servidor, o e-mail fica só leitura (a troca é pela central). A central é avisada.
 // Só online, como todo o cadastro; com a API de antes do cadastro V2, "Indisponível no momento".
 
@@ -10,13 +12,13 @@ import { CadastroUnavailable } from "../../components/settings/CadastroUnavailab
 import { EmailPendingBox } from "../../components/settings/EmailPendingBox";
 import { FormCard, ProfileFormScreen } from "../../components/settings/ProfileFormScreen";
 import { Button, Field, Input } from "../../components/ui";
-import { errorMessage } from "../../lib/api";
+import { ApiError, errorMessage } from "../../lib/api";
 import { confirmAction } from "../../lib/dialogs";
 import { haptic } from "../../lib/haptics";
 import { maskPhone } from "../../lib/masks";
 import { noNetwork, offlineFailure } from "../../lib/net";
-import { cancelEmailChange, hasCadastroV2, sendEmailLink } from "../../lib/profile";
-import { CONTACT_SECTION, emailHint, emailStatus } from "../../lib/profileForm";
+import { cancelEmailChange, hasCadastroV2, loadProfile, sendEmailLink } from "../../lib/profile";
+import { cancelChangeNotice, CONTACT_SECTION, emailHint, emailStatus } from "../../lib/profileForm";
 import { showToast } from "../../lib/toast";
 import { useProfileForm } from "../../lib/useProfileForm";
 import { useStyles, type Palette } from "../../theme/theme";
@@ -55,8 +57,15 @@ export default function ContactScreen() {
       haptic.success();
       showToast("Link enviado", { tone: "success", description: `Abra o e-mail em ${target}.` });
     } catch (error) {
-      if (await offlineFailure(error)) showToast(NO_INTERNET, { description: "Conecte o aparelho para enviar o link." });
-      else showToast("Não foi possível enviar o link", { tone: "error", description: errorMessage(error) });
+      if (error instanceof ApiError && error.code === "EMAIL_ALREADY_VERIFIED") {
+        // Validou no navegador com a tela aberta: a releitura tira o "Pendente de validação" e o botão.
+        void loadProfile().catch(() => undefined);
+        showToast("Seu e-mail já está validado");
+      } else if (await offlineFailure(error)) {
+        showToast(NO_INTERNET, { description: "Conecte o aparelho para enviar o link." });
+      } else {
+        showToast("Não foi possível enviar o link", { tone: "error", description: errorMessage(error) });
+      }
     } finally {
       acting.current = false;
       setBusy(null);
@@ -66,8 +75,10 @@ export default function ContactScreen() {
   async function cancelChange() {
     if (!profile || acting.current || saving) return;
     acting.current = true;
+    // O cadastro da tela: o que o DELETE devolve diz se ainda havia troca a cancelar.
+    const before = profile;
     try {
-      const ok = await confirmAction("Cancelar a troca de e-mail?", `Você continua entrando com ${profile.email}.`, {
+      const ok = await confirmAction("Cancelar a troca de e-mail?", `Você continua entrando com ${before.email}.`, {
         confirmText: "Cancelar troca",
         cancelText: "Voltar",
       });
@@ -77,9 +88,9 @@ export default function ContactScreen() {
         return;
       }
       setBusy("cancel");
-      await cancelEmailChange();
+      const notice = cancelChangeNotice(before, await cancelEmailChange());
       haptic.success();
-      showToast("Troca de e-mail cancelada", { tone: "success" });
+      showToast(notice.title, { tone: notice.tone, description: notice.description });
     } catch (error) {
       if (await offlineFailure(error)) showToast(NO_INTERNET, { description: "Conecte o aparelho para cancelar a troca." });
       else showToast("Não foi possível cancelar a troca", { tone: "error", description: errorMessage(error) });

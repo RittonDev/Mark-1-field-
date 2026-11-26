@@ -4,29 +4,19 @@ import { BadgeCheck, ClipboardList, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { NeutralChip } from "@/components/settings/shared";
 import { buttonClassName, Card, Pill } from "@/components/ui";
-import { OPERATIONAL_STATUS, periodShort, periodText, unavailableOn } from "@/lib/constants";
+import { periodShort, periodText, unavailableOn } from "@/lib/constants";
 import { todayISO } from "@/lib/format";
 import { useCan } from "@/lib/permissions";
-import { OPERATIONAL_STATUS_COLOR } from "@/lib/technicians";
+import { isOutOfActive } from "@/lib/technicians";
 import type { Technician } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
 import { LevelBadge } from "../LevelBadge";
 import { useTechnicianLevel } from "../LevelSection";
 import { TechAvatar } from "../TechAvatar";
+import { OperationalPill } from "./OperationalPill";
 
 /** Cor dos selos de problema que não são a situação (indisponível hoje). */
 const AMBER = "#d97706";
-
-/** O selo "Inativo"/"Bloqueado" com o motivo no `title` (Ativo não tem selo: cor só para problema). */
-export function OperationalPill({ tech }: { tech: Pick<Technician, "operational_status" | "operational_reason"> }) {
-  const status = tech.operational_status ?? "active";
-  if (status === "active") return null;
-  return (
-    <span title={tech.operational_reason ?? undefined} className="inline-flex">
-      <Pill color={OPERATIONAL_STATUS_COLOR[status]}>{OPERATIONAL_STATUS[status]}</Pill>
-    </span>
-  );
-}
 
 /**
  * O topo da ficha: foto, nome, cargo e grupo, o elo, os selos (situação, sem acesso ao app, indisponível hoje) e os
@@ -44,7 +34,7 @@ export function FichaHeader({ tech }: { tech: Technician }) {
   const today = todayISO();
   const away = unavailableOn(tech.unavailability, today);
   const role = [tech.job_title?.trim() || "Técnico", tech.team?.name].filter(Boolean).join(" · ");
-  const outOfActive = (tech.operational_status ?? "active") !== "active";
+  const outOfActive = isOutOfActive(tech);
 
   return (
     <Card className="mb-5 p-5">

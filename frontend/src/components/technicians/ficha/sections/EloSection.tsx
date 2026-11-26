@@ -17,7 +17,10 @@ export function EloSection({ tech, canEdit }: { tech: Technician; canEdit: boole
   useLeaveGuard(draft, "O motivo de desconsiderar ainda não foi enviado.");
   return (
     <SectionCard title={fichaLabel("elo")}>
-      <LevelSection tech={tech} readOnly={!canEdit} dirty={false} onDraftChange={setDraft} />
+      {/* O título "Elo" é o da seção: o do LevelSection (o SectionTitle, único h3 dele) sai daqui para não repetir. */}
+      <div className="empty:hidden [&_div:has(>h3)]:hidden">
+        <LevelSection tech={tech} readOnly={!canEdit} dirty={false} onDraftChange={setDraft} />
+      </div>
       <TechnicianStatsSection technicianId={tech.id} />
     </SectionCard>
   );

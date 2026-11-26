@@ -20,7 +20,7 @@ import { useToast } from "@/components/Toaster";
 import { useNow } from "@/components/useNow";
 import { Button, buttonClassName, Dialog, ErrorBox, Field, Input, Pill, SectionTitle, Select, Skeleton, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { OFFER_STATE, slotsText, unavailableOn } from "@/lib/constants";
+import { OFFER_STATE, slotsText, unavailableBetween } from "@/lib/constants";
 import { dayKey, formatDateTime, formatMoney, formatTime, fromLocalInput, initials, moneyInput, OPERATION_TZ } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useCan } from "@/lib/permissions";
@@ -251,7 +251,7 @@ interface Candidate {
   /** Fora de Ativo na operação (Inativo ou Bloqueado): não recebe OS (a API recusa a oferta). */
   status?: OffStatus;
   statusReason?: string | null;
-  /** Avisou que não atende no dia da visita (a API recusa a oferta). */
+  /** Avisou que não atende num dos dias da visita (a API recusa a oferta). */
   unavailable?: UnavailabilityPeriod;
   /** Faixa do elo (só o selo; sem ela na lista de atribuição). */
   level?: LevelTier;
@@ -277,40 +277,46 @@ function fromSuggestion(t: TechnicianSuggestion, scheduled: boolean): Candidate 
   };
 }
 
+/** Os dias da visita, "AAAA-MM-DD" no fuso da operação: do início ao fim (sem agenda, hoje). */
+interface VisitDays {
+  first: string;
+  last: string;
+}
+
 /**
- * A situação na operação e a indisponibilidade no dia da visita (`day`, "AAAA-MM-DD"): quem está fora de Ativo ou
- * avisou que não atende no dia aparece travado, com o motivo ou o período (a API recusa a oferta).
+ * A situação na operação e a indisponibilidade nos dias da visita: quem está fora de Ativo ou avisou que não atende em
+ * algum deles aparece travado, com o motivo ou o período (a API recusa a oferta, conferindo os mesmos dias).
  */
 function receiving(
   person: Pick<Technician, "operational_status" | "operational_reason" | "unavailability">,
-  day: string,
+  days: VisitDays,
 ): Pick<Candidate, "status" | "statusReason" | "unavailable"> {
   const status = offStatus(person) ?? undefined;
   return {
     status,
     statusReason: status ? (person.operational_reason ?? null) : undefined,
-    unavailable: status ? undefined : (unavailableOn(person.unavailability, day) ?? undefined),
+    unavailable: status ? undefined : (unavailableBetween(person.unavailability, days.first, days.last) ?? undefined),
   };
 }
 
-function fromTechnician(t: Technician, day: string): Candidate {
+function fromTechnician(t: Technician, days: VisitDays): Candidate {
   const region = cityOf(t.base_city, t.base_state) || cityOf(t.home_city, t.home_state) || "Sem região";
   return {
     id: t.id,
     name: t.name,
     detail: `${region} · ${t.open_tickets} em aberto`,
     inactive: !t.is_active,
-    ...receiving(t, day),
+    ...receiving(t, days),
     level: t.level?.tier,
   };
 }
 
-function fromAssignable(u: AssignableUser, day: string): Candidate {
+function fromAssignable(u: AssignableUser, days: VisitDays): Candidate {
   return {
     id: u.id,
     name: u.name,
     detail: [u.team_name, `${u.open_tickets} em aberto`].filter(Boolean).join(" · "),
-    ...receiving(u, day),
+    ...receiving(u, days),
   };
 }
 
@@ -327,10 +333,10 @@ interface TechnicianSearch {
 
 /**
  * "Incluir outro técnico": com a tela Técnicos, a base inteira (como o "Incluir favorito"; os sem acesso
- * ao app, os Inativos e Bloqueados e os indisponíveis no dia da visita, `day`, aparecem travados); sem ela,
+ * ao app, os Inativos e Bloqueados e os indisponíveis nos dias da visita, `days`, aparecem travados); sem ela,
  * os técnicos com acesso da lista de atribuição (com as mesmas travas).
  */
-function useTechnicianSearch(term: string, day: string): TechnicianSearch {
+function useTechnicianSearch(term: string, days: VisitDays): TechnicianSearch {
   const canBase = useCan("base.technicians");
   const typed = term.trim();
   const q = useDebounced(typed, 300);
@@ -348,7 +354,7 @@ function useTechnicianSearch(term: string, day: string): TechnicianSearch {
   if (canBase) {
     return {
       q,
-      items: (base.data ?? []).map((t) => fromTechnician(t, day)),
+      items: (base.data ?? []).map((t) => fromTechnician(t, days)),
       loading: waiting || base.isLoading,
       error: base.error,
       retry: () => void base.refetch(),
@@ -358,7 +364,7 @@ function useTechnicianSearch(term: string, day: string): TechnicianSearch {
   const items = (assignable.data ?? [])
     .filter((u) => u.role === "technician" && words.every((w) => searchText(u.name).includes(w)))
     .slice(0, 20)
-    .map((u) => fromAssignable(u, day));
+    .map((u) => fromAssignable(u, days));
   return { q, items, loading: waiting || assignable.isLoading, error: assignable.error, retry: () => void assignable.refetch() };
 }
 
@@ -516,10 +522,12 @@ export function OfferDialog({
   const [term, setTerm] = useState("");
   const [tried, setTried] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
-  // O dia da visita no fuso da operação (sem agenda, hoje): quem avisou que não atende nele fica travado.
+  // Os dias da visita no fuso da operação, do início ao fim gravado (sem fim, o dia do início; sem agenda, hoje), como
+  // a API confere a oferta: quem avisou que não atende em algum deles fica travado.
   const today = dayKey(now);
   const visitDay = ticket.scheduled_start ? dayKey(ticket.scheduled_start) || today : today;
-  const search = useTechnicianSearch(term, visitDay);
+  const visitLast = ticket.scheduled_start ? dayKey(ticket.scheduled_end ?? ticket.scheduled_start) || visitDay : visitDay;
+  const search = useTechnicianSearch(term, { first: visitDay, last: visitLast });
 
   // Os mais indicados para a OS (o mesmo ranking da aba Geral, com até 10). A própria OS não conta como
   // "ocupado" para ninguém (exclude_ticket_id).

@@ -1,16 +1,22 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Eye, EyeOff, Hourglass, KeyRound, Link2Off, Loader2, WifiOff } from "lucide-react";
+import { CheckCircle2, Eye, EyeOff, Hourglass, KeyRound, Link2Off, Loader2, Lock, WifiOff } from "lucide-react";
 import { useId, useState } from "react";
 import { apiText, isOffline, PublicPanel, PublicShell, useHashToken } from "@/components/PublicPage";
 import { Button, buttonClassName, Card, ErrorBox, Input } from "@/components/ui";
-import { ApiError, errorMessage, request } from "@/lib/api";
+import { ApiError, apiErrorCode, errorMessage, request } from "@/lib/api";
 import type { PasswordResetCheck, PasswordResetDone } from "@/lib/types";
 
 const GONE_TEXT = "Peça outro em “Esqueci minha senha”, no app, ou fale com a central pelo WhatsApp.";
+const ACCESS_CUT_TEXT = "Seu acesso ao app está desativado. Fale com a central pelo WhatsApp.";
 const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 128;
+
+/** O acesso ao app foi cortado (410 ACCESS_CUT): o link continua como estava, mas só serve depois que a central liberar. */
+function accessCut(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 410 && apiErrorCode(error) === "ACCESS_CUT";
+}
 
 /** O endereço do app que a API mandou, só http(s). */
 function appLink(url: string | null | undefined): string | null {
@@ -75,6 +81,12 @@ export default function SetPasswordPage() {
               </a>
             ) : undefined
           }
+        />
+      ) : accessCut(saveGone ?? error) ? (
+        <PublicPanel
+          icon={<Lock className="size-10 text-ink-muted" />}
+          title="Acesso ao app desativado"
+          text={apiText(saveGone ?? error, ACCESS_CUT_TEXT)}
         />
       ) : saveGone || status === 410 || status === 422 ? (
         <PublicPanel

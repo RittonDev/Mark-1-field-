@@ -830,7 +830,6 @@ function TeamDialog({ team, onClose }: { team: Team | null; onClose: () => void 
             required
             minLength={2}
             maxLength={120}
-            placeholder="Ex.: Campo - CFTV"
           />
         </Field>
         <Field label="Descrição">
@@ -1119,7 +1118,8 @@ function UsersTab({
                           <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-semibold text-ink">
                             <span className="min-w-0 truncate">{u.name}</span>
                             {u.id === me?.id ? <span className="text-xs font-normal text-ink-muted">(você)</span> : null}
-                            {!u.is_active ? <InactiveChip /> : null}
+                            {/* Para o técnico, ativo é o acesso ao app (a situação na operação fica na ficha). */}
+                            {!u.is_active ? <InactiveChip label={u.role === "technician" ? "Sem acesso ao app" : undefined} /> : null}
                           </p>
                           <p className="truncate text-xs text-ink-muted">
                             {u.email}

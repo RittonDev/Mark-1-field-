@@ -1,12 +1,13 @@
-// Moldura dos formulários do cadastro em Configurações (Dados pessoais, Contato, Endereço e Chave PIX): sem o cadastro
-// na memória, o ProfileGate; com ele, o aviso de sem internet, o aviso de dados velhos (a releitura falhou), os campos
-// da tela, o rodapé fixo "Salvar" com o primeiro erro e a folha da senha. O estado vem de useProfileForm.
+// Moldura dos formulários do cadastro em Configurações (Dados pessoais, Endereço, Contato, Mini biografia e Dados
+// empresariais): sem o cadastro na memória, o ProfileGate; com ele, o aviso de sem internet, o aviso de dados velhos (a
+// releitura falhou), os campos da tela (puxar para atualizar relê sem apagar o que foi digitado), o rodapé fixo "Salvar"
+// com o primeiro erro e a folha da senha. O estado vem de useProfileForm.
 
 import { HeaderHeightContext } from "expo-router/react-navigation";
 import { useContext, type ReactNode } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from "react-native";
+import { KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet } from "react-native";
 import type { ProfileFormState } from "../../lib/useProfileForm";
-import { useStyles, type Palette } from "../../theme/theme";
+import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Button, Card, ErrorBox, InfoBox } from "../ui";
 import { FixedFooter } from "./FixedFooter";
 import { OfflineNotice } from "./OfflineNotice";
@@ -28,6 +29,7 @@ export function ProfileFormScreen<F extends object, K extends string>({
   /** Os campos, com o formulário já montado. */
   children: (form: F) => ReactNode;
 }) {
+  const c = useTheme();
   const styles = useStyles(makeStyles);
   // O teclado sobe a partir do cabeçalho.
   const headerHeight = useContext(HeaderHeightContext) ?? 0;
@@ -46,6 +48,7 @@ export function ProfileFormScreen<F extends object, K extends string>({
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        refreshControl={<RefreshControl refreshing={state.refreshing} onRefresh={state.refresh} colors={[c.primary]} tintColor={c.primary} />}
       >
         <OfflineNotice />
         {stale ? <InfoBox message="Não foi possível atualizar agora. Os dados podem estar desatualizados." /> : null}

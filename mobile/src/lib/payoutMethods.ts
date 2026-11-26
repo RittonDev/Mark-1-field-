@@ -3,9 +3,10 @@
 // invadida não desvia o pagamento), sai na fila das gravações do cadastro (lib/profile.ts, writeProfile) e devolve o
 // MyProfile inteiro, que fica na memória. Só online: nada vai para a fila offline, o SQLite, o kv nem o SecureStore. A
 // lista não vai no PATCH /me/profile: não reenvia chaves e contas a cada mudança e não traz de volta a que a central
-// excluiu.
+// excluiu. Depois dos erros que dizem que a lista da tela está velha (payoutListStale, em lib/payoutForm.ts), a tela
+// relê o cadastro.
 
-import { api, ApiError, request } from "./api";
+import { api, request } from "./api";
 import { writeProfile } from "./profile";
 import type { MyProfile, PasswordConfirm, PayoutMethodCreate, PayoutMethodIn, PayoutMethodUpdate, UUID } from "./types";
 
@@ -34,9 +35,4 @@ export function preferPayoutMethod(id: UUID, password: string): Promise<MyProfil
 export function removePayoutMethod(id: UUID, password: string): Promise<MyProfile> {
   const body: PasswordConfirm = { current_password: password };
   return writeProfile(() => api.post<MyProfile>(`${pathOf(id)}/remove`, body));
-}
-
-/** A forma que a tela mostrava não existe mais no servidor (a central excluiu): 404 PAYOUT_METHOD_NOT_FOUND. */
-export function payoutMethodGone(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 404 && error.code === "PAYOUT_METHOD_NOT_FOUND";
 }

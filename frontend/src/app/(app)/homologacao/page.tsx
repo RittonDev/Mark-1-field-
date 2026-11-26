@@ -332,8 +332,9 @@ function OnboardingView() {
                               </span>
                               <span className="flex min-w-0 items-center gap-1 text-xs text-ink-muted">
                                 <span className="truncate">{a.email}</span>
-                                {/* Sem o campo (API antiga), nada: não dá para dizer se validou. */}
-                                {a.email_verified_at ? (
+                                {/* Sem o campo (API antiga), nada: não dá para dizer se validou. Aprovada, a validação
+                                    passa a ser do técnico (fica na ficha dele), e a da ficha para de valer. */}
+                                {a.status === "approved" ? null : a.email_verified_at ? (
                                   <span role="img" aria-label="E-mail validado" title="E-mail validado" className="inline-flex shrink-0">
                                     <MailCheck aria-hidden className="size-3.5 text-ink-muted" />
                                   </span>
@@ -555,15 +556,20 @@ function ApplicantPhoto({ name, url }: { name: string; url: string | null }) {
 }
 
 /**
- * Resultado da análise: o diálogo fica aberto para avisar o candidato pelo WhatsApp. Aprovada: o técnico criado e o
- * e-mail de boas-vindas (`welcome` null com a API antiga, que não manda).
+ * Resultado da análise: o diálogo fica aberto para avisar o candidato pelo WhatsApp. Aprovada: o técnico criado, o
+ * e-mail de boas-vindas (`welcome` null com a API antiga, que não manda) e se ele leva o link de criar senha.
  */
-type Outcome = { kind: "approved"; technician: User; welcome: EmailQueued | null } | { kind: "rejected" };
+type Approved = { technician: User; welcome: EmailQueued | null; passwordLink: boolean };
+type Outcome = ({ kind: "approved" } & Approved) | { kind: "rejected" };
 
-/** A resposta do Aprovar: a API nova manda o técnico e a boas-vindas (ApplicationApproved); a antiga, só o usuário. */
-function approvedOf(body: ApplicationApproved | User): { technician: User; welcome: EmailQueued | null } {
-  if ("technician" in body) return { technician: body.technician, welcome: body.welcome ?? null };
-  return { technician: body, welcome: null };
+/**
+ * A resposta do Aprovar: a API nova manda o técnico, a boas-vindas e `password_link` (o link de criar senha vai só com o
+ * e-mail validado); a antiga, só o usuário. Sem `password_link` (API de antes dele), o link ia com toda boas-vindas.
+ */
+function approvedOf(body: ApplicationApproved | User): Approved {
+  if (!("technician" in body)) return { technician: body, welcome: null, passwordLink: false };
+  const welcome = body.welcome ?? null;
+  return { technician: body.technician, welcome, passwordLink: body.password_link ?? welcome?.status === "queued" };
 }
 
 /** "Reprovada · 20/11/2026 14:32 · por Ana"; a expirada, sem autor. */
@@ -686,11 +692,15 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
     if (!a) return;
     const sendable = isSendableEmail(a.email);
     const sends = mailEnabled === true && sendable;
+    // E-mail nunca validado (null; a API antiga nem manda o campo): pode ter sido digitado errado, e a boas-vindas não
+    // leva o link de criar senha (quem tem a caixa ficaria com a conta).
+    const unverified = a.email_verified_at === null;
     const parts = ["Entra na base técnica e já pode entrar no app."];
     if (sends) parts.push(`O e-mail de boas-vindas vai para ${a.email}.`);
+    if (unverified) parts.push("E-mail ainda não validado: confira o endereço com o candidato pelo WhatsApp antes de aprovar.");
     if (a.has_password === false) {
       parts.push(
-        sends
+        sends && !unverified
           ? "A ficha está sem senha: o e-mail leva o link para criar a senha."
           : mailEnabled === undefined
             ? "A ficha está sem senha."
@@ -886,8 +896,14 @@ function ApplicationView({
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="break-all">
                 {a.email}
-                {/* Sem o campo (API antiga), só o e-mail. */}
-                {a.email_verified_at ? ` · validado em ${formatDate(a.email_verified_at)}` : a.email_verified_at === null ? " · validação pendente" : ""}
+                {/* Sem o campo (API antiga), só o e-mail. Aprovada: a validação fica na ficha do técnico. */}
+                {a.status === "approved"
+                  ? ""
+                  : a.email_verified_at
+                    ? ` · validado em ${formatDate(a.email_verified_at)}`
+                    : a.email_verified_at === null
+                      ? " · validação pendente"
+                      : ""}
               </span>
               {resend ? (
                 <Button
@@ -1011,7 +1027,8 @@ function ApplicationView({
 
 /**
  * Depois de aprovar ou reprovar: a mensagem pronta para avisar o candidato pelo WhatsApp. Aprovada: o que aconteceu
- * com o e-mail de boas-vindas e, sem senha e sem o link por e-mail, a senha provisória (com Técnicos em Editar).
+ * com o e-mail de boas-vindas e, sem senha e sem o link por e-mail (envio desligado, sem e-mail válido ou e-mail ainda
+ * não validado), a senha provisória (com Técnicos em Editar).
  */
 function OutcomePanel({
   application: a,
@@ -1046,14 +1063,15 @@ function OutcomePanel({
       </div>
     );
   }
-  const { technician, welcome } = outcome;
+  const { technician, welcome, passwordLink } = outcome;
   const email = welcome?.to ?? technician.email;
   // Sem senha na ficha, a API cria o usuário com uma senha que ninguém sabe e pede a troca no primeiro acesso.
   const noPassword = technician.must_change_password;
-  const linkSent = welcome?.status === "queued";
+  // O link de criar senha foi junto da boas-vindas: só com o e-mail validado (`password_link`) e a boas-vindas na fila.
+  const linkSent = noPassword && passwordLink && welcome?.status === "queued";
   const mailLine =
     welcome?.status === "queued"
-      ? `E-mail de boas-vindas enviado para ${email}.`
+      ? `E-mail de boas-vindas enviado para ${email}.${noPassword && !passwordLink ? " Sem o link de senha: o e-mail ainda não foi validado." : ""}`
       : welcome?.status === "not_configured"
         ? "E-mail de boas-vindas não enviado: envio de e-mail desligado."
         : welcome?.status === "not_sendable"

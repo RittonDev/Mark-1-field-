@@ -22,8 +22,13 @@ import type { CepAddress } from "@/lib/types";
 
 /** O que veio junto do endereço aplicado. */
 export interface CepApplyInfo {
-  /** Campos que o CEP trocou ("company": ["street"], a linha). */
+  /** Campos que o CEP trocou ("company": ["street"], a linha). Inclui os que ele esvaziou (veja `stale`). */
   filled: (keyof AddressSlots)[];
+  /**
+   * Campos que ainda tinham o valor da busca anterior (o `stale` de cepFill e cepLineFill): o CEP geral esvazia os que ele
+   * não traz (logradouro e bairro), e eles vão em `filled` com "". O digitado e o gravado nunca estão aqui. "company": [].
+   */
+  stale: (keyof AddressSlots)[];
   /** "auto": a resposta da busca; "use": a pessoa tocou em "Usar este endereço". */
   via: "auto" | "use";
   /** A pessoa ainda estava no CEP (ou pediu "Usar este endereço"): dá para levar o foco ao próximo campo. */
@@ -64,6 +69,10 @@ export type CepFieldProps = CepFieldCommon &
         /** O endereço gravado, ou o que a pessoa não digitou (campo igual a ele é livre para o CEP). Sem ele, vale o da
          *  abertura do formulário. */
         opened?: AddressSlots;
+        /** O que a busca anterior pôs, quando a tela guarda (a ficha pública: o campo monta de novo ao voltar à etapa e
+         *  esquece o que aplicou). Junto do que o próprio campo aplicou, decide o `stale`: o campo que ainda tem esse
+         *  valor é livre e, no CEP geral, se esvazia. */
+        lastFill?: Partial<AddressSlots>;
         /** O formulário grava os campos (e, em "parts", esvazia Número e Complemento livres quando o logradouro mudou). */
         onApply: (next: AddressSlots, info: CepApplyInfo) => void;
       }
@@ -95,9 +104,10 @@ interface FocusRequest {
 /**
  * Campo de CEP com a busca (os 6 lugares do endereço seguem a mesma regra). Busca só depois que a pessoa digita no campo
  * (abrir um cadastro com CEP não busca), uma vez por CEP. Achou: preenche os campos livres (vazios, iguais ao aberto ou
- * da busca anterior) pelo `onApply`; o que a pessoa digitou fica e, se difere, aparece "CEP de {resumo}." com "Usar este
- * endereço". Não achou ou fora do ar: só a linha de status; nada trava o salvar. Resposta atrasada (outro CEP digitado) é
- * ignorada.
+ * da busca anterior; no "line", a linha só vazia ou da busca anterior) pelo `onApply`; o que a pessoa digitou fica e, se
+ * difere, aparece "CEP de {resumo}." com "Usar este endereço". O CEP geral (sem logradouro e bairro) esvazia só o que
+ * ainda é da busca anterior. Não achou ou fora do ar: só a linha de status; nada trava o salvar. Resposta atrasada (outro
+ * CEP digitado) é ignorada.
  */
 export function CepField(props: CepFieldProps) {
   const {
@@ -134,7 +144,7 @@ export function CepField(props: CepFieldProps) {
   });
   // O CEP digitado por último (a resposta de outro CEP é ignorada).
   const typed = useRef("");
-  // Os valores que a última busca pôs: o campo que ainda está com eles continua livre (`auto` de cepFill).
+  // Os valores que as buscas puseram: o campo que ainda está com eles continua livre (`auto`) e é o `stale` de cepFill.
   const applied = useRef<Partial<AddressSlots>>({});
 
   // Depois de aplicar, o foco segue para o próximo campo (com o valor novo já na tela).
@@ -163,19 +173,25 @@ export function CepField(props: CepFieldProps) {
       const fresh = companyLineFromCep(cep);
       const next = via === "use" ? { line: fresh.text, caret: fresh.caret } : companyLineFill(line, cep).next;
       if (!next) return;
-      current.onApply(next, { filled: ["street"], via, focus, cep });
+      current.onApply(next, { filled: ["street"], stale: [], via, focus, cep });
       // Linha nova (vazia ou trocada): o cursor vai para o fim do logradouro. Só o CEP acrescentado no fim: o foco fica.
       if (focus && (via === "use" || !line.trim())) setFocusRequest({ target: "next", caret: next.caret });
       return;
     }
-    const auto = new Set(ADDRESS_SLOTS.filter((key) => applied.current[key] !== undefined && current.address[key] === applied.current[key]));
+    // Os campos ainda com o valor da busca anterior (o que este campo aplicou ou, depois de montar de novo, o que a tela
+    // guardou): livres para o CEP novo e, no CEP geral, esvaziados. No "Usar este endereço" todos são livres, mas só
+    // estes se esvaziam.
+    const previous: Partial<AddressSlots> = { ...current.lastFill, ...applied.current };
+    const stale = ADDRESS_SLOTS.filter((key) => !!previous[key] && current.address[key] === previous[key]);
+    const auto = new Set(stale);
     const opened = current.opened ?? mounted ?? NO_ADDRESS;
+    const free = via === "use" ? EVERY_SLOT : auto;
     const result =
       current.mode === "line"
-        ? cepLineFill(current.address, opened, via === "use" ? EVERY_SLOT : auto, cep)
-        : cepFill(current.address, opened, via === "use" ? EVERY_SLOT : auto, cep);
+        ? cepLineFill(current.address, opened, free, cep, auto)
+        : cepFill(current.address, opened, free, cep, auto);
     for (const key of result.filled) applied.current[key] = result.next[key];
-    if (result.filled.length) current.onApply(result.next, { filled: result.filled, via, focus, cep });
+    if (result.filled.length) current.onApply(result.next, { filled: result.filled, stale, via, focus, cep });
     if (!focus) return;
     if (current.mode === "line") {
       // A linha ganhou o logradouro: a pessoa completa o número no fim dela.

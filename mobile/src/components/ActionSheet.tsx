@@ -58,11 +58,13 @@ export function useAfterClose(visible: boolean, onClosed?: () => void): (() => v
 
 /**
  * Folha inferior (fundo escurecido, alça e área segura). O pai controla `visible`; `onClosed` avisa
- * quando ela terminou de sair. `locked` impede fechar pelo fundo e pelo voltar do Android.
+ * quando ela terminou de sair. `locked` impede fechar pelo fundo e pelo voltar do Android. O título vai em
+ * maiúsculas; `plainTitle` o deixa como veio (um título com dado do técnico, como a chave PIX e-mail).
  */
 export function BottomSheet({
   visible,
   title,
+  plainTitle = false,
   onClose,
   onClosed,
   locked = false,
@@ -70,6 +72,7 @@ export function BottomSheet({
 }: {
   visible: boolean;
   title?: string;
+  plainTitle?: boolean;
   onClose: () => void;
   onClosed?: () => void;
   locked?: boolean;
@@ -91,7 +94,7 @@ export function BottomSheet({
         >
           <View style={styles.handle} />
           {title ? (
-            <Text style={styles.title} accessibilityRole="header">
+            <Text style={[styles.title, plainTitle && styles.plainTitle]} accessibilityRole="header">
               {title}
             </Text>
           ) : null}
@@ -105,15 +108,18 @@ export function BottomSheet({
 /**
  * Folha com as demais ações da OS (o passo principal fica na barra fixa). A ação escolhida roda
  * depois que a folha sai, para o próximo Modal (transição, visita improdutiva, peça) abrir no iPhone.
+ * `plainTitle`: o título sem as maiúsculas (BottomSheet).
  */
 export function ActionSheet({
   visible,
   title,
+  plainTitle = false,
   actions,
   onClose,
 }: {
   visible: boolean;
   title: string;
+  plainTitle?: boolean;
   actions: SheetAction[];
   onClose: () => void;
 }) {
@@ -126,7 +132,7 @@ export function ActionSheet({
     action?.();
   }, []);
   return (
-    <BottomSheet visible={visible} title={title} onClose={onClose} onClosed={runChosen}>
+    <BottomSheet visible={visible} title={title} plainTitle={plainTitle} onClose={onClose} onClosed={runChosen}>
       {actions.map((action) => {
         const disabled = Boolean(action.disabledReason);
         const color = action.tone === "danger" ? c.danger : c.ink;
@@ -198,6 +204,8 @@ const makeStyles = (c: Palette) =>
       paddingHorizontal: 12,
       paddingBottom: 4,
     },
+    // Como veio (dado do técnico): sem as maiúsculas e o espaçamento delas.
+    plainTitle: { fontSize: 13, textTransform: "none", letterSpacing: 0 },
     row: {
       flexDirection: "row",
       alignItems: "center",

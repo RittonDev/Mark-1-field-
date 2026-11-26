@@ -24,6 +24,7 @@ const {
   payoutChanged,
   payoutDraftOf,
   payoutInput,
+  payoutListStale,
   payoutMethodsOf,
   payoutOwnerOf,
   payoutProblem,
@@ -448,6 +449,49 @@ describe("a lista", () => {
     assert.equal(preferredPayout(profileWith({ payout_methods: [] })), null);
     assert.equal(preferredPayout(profileWith({})), null);
     assert.equal(preferredPayout(null), null);
+  });
+});
+
+describe("erros depois dos quais a tela relê a lista (payoutListStale)", () => {
+  /** Como o ApiError de lib/api.ts (status e code), sem importá-lo: api.ts puxa o React Native. */
+  class ApiErrorLike extends Error {
+    constructor(status, code = null) {
+      super("erro de exemplo");
+      this.status = status;
+      this.code = code;
+    }
+  }
+
+  it("sem resposta (status 0) e os códigos de lista velha: relê", () => {
+    assert.equal(payoutListStale(new ApiErrorLike(0)), true);
+    assert.equal(payoutListStale(new ApiErrorLike(404, "PAYOUT_METHOD_NOT_FOUND")), true);
+    assert.equal(payoutListStale(new ApiErrorLike(409, "PAYOUT_METHOD_DUPLICATE")), true);
+    assert.equal(payoutListStale(new ApiErrorLike(422, "PAYOUT_METHODS_LIMIT")), true);
+  });
+
+  it("os outros erros não mexem na lista", () => {
+    assert.equal(payoutListStale(new ApiErrorLike(404)), false);
+    assert.equal(payoutListStale(new ApiErrorLike(409, "PAYOUT_METHOD_NOT_FOUND")), false);
+    assert.equal(payoutListStale(new ApiErrorLike(422)), false);
+    assert.equal(payoutListStale(new ApiErrorLike(422, "PAYOUT_METHOD_KIND_LOCKED")), false);
+    assert.equal(payoutListStale(new ApiErrorLike(400)), false);
+    assert.equal(payoutListStale(new ApiErrorLike(429)), false);
+    assert.equal(payoutListStale(new ApiErrorLike(500)), false);
+    assert.equal(payoutListStale(new Error("Sessão encerrada")), false);
+    assert.equal(payoutListStale(null), false);
+    assert.equal(payoutListStale(undefined), false);
+    assert.equal(payoutListStale("Sem conexão"), false);
+  });
+
+  it("a resposta do 1º POST se perdeu: com a lista velha a folha deixa reenviar; relida, acusa a repetida no campo", () => {
+    const sheet = draft({ pixType: "phone", pixKey: "(11) 97777-6666", holderDocument: "123.456.789-09" });
+    const input = payoutInput(sheet);
+    assert.ok(input && input.kind === "pix");
+    // O que o servidor gravou no POST cuja resposta não chegou (o reenvio dá 409 PAYOUT_METHOD_DUPLICATE).
+    const committed = { ...PIX_PHONE, id: "m-nova", pix_key: input.pix_key, created_at: "2026-11-26T10:00:00Z" };
+    assert.deepEqual(payoutProblem(sheet, [PIX_CPF]), {});
+    assert.equal(payoutListStale(new ApiErrorLike(409, "PAYOUT_METHOD_DUPLICATE")), true);
+    assert.equal(payoutProblem(sheet, [PIX_CPF, committed]).pixKey, PAYOUT_MSG.pixRepeated);
   });
 });
 

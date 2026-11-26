@@ -8,9 +8,9 @@ import { useEffect, useRef, useState } from "react";
 import type { Theme } from "@/components/Brand";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { Button, buttonClassName, restoreFocus } from "@/components/ui";
-import { STATUS } from "@/lib/constants";
+import { OPERATIONAL_STATUS, STATUS } from "@/lib/constants";
 import { formatTime, initials } from "@/lib/format";
-import { DAY_STATE, formatAgo, isStale, isValidCoords, LIVE_STATE, shiftPosition } from "@/lib/tracking";
+import { DAY_STATE, formatAgo, isStale, isValidCoords, liveLook, shiftPosition } from "@/lib/tracking";
 import type { Activity, LiveTechnician, LiveTicket, TrackingHistory } from "@/lib/types";
 
 type Leaflet = typeof import("leaflet");
@@ -342,7 +342,10 @@ export default function LiveMap({
 
     for (const tech of technicians) {
       const pos = shiftPosition(tech);
-      const { color, label } = LIVE_STATE[tech.state];
+      // "Disponível" (verde) só para quem está Ativo; Inativo ou Bloqueado leva a situação junto do nome.
+      const { color, label } = liveLook(tech);
+      const status = tech.operational_status ?? "active";
+      const who = status === "active" ? tech.name : `${tech.name} · ${OPERATIONAL_STATUS[status]}`;
       const selected = tech.id === selectedId;
       const ticket = tech.current_ticket;
       const dest = ticket?.location;
@@ -402,9 +405,9 @@ export default function LiveMap({
       const moving = !stale && tech.state === "en_route";
       const look = [color, selected, initials(tech.name), heading ?? "-", stale, moving].join("|");
       const precision = pos.accuracy_m != null ? ` · ±${Math.round(pos.accuracy_m)} m` : "";
-      const lines = [tech.name, ticket ? `${label} · ${ticket.code}` : label];
+      const lines = [who, ticket ? `${label} · ${ticket.code}` : label];
       if (stale) lines.push(`Última posição ${formatAgo(pos.recorded_at, now)}${precision}`);
-      const aria = `${tech.name}: ${label}${ticket ? `, ${ticket.code}` : ""}${
+      const aria = `${who}: ${label}${ticket ? `, ${ticket.code}` : ""}${
         stale ? `, última posição ${formatAgo(pos.recorded_at, now)}` : ""
       }`;
       let entry = pins.get(tech.id);

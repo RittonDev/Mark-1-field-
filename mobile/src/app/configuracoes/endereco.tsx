@@ -1,9 +1,10 @@
 // Configurações › Endereço: CEP, logradouro, número, complemento, bairro, cidade e UF (obrigatórias só aqui) e a região
 // que atende. O CEP de 8 números busca o endereço (lib/cep.ts) e preenche o que está livre (vazio, igual ao gravado ou
-// posto pela busca anterior: a regra dos 6 lugares, cepPatch); logradouro trocado esvazia o número e o complemento que a
-// pessoa não mexeu, e o foco vai para o Número. O que ela digitou fica e, se difere, aparece "CEP de {resumo}." com "Usar
-// este endereço". Não achou ou sem o serviço: só o aviso; nada trava o Salvar. Não pede senha; a central é avisada. Só
-// online, como todo o cadastro; com a API de antes do cadastro V2, "Indisponível no momento".
+// posto pela busca anterior: a regra dos 6 lugares, cepPatch); o CEP geral (sem logradouro) esvazia o logradouro e o
+// bairro que ainda são da busca anterior; logradouro trocado de fato (outra grafia não conta) esvazia o número e o
+// complemento que a pessoa não mexeu, e o foco vai para o Número. O que ela digitou fica e, se difere, aparece "CEP de
+// {resumo}." com "Usar este endereço". Não achou ou sem o serviço: só o aviso; nada trava o Salvar. Não pede senha; a
+// central é avisada. Só online, como todo o cadastro; com a API de antes do cadastro V2, "Indisponível no momento".
 
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View, type TextInputInstance } from "react-native";

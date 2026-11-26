@@ -1,5 +1,6 @@
 // Configurações › Dados pessoais: nome completo (vai para os textos do grupo do cliente, o relatório e o portal), CPF (o
-// técnico informa uma vez; depois, só a central corrige), RG (número, órgão emissor e UF, os três juntos) e nascimento.
+// técnico informa uma vez; depois, só a central corrige), RG (número, órgão emissor e UF, os três juntos; "SSP/SP" no
+// órgão separa a UF, que vai para o campo dela quando está vazio) e nascimento (no iPhone, as rodas de dia, mês e ano).
 // Não pede senha; antes de gravar o CPF, a tela pede para conferir os números. A central é avisada. Só online, como todo
 // o cadastro; com a API de antes do cadastro V2, "Indisponível no momento".
 
@@ -11,10 +12,10 @@ import { CadastroUnavailable } from "../../components/settings/CadastroUnavailab
 import { FormCard, ProfileFormScreen } from "../../components/settings/ProfileFormScreen";
 import { Text } from "../../components/Text";
 import { Field, Input } from "../../components/ui";
-import { normalizeIssuer, normalizeRg } from "../../lib/constants";
+import { normalizeIssuer, normalizeRg, splitIssuer } from "../../lib/constants";
 import { maskCpf } from "../../lib/masks";
 import { hasCadastroV2 } from "../../lib/profile";
-import { birthLimits, PERSONAL_SECTION, todayIso } from "../../lib/profileForm";
+import { birthLimits, issuerParts, PERSONAL_SECTION, todayIso, type PersonalForm } from "../../lib/profileForm";
 import { useProfileForm } from "../../lib/useProfileForm";
 import { useStyles, type Palette } from "../../theme/theme";
 
@@ -30,6 +31,17 @@ export default function PersonalDataScreen() {
   const rgStateRef = useRef<TextInputInstance>(null);
 
   if (state.profile && !hasCadastroV2(state.profile)) return <CadastroUnavailable onRetry={state.retry} />;
+
+  /**
+   * Saiu do órgão emissor com a UF no fim ("SSP/SP", "SSP-SP"): o órgão fica "SSP" e a UF vai para o campo dela, se ele
+   * estiver vazio (com outra UF lá, fica a dela). É o que o Salvar grava (issuerParts); sem UF no fim, o campo fica
+   * como foi digitado.
+   */
+  function tidyIssuer(form: PersonalForm) {
+    if (!splitIssuer(form.rgIssuer).state) return;
+    const parts = issuerParts(form.rgIssuer, form.rgState);
+    if (parts.issuer !== form.rgIssuer || parts.state !== form.rgState) update({ rgIssuer: parts.issuer, rgState: parts.state });
+  }
 
   return (
     <ProfileFormScreen state={state}>
@@ -96,6 +108,7 @@ export default function PersonalDataScreen() {
                     ref={issuerRef}
                     value={form.rgIssuer}
                     onChangeText={(text) => update({ rgIssuer: normalizeIssuer(text) })}
+                    onBlur={() => tidyIssuer(form)}
                     accessibilityLabel="Órgão emissor do RG"
                     autoCapitalize="characters"
                     autoCorrect={false}
@@ -131,6 +144,7 @@ export default function PersonalDataScreen() {
                 max={limits.max}
                 initial={limits.initial}
                 todayShortcut={false}
+                iosDisplay="spinner"
               />
             </Field>
           </FormCard>

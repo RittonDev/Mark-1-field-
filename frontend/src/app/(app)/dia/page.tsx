@@ -46,7 +46,7 @@ const STATE: Record<ActivityState, { label: string; color: string }> = {
   pending: { label: "Voltou para a fila", color: STATUS.new.color },
 };
 
-/** Filtro dos números: uma situação, as visitas improdutivas do dia ou as sem técnico (ou com técnico inativo). */
+/** Filtro dos números: uma situação, as visitas improdutivas do dia ou as sem técnico (ou com técnico sem acesso ao app). */
 type Filter = ActivityState | "unproductive" | "no_technician";
 
 const FILTERS: { key: Filter; label: string; color: string; hint?: string }[] = [
@@ -59,7 +59,7 @@ const FILTERS: { key: Filter; label: string; color: string; hint?: string }[] = 
   { key: "pending", label: "Voltaram para a fila", color: STATE.pending.color, hint: "Saíram da agenda e esperam uma nova visita" },
   { key: "done", label: "Concluídas", color: STATE.done.color },
   { key: "unproductive", label: "Improdutivas", color: "#c2410c", hint: "O técnico foi e não conseguiu atender (com o motivo)" },
-  { key: "no_technician", label: "Sem técnico", color: "#b45309", hint: "Sem técnico ou com técnico inativo (não entra mais no app)" },
+  { key: "no_technician", label: "Sem técnico", color: "#b45309", hint: "Sem técnico ou com técnico sem acesso ao app" },
 ];
 
 /** Números que pedem ação quando passam de zero: vermelho para atraso, âmbar para o resto. */
@@ -103,7 +103,7 @@ function when(value: string, day: string): string {
 const minutesBetween = (from: string | number, to: string | number) =>
   Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000);
 
-/** Sem técnico, ou com técnico desativado (ele não entra mais no app e a visita não acontece). */
+/** Sem técnico, ou com técnico sem acesso ao app (ele não entra no app e a visita não acontece). */
 const lacksTechnician = (a: Activity) => !a.ticket.assignee || a.ticket.assignee.is_active === false;
 
 /** Quem trabalha na visita: o responsável ou quem vai junto. */

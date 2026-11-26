@@ -33,9 +33,11 @@ import app.main as app_main
 from app.api.routes import auth as auth_routes
 from app.core.config import settings
 from app.core.enums import AccountTokenPurpose, EmailStatus, EmailTemplate, UserRole
-from app.core.security import create_access_token, hash_password
+from app.core.security import create_access_token, hash_password, verify_password
 from app.models import AccountToken, EmailOutbox, User, UserChange
-from app.services import account, mail
+from app.models.user_change import VIA_APP, VIA_CENTRAL
+from app.schemas.technician import OperationalStatusIn
+from app.services import account, mail, my_profile, technician_status
 from app.services import company as company_svc
 from tests.conftest import MailBox, World, requires_db
 
@@ -146,19 +148,18 @@ def _errors(caplog: pytest.LogCaptureFixture) -> list[str]:
 # ------------------------------------------------------------------ impasse nos links
 
 
-async def _until_link_waits(engine: AsyncEngine) -> None:
-    """Espera (até 10 s) a rota do link parar na trava do técnico (SELECT ... FROM users ... FOR
-    UPDATE esperando a outra sessão)."""
+async def _until_blocked_by(engine: AsyncEngine, pid: int) -> None:
+    """Espera (até 10 s) alguma sessão ficar parada numa trava da sessão `pid`: a rota do link
+    esperando o técnico. (Pela trava, e não pelo texto da consulta: o pg_stat_activity corta o
+    SELECT longo da tabela users antes do FOR UPDATE.)"""
     deadline = time.monotonic() + 10
     async with engine.connect() as conn:
         while True:
             waiting = await conn.scalar(
                 text(
-                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
-                    "AND pid <> pg_backend_pid() AND wait_event_type = 'Lock' "
-                    "AND query ILIKE :pattern"
+                    "SELECT count(*) FROM pg_stat_activity WHERE :pid = ANY(pg_blocking_pids(pid))"
                 ),
-                {"pattern": "%FROM users%FOR UPDATE%"},
+                {"pid": pid},
             )
             # O pg_stat_activity fica fixo dentro de uma transação: a próxima leitura é outra.
             await conn.rollback()
@@ -170,20 +171,21 @@ async def _until_link_waits(engine: AsyncEngine) -> None:
 
 async def _collide(
     engine: AsyncEngine,
-    user_id: uuid.UUID,
     link: Callable[[], Awaitable[httpx.Response]],
-    other_side: Callable[[AsyncSession], Awaitable[None]],
+    hold: Callable[[AsyncSession], Awaitable[object]],
+    then: Callable[[AsyncSession], Awaitable[object]],
 ) -> httpx.Response:
-    """A outra gravação trava o técnico (como my_profile.lock ou technician_status._locked); a
-    rota do link chega, trava o link e espera o técnico; aí a outra gravação pede a linha do link
-    (`other_side`) e grava. O banco desfaz o lado que esperou primeiro (o do link), e a rota
+    """A outra gravação trava o técnico (`hold`: my_profile.lock ou technician_status._locked); a
+    rota do link chega, trava o link e espera o técnico; aí a outra gravação segue (`then`), pede
+    a linha do link e grava. O banco desfaz o lado que esperou primeiro (o do link), e a rota
     repete. Devolve a resposta da rota."""
     async with _maker(engine)() as other:
-        await other.execute(select(User).where(User.id == user_id).with_for_update())
+        pid = await other.scalar(text("SELECT pg_backend_pid()"))
+        await hold(other)
         task = asyncio.create_task(link())
         try:
-            await _until_link_waits(engine)
-            await other_side(other)
+            await _until_blocked_by(engine, int(pid))
+            await then(other)
             await other.commit()
         finally:
             await other.rollback()  # depois do commit não faz nada; numa falha, solta a trava
@@ -197,11 +199,14 @@ async def test_verify_link_colliding_with_the_app_is_retried(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """O técnico abre o link da troca de e-mail enquanto o app cancela o pedido (trava o técnico
-    e revoga o link): 410 do link revogado, não o 500 do impasse."""
+    """O técnico abre o link da troca de e-mail enquanto o app cancela o pedido
+    (my_profile.cancel_email_change: trava o técnico e revoga o link): 410 do link revogado, não o
+    500 do impasse."""
     now = datetime.now(UTC)
     wanted = "alfa.novo@exemplo.com"
-    user = await _add_user(engine, email_verified_at=now, email_pending=wanted, email_pending_at=now)
+    user = await _add_user(
+        engine, email_verified_at=now, email_pending=wanted, email_pending_at=now
+    )
     raw, _ = await _mint(
         engine, user, AccountTokenPurpose.VERIFY_EMAIL, email=wanted, reason="change"
     )
@@ -210,21 +215,14 @@ async def test_verify_link_colliding_with_the_app_is_retried(
     caplog.set_level(logging.INFO)
 
     async def cancel_the_change(other: AsyncSession) -> None:
-        # my_profile.cancel_email_change: revoga os links do pedido e limpa o pedido.
-        await account.revoke(
-            other, user_id=user.id, purpose=AccountTokenPurpose.VERIFY_EMAIL, email=wanted
-        )
-        await other.execute(
-            update(User)
-            .where(User.id == user.id)
-            .values(email_pending=None, email_pending_at=None)
-            .execution_options(synchronize_session=False)
-        )
+        me = await other.get(User, user.id)
+        assert me is not None
+        assert await my_profile.cancel_email_change(other, me)
 
     r = await _collide(
         engine,
-        user.id,
         lambda: client.post(f"{API}/auth/verify-email", json={"token": raw}),
+        lambda other: my_profile.lock(other, user),
         cancel_the_change,
     )
     assert (r.status_code, r.json()) == (
@@ -236,40 +234,35 @@ async def test_verify_link_colliding_with_the_app_is_retried(
     assert "Link do e-mail: outra gravação ao mesmo tempo, repetindo uma vez" in caplog.text
     assert _errors(caplog) == []
     saved = await _reload(engine, user.id)
-    assert (saved.email, saved.email_pending) == (ALFA, None)
+    assert (saved.email, saved.email_verified_at, saved.email_pending) == (ALFA, now, None)
+    # Só a linha do app (o pedido cancelado): o link não gravou nada.
+    assert [line.via for line in await _history(engine, user.id)] == [VIA_APP]
 
 
 async def test_reset_link_colliding_with_the_central_is_retried(
     client: AsyncClient,
     engine: AsyncEngine,
+    world: World,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """"Salvar senha" no mesmo instante em que a central corta o acesso (trava o técnico e revoga
-    os links de senha): 410, e a senha não muda."""
+    """ "Salvar senha" no mesmo instante em que a central bloqueia com "cortar acesso"
+    (technician_status.apply: trava o técnico e revoga os links de senha): 410, e a senha não
+    muda."""
     user = await _add_user(engine, email_verified_at=datetime.now(UTC))
     raw, _ = await _mint(engine, user)
     attempts = _count(monkeypatch, auth_routes, "_link_attempt")
     calls = _count(monkeypatch, account, "reset_password")
     caplog.set_level(logging.INFO)
-
-    async def cut_access(other: AsyncSession) -> None:
-        # technician_status.apply com "cortar acesso".
-        await other.execute(
-            update(User)
-            .where(User.id == user.id)
-            .values(is_active=False, sessions_revoked_at=datetime.now(UTC))
-            .execution_options(synchronize_session=False)
-        )
-        await account.revoke(other, user_id=user.id, purpose=AccountTokenPurpose.RESET_PASSWORD)
+    cut = OperationalStatusIn(status="blocked", reason="Teste de corte de acesso", cut_access=True)
 
     r = await _collide(
         engine,
-        user.id,
         lambda: client.post(
             f"{API}/auth/password-reset", json={"token": raw, "password": NEW_PASSWORD}
         ),
-        cut_access,
+        lambda other: technician_status._locked(other, user.id),
+        lambda other: technician_status.apply(other, user.id, cut, world.admin.user),
     )
     assert (r.status_code, r.json()) == (
         410,
@@ -277,8 +270,14 @@ async def test_reset_link_colliding_with_the_central_is_retried(
     )
     assert (len(calls), len(attempts)) == (2, 1)
     assert _errors(caplog) == []
-    assert (await _login(client, ALFA, NEW_PASSWORD)).status_code == 401
-    assert await _history(engine, user.id) == []
+    saved = await _reload(engine, user.id)
+    assert saved.is_active is False
+    assert verify_password(PASSWORD, saved.password_hash), "a senha continua a de antes"
+    # Só a linha da central (o bloqueio): a senha não mudou pelo link.
+    assert [line.via for line in await _history(engine, user.id)] == [VIA_CENTRAL]
+    async with _maker(engine)() as db:
+        token = await db.scalar(select(AccountToken))
+        assert token is not None and token.used_at is None and token.revoked_at is not None
 
 
 async def test_reset_link_retry_saves_the_password(
@@ -304,10 +303,10 @@ async def test_reset_link_retry_saves_the_password(
 
     r = await _collide(
         engine,
-        user.id,
         lambda: client.post(
             f"{API}/auth/password-reset", json={"token": raw, "password": NEW_PASSWORD}
         ),
+        lambda other: my_profile.lock(other, user),
         touch_the_link,
     )
     assert r.status_code == 200, r.text
@@ -473,7 +472,9 @@ async def test_queued_reset_link_dies_after_the_password_changes(
         row = await db.get(EmailOutbox, row_id)
         assert row is not None and (row.status, row.attempts) == (EmailStatus.PENDING, 1)
 
-    r = await client.post(f"{API}/technicians/{tech.id}/reset-password", headers=world.admin.headers)
+    r = await client.post(
+        f"{API}/technicians/{tech.id}/reset-password", headers=world.admin.headers
+    )
     assert r.status_code == 200, r.text
     temporary = r.json()["temporary_password"]
     r = await _login(client, tech.email, temporary)
@@ -580,7 +581,9 @@ async def test_welcome_after_a_temporary_password_goes_without_the_link(
         )
         assert row is not None
         await db.commit()
-    r = await client.post(f"{API}/technicians/{user.id}/reset-password", headers=world.admin.headers)
+    r = await client.post(
+        f"{API}/technicians/{user.id}/reset-password", headers=world.admin.headers
+    )
     assert r.status_code == 200, r.text
     async with _maker(engine)() as db:
         assert await mail.deliver_pending(db) == 1

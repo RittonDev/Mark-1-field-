@@ -25,8 +25,8 @@ import { PAYOUT_LIMITS, payoutMethodText } from "../../lib/constants";
 import { haptic } from "../../lib/haptics";
 import { noNetwork, offlineFailure } from "../../lib/net";
 import { hasCadastroV2, loadProfile } from "../../lib/profile";
-import { nextPreferred, PAYOUT_MSG, payoutCard, payoutOwnerOf, payoutSpoken, preferredPayout } from "../../lib/payoutForm";
-import { addPayoutMethod, payoutMethodGone, preferPayoutMethod, removePayoutMethod, updatePayoutMethod } from "../../lib/payoutMethods";
+import { nextPreferred, PAYOUT_MSG, payoutCard, payoutListStale, payoutOwnerOf, payoutSpoken, preferredPayout } from "../../lib/payoutForm";
+import { addPayoutMethod, preferPayoutMethod, removePayoutMethod, updatePayoutMethod } from "../../lib/payoutMethods";
 import { OFFLINE_SAVE, trackListWrite, UNAVAILABLE, useListWrite } from "../../lib/technicalProfile";
 import { showToast } from "../../lib/toast";
 import type { PayoutMethod, PayoutMethodIn } from "../../lib/types";
@@ -147,8 +147,9 @@ export default function PayoutMethodsScreen() {
       closeForm();
       return null;
     } catch (error) {
-      // A central excluiu a forma enquanto a folha estava aberta: a lista atrás já se atualiza.
-      if (payoutMethodGone(error)) void loadProfile().catch(() => undefined);
+      // A lista da tela pode estar velha (a central excluiu a forma; ou a tentativa anterior entrou e a resposta se
+      // perdeu, e agora vem "já está na lista"): a releitura atualiza a lista atrás e a folha acusa a repetida no campo.
+      if (payoutListStale(error)) void loadProfile().catch(() => undefined);
       return (await offlineFailure(error)) ? OFFLINE_SAVE : errorMessage(error);
     }
   }
@@ -209,7 +210,8 @@ export default function PayoutMethodsScreen() {
         }
         patchConfirm({ open: false, saving: false, password: "" });
       } catch (error) {
-        if (payoutMethodGone(error)) void loadProfile().catch(() => undefined);
+        // A forma que a central excluiu, ou a resposta que se perdeu (a ação pode ter entrado): relê a lista.
+        if (payoutListStale(error)) void loadProfile().catch(() => undefined);
         const offline = await offlineFailure(error);
         // A senha volta limpa e o campo ganha o foco (PasswordSheet).
         patchConfirm({ saving: false, password: "", error: offline ? OFFLINE_SAVE : errorMessage(error) });
@@ -311,7 +313,9 @@ export default function PayoutMethodsScreen() {
 
       <ActionSheet
         visible={Boolean(menu?.open)}
+        // A chave e-mail mascarada no título: como foi gravada, sem as maiúsculas dos títulos de folha.
         title={menu ? payoutMethodText(menu.method) : ""}
+        plainTitle
         actions={menuActions}
         onClose={() => setMenu((current) => (current ? { ...current, open: false } : current))}
       />

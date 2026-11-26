@@ -7,11 +7,13 @@ import { URL } from "node:url";
 import { CEP_TEXT } from "../src/lib/constants.ts";
 import {
   ADDRESS_SECTION,
+  addressNumberOf,
   addressSummary,
   BIO_SECTION,
   bioCount,
   bioSummary,
   birthLimits,
+  cancelChangeNotice,
   cepDiffers,
   cepMiss,
   cepPatch,
@@ -21,9 +23,11 @@ import {
   contactRowSummary,
   contactSummary,
   countLabel,
+  EMAIL_UNVERIFIED,
   emailHint,
   emailStatus,
   firstError,
+  issuerParts,
   linkSentText,
   MSG,
   NO_ADDRESS,
@@ -208,6 +212,35 @@ describe("reviewPersonal (Dados pessoais)", () => {
     assert.equal(personalReview({ rgIssuer: "SSP" }).errors.rgNumber, "Informe o número do RG.");
   });
 
+  it("órgão emissor com a UF no fim (\"SSP/SP\", \"ssp-sp\"): separa, e a UF vale quando o campo dela está vazio", () => {
+    const rg = { rgNumber: "12.345.678-x" };
+    const expected = { rg_number: "12.345.678-X", rg_issuer: "SSP", rg_state: "SP" };
+    assert.deepEqual(personalReview({ ...rg, rgIssuer: "SSP/SP", rgState: "" }), { body: expected, errors: {}, needsPassword: false });
+    assert.deepEqual(personalReview({ ...rg, rgIssuer: "ssp-sp", rgState: "" }).body, expected);
+    assert.deepEqual(personalReview({ ...rg, rgIssuer: " SSP / SP ", rgState: "" }).body, expected);
+    // Com outra UF no campo, fica a do campo e o fim sai.
+    assert.deepEqual(personalReview({ ...rg, rgIssuer: "SSP/SP", rgState: "RJ" }).body, { ...expected, rg_state: "RJ" });
+    // Sem UF válida no fim, "/" e "-" viram espaço.
+    assert.deepEqual(personalReview({ ...rg, rgIssuer: "SSP/XX", rgState: "MG" }).body, { ...expected, rg_issuer: "SSP XX", rg_state: "MG" });
+    assert.equal(personalReview({ ...rg, rgIssuer: "Detran-RJ", rgState: "" }).body.rg_issuer, "DETRAN");
+  });
+
+  it("órgão emissor: \"SSP/SP\" igual ao gravado (SSP e SP) não é mudança; órgão de 1 letra antes da UF não passa", () => {
+    const withRg = { ...PROFILE, rg_number: "12.345.678-X", rg_issuer: "SSP", rg_state: "SP" };
+    assert.deepEqual(personalReview({ rgIssuer: "SSP/SP" }, withRg), UNCHANGED);
+    assert.deepEqual(personalReview({ rgIssuer: "SSP/SP", rgState: "" }, withRg), UNCHANGED);
+    assert.equal(personalReview({ rgIssuer: "S/SP" }, withRg).errors.rgIssuer, MSG.rgIssuerShort);
+  });
+
+  it("issuerParts: o que o Salvar grava e a tela mostra ao sair do campo", () => {
+    assert.deepEqual(issuerParts("SSP/SP", ""), { issuer: "SSP", state: "SP" });
+    assert.deepEqual(issuerParts("ssp-sp", " rj "), { issuer: "SSP", state: "RJ" });
+    assert.deepEqual(issuerParts("SSP", "sp"), { issuer: "SSP", state: "SP" });
+    assert.deepEqual(issuerParts("SSP/XX", ""), { issuer: "SSP XX", state: "" });
+    assert.deepEqual(issuerParts("Polícia  Civil", "MG"), { issuer: "POLICIA CIVIL", state: "MG" });
+    assert.deepEqual(issuerParts("", ""), { issuer: "", state: "" });
+  });
+
   it("os três vazios limpam o RG gravado; o RG antigo que não mudou não trava o resto", () => {
     const withRg = { ...PROFILE, rg_number: "12.345.678-X", rg_issuer: "SSP", rg_state: "SP" };
     const cleared = personalReview({ rgNumber: "", rgIssuer: "  ", rgState: "" }, withRg);
@@ -360,6 +393,23 @@ describe("estado do e-mail (Contato)", () => {
     assert.equal(emailHint({ kind: "undeliverable" }, true, now), "Você recebe um link para validar.");
   });
 
+  it("Cancelar troca com a tela velha: o que o DELETE devolveu diz se ainda havia troca (cancelChangeNotice)", () => {
+    const pending = { email: "tecnico.alfa@exemplo.com", email_pending: "tecnico.beta@exemplo.com" };
+    assert.deepEqual(cancelChangeNotice(pending, { email: "tecnico.alfa@exemplo.com" }), { title: "Troca de e-mail cancelada", tone: "success" });
+    // O link já tinha sido aberto no navegador: o pendente virou o login (maiúsculas não contam).
+    assert.deepEqual(cancelChangeNotice(pending, { email: "Tecnico.Beta@exemplo.com" }), {
+      title: "Seu e-mail já foi validado",
+      description: "Agora você entra com Tecnico.Beta@exemplo.com.",
+      tone: "info",
+    });
+    // A central trocou o login para outro endereço: a troca saiu e ele entra com o novo.
+    assert.deepEqual(cancelChangeNotice(pending, { email: "tecnico.gama@exemplo.com" }), {
+      title: "Troca de e-mail cancelada",
+      description: "Agora você entra com tecnico.gama@exemplo.com.",
+      tone: "info",
+    });
+  });
+
   it("linkSentText no mesmo dia, em outro dia e em outro ano", () => {
     assert.equal(linkSentText(sent, now), "Link enviado às 14:30");
     assert.equal(linkSentText(new Date(2026, 10, 18, 14, 30).toISOString(), now), "Link enviado em 18/11 às 14:30");
@@ -432,6 +482,20 @@ describe("reviewAddress (Endereço)", () => {
       title: "Endereço atualizado",
     });
   });
+
+  it("número como o servidor grava: maiúsculas, \"SN\" e \"S / N\" viram \"S/N\"", () => {
+    assert.equal(addressNumberOf(" 100a "), "100A");
+    assert.equal(addressNumberOf("sn"), "S/N");
+    assert.equal(addressNumberOf("s / n"), "S/N");
+    assert.equal(addressNumberOf("S/N"), "S/N");
+    assert.equal(addressNumberOf("S N"), "S N");
+    assert.equal(addressNumberOf("  "), "");
+    const noNumber = { ...PROFILE, address_number: "S/N" };
+    assert.deepEqual(addressReview({ number: "s/n" }, noNumber), UNCHANGED);
+    assert.deepEqual(addressReview({ number: "100" }, { ...PROFILE, address_number: "100" }), UNCHANGED);
+    assert.equal(addressReview({ number: "sn" }).body.address_number, "S/N");
+    assert.equal(addressReview({ number: "12b" }).body.address_number, "12B");
+  });
 });
 
 describe("CEP no Endereço (cepPatch, cepDiffers, cepMiss)", () => {
@@ -497,6 +561,56 @@ describe("CEP no Endereço (cepPatch, cepDiffers, cepMiss)", () => {
     assert.equal(r.focus, "street");
   });
 
+  /** O `auto` da tela (endereco.tsx): os campos que ainda têm o valor que a busca pôs. */
+  const autoOf = (form, filled) =>
+    new Set(["street", "district", "city", "state"].filter((key) => filled[key] !== undefined && (key === "state" ? form.uf : form[key]) === filled[key]));
+
+  it("CEP geral depois de CEP específico: rua e bairro da busca anterior saem; o digitado fica", () => {
+    const first = cepPatch(empty, empty, NONE, FOUND);
+    const found = { ...empty, ...first.patch };
+    const r = cepPatch(found, empty, autoOf(found, first.filled), GENERAL);
+    assert.deepEqual(r.patch, { street: "", district: "", city: "Cidade Geral", uf: "MG" });
+    assert.deepEqual(r.filled, { street: "", district: "", city: "Cidade Geral", state: "MG" });
+    assert.equal(r.focus, "street");
+    assert.equal(cepDiffers({ ...found, ...r.patch }, GENERAL), false);
+    // A rua que a pessoa digitou por cima da busca fica; o bairro, ainda da busca, sai.
+    const typed = { ...found, street: "Rua Digitada" };
+    const kept = cepPatch(typed, empty, autoOf(typed, first.filled), GENERAL);
+    assert.deepEqual(kept.patch, { district: "", city: "Cidade Geral", uf: "MG" });
+  });
+
+  it("CEP geral: o gravado (que não veio da busca) fica; Usar este endereço também só tira o da busca anterior", () => {
+    // Cidade da busca anterior; rua e bairro são os gravados.
+    const r = cepPatch({ ...saved, city: "Cidade Exemplo" }, saved, new Set(["city"]), GENERAL);
+    assert.deepEqual(r.patch, { city: "Cidade Geral", uf: "MG" });
+    const first = cepPatch(empty, empty, NONE, FOUND);
+    const typed = { ...empty, ...first.patch, street: "Rua Digitada" };
+    const used = cepPatch(typed, empty, autoOf(typed, first.filled), GENERAL, true);
+    assert.equal(used.patch.street, undefined);
+    assert.equal(used.patch.district, "");
+    assert.equal(used.patch.city, "Cidade Geral");
+  });
+
+  it("logradouro da busca anterior que sai: o número e o complemento iguais ao gravado também saem", () => {
+    const first = cepPatch(saved, saved, NONE, FOUND);
+    const found = { ...saved, ...first.patch };
+    assert.equal(found.number, "");
+    const back = { ...found, number: "100", complement: "Apto 4" };
+    const r = cepPatch(back, saved, autoOf(back, first.filled), GENERAL);
+    assert.equal(r.patch.street, "");
+    assert.equal(r.patch.number, "");
+    assert.equal(r.patch.complement, "");
+  });
+
+  it("rua igual de outro jeito (sameStreet) não esvazia número nem complemento; outra rua, sim", () => {
+    const spaced = ADDRESS_SECTION.fromProfile({ ...PROFILE, address_line: "RUA NOVA   EXEMPLO" });
+    assert.deepEqual(cepPatch(spaced, spaced, NONE, FOUND).patch, { street: "Rua Nova Exemplo", district: "Bairro Exemplo" });
+    const short = ADDRESS_SECTION.fromProfile({ ...PROFILE, address_line: "R. Nova Exemplo" });
+    const r = cepPatch(short, short, NONE, FOUND);
+    assert.equal(r.patch.number, "");
+    assert.equal(r.patch.complement, "");
+  });
+
   it("Usar este endereço: troca também o que foi digitado", () => {
     const typed = { ...saved, street: "Rua Digitada", city: "Outra Cidade" };
     const r = cepPatch(typed, saved, NONE, FOUND, true);
@@ -525,16 +639,29 @@ describe("reviewBio (Mini biografia)", () => {
     assert.deepEqual(bioReview({ bio: "😀".repeat(500) }).errors, {});
   });
 
-  it("espaços e quebras juntados; vazio limpa", () => {
-    assert.deepEqual(bioReview({ bio: " Instalo  redes\ne câmeras " }).body, { bio: "Instalo redes e câmeras" });
-    const withBio = { ...PROFILE, bio: "Instalo redes e câmeras" };
-    assert.deepEqual(bioReview({ bio: "  " }, withBio).body, { bio: null });
-    assert.deepEqual(bioReview({ bio: "Instalo redes\ne câmeras" }, withBio), UNCHANGED);
+  it("os parágrafos ficam (normalizeBio): sem espaço no fim das linhas, no máximo uma linha em branco; vazio limpa", () => {
+    assert.deepEqual(bioReview({ bio: " Instalo redes  \r\ne câmeras \n\n\n\nAtendo a região  \n" }).body, {
+      bio: "Instalo redes\ne câmeras\n\nAtendo a região",
+    });
+    const withBio = { ...PROFILE, bio: "Instalo redes\ne câmeras" };
+    assert.deepEqual(bioReview({ bio: "  \n " }, withBio).body, { bio: null });
+    // O mesmo texto com espaço no fim da linha, "\r\n" e quebra no fim não é mudança.
+    assert.deepEqual(bioReview({ bio: "Instalo redes  \r\ne câmeras\n" }, withBio), UNCHANGED);
+    // Juntar os parágrafos numa linha é mudança (antes, as quebras viravam espaço).
+    assert.deepEqual(bioReview({ bio: "Instalo redes e câmeras" }, withBio).body, { bio: "Instalo redes e câmeras" });
+  });
+
+  it("o limite de 500 conta depois de normalizeBio", () => {
+    assert.deepEqual(bioReview({ bio: `${"a".repeat(250)}\n\n\n\n${"a".repeat(248)}` }).errors, {});
+    assert.equal(bioReview({ bio: `${"a".repeat(250)}\n\n${"a".repeat(249)}` }).errors.bio, MSG.bioLong);
+    assert.deepEqual(bioReview({ bio: `${"a".repeat(500)}  \n\n` }).errors, {});
   });
 
   it("contador e aviso de salvo", () => {
     assert.equal(bioCount("Instalo"), "7/500");
     assert.equal(bioCount(""), "0/500");
+    assert.equal(bioCount("Instalo  \n\n\n"), "7/500");
+    assert.equal(bioCount("Instalo\n\n\n\nredes"), "14/500");
     assert.deepEqual(BIO_SECTION.saved(bioReview({ bio: "Instalo redes" }), BIO_SECTION.fromProfile(PROFILE)), {
       title: "Mini biografia atualizada",
     });
@@ -655,6 +782,19 @@ describe("resumos das linhas de Configurações", () => {
     assert.deepEqual(contactRowSummary({ ...PROFILE, phone: null }), { value: NO_PHONE, tone: "warning" });
     assert.equal(NO_PHONE, "Sem celular");
     assert.deepEqual(contactRowSummary({ ...PROFILE, email_pending: "tecnico.beta@exemplo.com" }), { value: "E-mail pendente", tone: "warning" });
+  });
+
+  it("Contato: login que recebe e-mail ainda sem validação, com o envio ligado: \"E-mail não validado\" (neutro)", () => {
+    const unverified = { ...PROFILE, email_verified_at: null };
+    assert.deepEqual(contactRowSummary(unverified), { value: "E-mail não validado", tone: "muted" });
+    assert.equal(EMAIL_UNVERIFIED, "E-mail não validado");
+    // Sem celular e troca pendente vêm antes.
+    assert.deepEqual(contactRowSummary({ ...unverified, phone: null }), { value: NO_PHONE, tone: "warning" });
+    assert.deepEqual(contactRowSummary({ ...unverified, email_pending: "tecnico.beta@exemplo.com" }), { value: "E-mail pendente", tone: "warning" });
+    // Envio desligado, endereço que não recebe e login de teste: não há o que validar, fica o celular.
+    assert.deepEqual(contactRowSummary({ ...unverified, mail_enabled: false }), { value: "(11) 98888-7777", tone: "muted" });
+    assert.deepEqual(contactRowSummary({ ...unverified, email: "fc-1@importado.invalid" }), { value: "(11) 98888-7777", tone: "muted" });
+    assert.deepEqual(contactRowSummary({ ...unverified, email: "tecnico" }), { value: "(11) 98888-7777", tone: "muted" });
   });
 
   it("Endereço: cidade/UF, só a cidade ou Não informado", () => {

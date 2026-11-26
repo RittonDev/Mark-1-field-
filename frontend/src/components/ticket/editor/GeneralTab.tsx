@@ -38,7 +38,7 @@ import {
   STATUS,
   STATUS_ORDER,
   TICKET_SOURCE,
-  unavailableOn,
+  unavailableBetween,
 } from "@/lib/constants";
 import { dayKey, formatDateTime, formatDocument, formatMinutes, formatMoney, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
@@ -82,6 +82,13 @@ const split = (iso: string | null | undefined) => {
 };
 const join = (date: string, time: string) => (date && time ? fromLocalInput(`${date}T${time}`) : null);
 const sameList = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join() === [...b].sort().join();
+
+/** A duração da agenda que o Salvar grava (fim = início + ela): a estimada, a da agenda atual ou, sem as duas, 1 h. */
+function scheduleMinutes(minutes: number | null, t: Pick<TicketDetail, "scheduled_start" | "scheduled_end">): number {
+  const current =
+    t.scheduled_start && t.scheduled_end ? Math.round((Date.parse(t.scheduled_end) - Date.parse(t.scheduled_start)) / 60000) : null;
+  return minutes ?? current ?? 60;
+}
 
 /** Situações com o técnico na OS: tirar ou trocar o técnico muda a situação. */
 const FIELD_ACTIVE: TicketStatus[] = ["assigned", "scheduled", "en_route", "in_progress"];
@@ -491,10 +498,17 @@ export function GeneralTab({
   const technicians = people.filter((p) => p.role === "technician" && !offStatus(p));
   const offTechs = people.filter((p) => p.role === "technician" && offStatus(p));
   const internal = people.filter((p) => p.role !== "technician");
-  // A indisponibilidade vale no dia da visita (sem data, hoje); o "até 30/11" conta de hoje. No fuso da operação.
+  // A indisponibilidade vale nos dias da visita, do início ao fim: a agenda gravada ou, mudada, a do formulário até o
+  // fim que o Salvar grava (sem data, hoje); o "até 30/11" conta de hoje. No fuso da operação.
   const todayKey = dayKey(now);
   const visitDay = form.date || todayKey;
-  const awayOn = (p: AssignableUser | undefined) => (p && !offStatus(p) ? unavailableOn(p.unavailability, visitDay) : null);
+  const visitLast = sameGroup(SCHEDULE_KEYS, form, base)
+    ? (server.scheduled_end ? dayKey(server.scheduled_end) : "") || visitDay
+    : startIso
+      ? dayKey(Date.parse(startIso) + scheduleMinutes(minutes, server) * 60_000) || visitDay
+      : visitDay;
+  const awayOn = (p: AssignableUser | undefined) =>
+    p && !offStatus(p) ? unavailableBetween(p.unavailability, visitDay, visitLast) : null;
   const awaySuffix = (p: AssignableUser) => {
     const away = awayOn(p);
     return away ? ` · indisponível ${periodShort(away, todayKey)}` : "";
@@ -504,7 +518,8 @@ export function GeneralTab({
     const reason = shortReason(p.operational_reason);
     return off ? `${p.name} · ${OPERATIONAL_STATUS[off].toLowerCase()}${reason ? `: ${reason}` : ""}` : p.name;
   };
-  // O responsável e os que vão junto que saíram de Ativo ou avisaram que não atendem no dia (só com a OS em andamento).
+  // O responsável e os que vão junto que saíram de Ativo ou avisaram que não atendem nos dias da visita (só com a OS em
+  // andamento).
   const receiveCaution = (id: UUID | "") => {
     const person = id ? people.find((p) => p.id === id) : undefined;
     const off = person ? offStatus(person) : null;
@@ -646,13 +661,8 @@ export function GeneralTab({
     }
     if (schedChanged && startIso) {
       // Fim = início + duração (estimada ou a da agenda atual), para não sobrar um fim antigo.
-      const current =
-        server.scheduled_start && server.scheduled_end
-          ? Math.round((Date.parse(server.scheduled_end) - Date.parse(server.scheduled_start)) / 60000)
-          : null;
-      const duration = minutes ?? current ?? 60;
       p.scheduled_start = startIso;
-      p.scheduled_end = new Date(Date.parse(startIso) + duration * 60000).toISOString();
+      p.scheduled_end = new Date(Date.parse(startIso) + scheduleMinutes(minutes, server) * 60000).toISOString();
     } else if (schedChanged && !form.date && !form.time && (base.date || base.time)) {
       // Data e hora apagadas: a OS fica sem agenda.
       p.scheduled_start = null;
@@ -879,6 +889,9 @@ export function GeneralTab({
   const autoTags = autoTagsHint(tagRules);
   const assigneeListed = people.some((p) => p.id === form.assigneeId);
   const assigneeName = form.assigneeId ? (names[form.assigneeId] ?? null) : null;
+  // Quem já está na OS e ficou sem acesso ao app (a lista de atribuição só traz quem tem): marcado, sem cor; continua na
+  // OS até alguém tirar.
+  const noAccess = new Set([server.assignee, ...(server.helpers ?? [])].flatMap((p) => (p && p.is_active === false ? [p.id] : [])));
   const unscheduledWarning = schedChanged && !form.date && !form.time && (base.date || base.time) && server.status === "scheduled";
   const conflictsTitle = conflicts
     ? `${busyTitle(conflicts, assigneeName ?? "O técnico")}.${partial ? " O restante das alterações já foi salvo." : ""} Para agendar assim mesmo, use "Salvar mesmo assim".`
@@ -1189,7 +1202,12 @@ export function GeneralTab({
                   ))}
                 </optgroup>
               ) : null}
-              {form.assigneeId && !assigneeListed ? <option value={form.assigneeId}>{assigneeName ?? "Técnico atual"}</option> : null}
+              {form.assigneeId && !assigneeListed ? (
+                <option value={form.assigneeId}>
+                  {assigneeName ?? "Técnico atual"}
+                  {noAccess.has(form.assigneeId) ? " · sem acesso ao app" : ""}
+                </option>
+              ) : null}
             </Select>
           </Field>
           <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-6">
@@ -1203,6 +1221,7 @@ export function GeneralTab({
               assigneeId={form.assigneeId as UUID | ""}
               helperIds={form.helperIds}
               names={names}
+              noAccess={noAccess}
               onChange={(ids) => set("helperIds", ids)}
             />
           </div>

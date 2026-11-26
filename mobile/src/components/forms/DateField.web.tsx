@@ -1,6 +1,6 @@
 // Pré-visualização no navegador: <input type="date">. Mesmas props do DateField.tsx; `min` e `max` vão para o campo
-// (o seletor do navegador não deixa escolher fora deles). `todayShortcut` e `initial` não mudam nada aqui: o seletor é
-// o do navegador.
+// (o seletor do navegador não deixa escolher fora deles). `todayShortcut`, `initial` e `iosDisplay` não mudam nada aqui:
+// o seletor é o do navegador.
 
 import { brandFont } from "../../theme/fonts";
 import { useTheme } from "../../theme/theme";
@@ -23,6 +23,7 @@ export function DateField({
   max?: string;
   todayShortcut?: boolean;
   initial?: string;
+  iosDisplay?: "inline" | "spinner";
 }) {
   const c = useTheme();
   return (

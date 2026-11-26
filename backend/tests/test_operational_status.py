@@ -105,6 +105,21 @@ def test_receive_block_and_ensure_can_receive() -> None:
     }
 
 
+def test_badge_brings_the_reason_only_out_of_active() -> None:
+    """O selo da central (mapa, Mais próximos, favoritos): o motivo limpo só fora de Ativo; o da
+    reativação não aparece, e o sem acesso que está Ativo vem sem selo (o chip é outro)."""
+
+    def badge(**values: object) -> tuple[str, str | None]:
+        out = technician_status.badge(_user(**values))  # type: ignore[arg-type]
+        return out["operational_status"], out["operational_reason"]
+
+    inactive = badge(operational_status="inactive", operational_reason=" Férias  coletivas ")
+    assert inactive == ("inactive", "Férias coletivas")
+    assert badge(operational_status="blocked", operational_reason="  ") == ("blocked", None)
+    assert badge(operational_reason="Voltou das férias") == ("active", None)
+    assert badge(is_active=False, operational_status=None) == ("active", None)
+
+
 def test_unavailable_between_counts_both_ends() -> None:
     stored = [
         {"id": "b", "start": "2026-12-10", "end": "2026-12-20"},

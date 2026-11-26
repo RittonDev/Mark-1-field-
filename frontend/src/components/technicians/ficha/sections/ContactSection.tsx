@@ -5,9 +5,10 @@ import { Field, Input } from "@/components/ui";
 import { isSendableEmail } from "@/lib/constants";
 import { maskPhone } from "@/lib/onboarding";
 import { useMailEnabled } from "@/lib/queries";
+import { isLegacyDetail } from "@/lib/technicians";
 import type { Technician } from "@/lib/types";
 import { fichaLabel } from "../FichaNav";
-import { SectionCard, SectionForm } from "../SectionCard";
+import { LEGACY_TEXT, SectionCard, SectionForm } from "../SectionCard";
 import { type SectionErrors, useSectionForm } from "../useSectionForm";
 import { EmailState } from "./CredentialsSection";
 
@@ -43,10 +44,12 @@ function validate(v: ContactForm): SectionErrors {
 
 /**
  * Contato: celular (WhatsApp), telefone secundário e o e-mail de login. Trocar o e-mail aqui troca o login na hora e
- * manda a validação para o e-mail novo (pergunta antes).
+ * manda a validação para o e-mail novo (pergunta antes). Com a API de antes (até a publicação), o telefone secundário
+ * fica travado (ela o descartaria calada).
  */
 export function ContactSection({ tech, canEdit }: { tech: Technician; canEdit: boolean }) {
   const label = fichaLabel("contato");
+  const legacy = isLegacyDetail(tech);
   const confirm = useConfirm();
   const mailEnabled = useMailEnabled();
   const form = useSectionForm({
@@ -89,12 +92,13 @@ export function ContactSection({ tech, canEdit }: { tech: Technician; canEdit: b
               aria-invalid={errors.phone ? true : undefined}
             />
           </Field>
-          <Field label="Telefone secundário" error={errors.phoneSecondary}>
+          <Field label="Telefone secundário" error={errors.phoneSecondary} hint={legacy ? LEGACY_TEXT : undefined}>
             <Input
               value={value.phoneSecondary}
               onChange={(e) => set("phoneSecondary", maskPhone(e.target.value))}
+              disabled={legacy}
               inputMode="tel"
-              placeholder="(11) 90000-0000"
+              placeholder={legacy ? undefined : "(11) 90000-0000"}
               autoComplete="off"
               aria-invalid={errors.phoneSecondary ? true : undefined}
             />

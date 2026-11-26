@@ -1,10 +1,11 @@
 "use client";
 
 import { Textarea } from "@/components/ui";
-import { PROFILE_LIMITS } from "@/lib/constants";
+import { normalizeBio, PROFILE_LIMITS } from "@/lib/constants";
+import { isLegacyDetail } from "@/lib/technicians";
 import type { Technician } from "@/lib/types";
 import { fichaLabel } from "../FichaNav";
-import { FICHA_HEADING_ID, SectionCard, SectionForm } from "../SectionCard";
+import { FICHA_HEADING_ID, LegacyNote, SectionCard, SectionForm } from "../SectionCard";
 import { type SectionErrors, useSectionForm } from "../useSectionForm";
 
 interface BioForm {
@@ -12,19 +13,25 @@ interface BioForm {
 }
 
 const read = (t: Technician): BioForm => ({ bio: t.bio ?? "" });
-const body = (v: BioForm) => ({ bio: v.bio.trim() || null });
+// Com os parágrafos, como a API grava (normalizeBio = personal.bio): compara e envia o mesmo texto.
+const body = (v: BioForm) => ({ bio: normalizeBio(v.bio) || null });
 const validate = (v: BioForm): SectionErrors =>
-  v.bio.trim().length > PROFILE_LIMITS.bio ? { bio: `No máximo ${PROFILE_LIMITS.bio} caracteres.` } : {};
+  normalizeBio(v.bio).length > PROFILE_LIMITS.bio ? { bio: `No máximo ${PROFILE_LIMITS.bio} caracteres.` } : {};
 
-/** Mini biografia (opcional): a experiência e a atuação, em até 500 caracteres. */
+/**
+ * Mini biografia (opcional): a experiência e a atuação, em até 500 caracteres, com os parágrafos (o limite conta depois
+ * de juntar as linhas em branco repetidas). Com a API de antes (até a publicação), só leitura.
+ */
 export function BioSection({ tech, canEdit }: { tech: Technician; canEdit: boolean }) {
   const label = fichaLabel("mini-biografia");
+  const legacy = isLegacyDetail(tech);
   const form = useSectionForm({ tech, label, read, body, validate, savedTitle: "Mini biografia salva" });
   const { value, set, errors } = form;
 
   return (
     <SectionCard title={label}>
-      <SectionForm form={form} canEdit={canEdit}>
+      {legacy ? <LegacyNote /> : null}
+      <SectionForm form={form} canEdit={canEdit && !legacy}>
         {/* O título da seção é o rótulo do campo (um rótulo igual logo abaixo dele seria repetido). */}
         <div className="flex flex-col gap-1.5">
           <Textarea
@@ -44,7 +51,7 @@ export function BioSection({ tech, canEdit }: { tech: Technician; canEdit: boole
               <span />
             )}
             <span className="shrink-0 text-ink-muted tabular-nums">
-              {value.bio.length}/{PROFILE_LIMITS.bio}
+              {normalizeBio(value.bio).length}/{PROFILE_LIMITS.bio}
             </span>
           </div>
         </div>

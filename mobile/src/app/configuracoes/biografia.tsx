@@ -1,6 +1,7 @@
 // Configurações › Mini biografia: um texto curto e opcional sobre a experiência e a atuação do técnico, que a central vê
-// na ficha dele. Até 500 caracteres (o contador conta como o servidor); vazio apaga. Não pede senha; a central é avisada.
-// Só online, como todo o cadastro; com a API de antes do cadastro V2, "Indisponível no momento".
+// na ficha dele. Os parágrafos ficam (as quebras de linha vão como digitadas, sem linhas em branco a mais: normalizeBio).
+// Até 500 caracteres (o contador conta como o servidor); vazio apaga. Não pede senha; a central é avisada. Só online,
+// como todo o cadastro; com a API de antes do cadastro V2, "Indisponível no momento".
 
 import { StyleSheet } from "react-native";
 import { CadastroUnavailable } from "../../components/settings/CadastroUnavailable";

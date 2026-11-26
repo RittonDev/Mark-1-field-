@@ -8,8 +8,9 @@ import { CepField } from "@/components/CepField";
 import { FieldError, useLeaveGuard } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox, Field, Input, LoadingBlock } from "@/components/ui";
-import { cepDigits, cepFromLine, companyLineWithCep } from "@/lib/address";
+import { cepFromLine, cepIncomplete, companyCepAfterEdit, companyLineToSave } from "@/lib/address";
 import { api, errorMessage } from "@/lib/api";
+import { CEP_TEXT } from "@/lib/constants";
 import { formatDocument } from "@/lib/format";
 import type { CompanyProfile } from "@/lib/types";
 
@@ -81,8 +82,11 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
     website: initial.website ?? "",
   }));
   const [form, setForm] = useState(start);
-  // O CEP não é gravado à parte: ajuda a montar a linha do endereço (e vai para o fim dela). Começa com o que está nela.
+  // O CEP não é gravado à parte: ajuda a montar a linha do endereço (e vai para o fim dela). Começa com o que está nela e
+  // acompanha o CEP que a pessoa escreve na própria linha.
   const [cep, setCep] = useState(() => cepFromLine(start.address));
+  // "CEP inválido" aparece depois de sair do campo ou de tentar salvar.
+  const [cepTouched, setCepTouched] = useState(false);
   const addressRef = useRef<HTMLInputElement>(null);
   const [showDocumentError, setShowDocumentError] = useState(false);
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -90,10 +94,10 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
   const cnpj = cleanDocument(form.document);
   const documentValid = !cnpj || isValidCnpj(cnpj);
   const documentProblem = documentValid ? undefined : "CNPJ inválido: confira os 14 caracteres e os dígitos verificadores.";
-  // O endereço que vai ser gravado: com o CEP completo no fim da linha (o achado já foi para lá; sem a busca, como CEP não
-  // achado ou busca fora do ar, ele entra ao salvar, em vez de sumir). Até os 300 caracteres da linha.
-  const withCep = cepDigits(cep).length === 8 ? companyLineWithCep(form.address, cep) : form.address;
-  const address = withCep.length <= ADDRESS_MAX ? withCep : form.address;
+  // CEP começado e incompleto: não entra na linha e trava o Salvar (como em Clientes e Locais).
+  const cepError = cepIncomplete(cep) ? CEP_TEXT.invalid : null;
+  // O endereço que vai ser gravado: com o CEP completo no fim da linha, até os 300 caracteres dela.
+  const address = companyLineToSave(form.address, cep, ADDRESS_MAX);
   const normalized = (f: typeof form) =>
     JSON.stringify({
       name: f.name.trim(),
@@ -128,10 +132,9 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
         className="grid gap-4 sm:grid-cols-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!documentValid) {
-            setShowDocumentError(true);
-            return;
-          }
+          if (!documentValid) setShowDocumentError(true);
+          if (cepError) setCepTouched(true);
+          if (!documentValid || cepError) return;
           if (dirty) save.mutate();
         }}
       >
@@ -170,12 +173,19 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
             onApply={(next) => setForm((f) => ({ ...f, address: next.line }))}
             focusRef={addressRef}
             disabled={readOnly}
+            error={cepTouched ? cepError : null}
+            inputProps={{ onBlur: () => setCepTouched(true) }}
           />
           <Field label="Endereço">
             <Input
               ref={addressRef}
               value={form.address}
-              onChange={set("address")}
+              onChange={(e) => {
+                const line = e.target.value;
+                // CEP mudado (ou apagado) na linha: o campo vai junto, e o salvar não troca de volta.
+                setCep((current) => companyCepAfterEdit(form.address, line, current));
+                setForm((f) => ({ ...f, address: line }));
+              }}
               maxLength={ADDRESS_MAX}
               placeholder="Rua, número - bairro - cidade - UF"
               disabled={readOnly}

@@ -1,6 +1,7 @@
 // Ficha do técnico na central (/tecnicos/[id]) e lista de Técnicos: o grupo Gestão do menu, o link da ficha, os
-// filtros da lista na URL e os rótulos de situação, e-mails e análises. Só `import type` (testável no Node, como
-// lib/constants.ts): tests/technicians.test.mjs. Os três primeiros grupos do menu, a entrega no ar, os períodos de
+// filtros da lista na URL, os rótulos de situação, e-mails e análises, e as regras puras das seções da ficha (API de
+// antes, endereço e RG). Só `import type` (testável no Node, como lib/constants.ts): tests/technicians.test.mjs e
+// tests/ficha-mapa.test.mjs. Os três primeiros grupos do menu, a entrega no ar, os períodos de
 // indisponibilidade e o e-mail que recebe ficam em lib/constants.ts (TECH_SECTION_GROUPS, CADASTRO_DELIVERY,
 // periodShort, unavailableOn e isSendableEmail), iguais no app.
 
@@ -73,6 +74,73 @@ export function operationalRank(t: { operational_status?: OperationalStatus; is_
   if (status === "blocked") return 3;
   if (status === "inactive") return 2;
   return t.is_active ? 0 : 1;
+}
+
+/** Inativo ou Bloqueado: não recebe OS. Sem `operational_status` (API antiga): Ativo. */
+export function isOutOfActive(t: { operational_status?: OperationalStatus }): boolean {
+  return (t.operational_status ?? "active") !== "active";
+}
+
+/** O `title` do selo Inativo/Bloqueado: o motivo; só quando ele não vem, "Não recebe OS". */
+export function operationalTitle(reason: string | null | undefined): string {
+  return reason?.trim() || "Não recebe OS";
+}
+
+// --------------------------------------------------------------------------- ficha: API de antes e endereço
+
+/**
+ * O detalhe veio da API de antes do cadastro V2 (até a publicação): a nova sempre manda `address_number` (null quando
+ * vazio). Com a antiga, as partes novas da ficha ficam só leitura ("Indisponível no momento."): ela ignora calada o que
+ * não conhece, e salvar o Endereço trocaria a linha inteira gravada ("Rua Exemplo, 123 - Apto 4") só pelo logradouro.
+ */
+export function isLegacyDetail(t: { address_number?: string | null }): boolean {
+  return t.address_number === undefined;
+}
+
+/** O número do endereço como a API grava (= personal.address_number): espaços juntos, maiúsculas; "SN" e "S / N", "S/N". */
+export function addressNumberText(text: string): string {
+  const value = text.replace(/\s+/g, " ").trim().toUpperCase();
+  return /^(?:S\s*\/\s*N|SN)$/.test(value) ? "S/N" : value;
+}
+
+/** O endereço em partes da ficha (Endereço). */
+export interface AddressParts {
+  street: string;
+  number: string;
+  complement: string;
+  district: string;
+  city: string;
+  state: string;
+}
+
+/**
+ * O que o CEP muda no endereço da ficha: logradouro, bairro, cidade e UF de `next` (o cepFill) e, só com o logradouro
+ * trocado de fato (`streetChanged`, pelo sameStreet de constants: acento, maiúsculas e espaços não contam), o número e o
+ * complemento que ainda são os gravados saem (o digitado agora fica).
+ */
+export function addressAfterCep(
+  value: AddressParts,
+  base: AddressParts,
+  next: Pick<AddressParts, "street" | "district" | "city" | "state">,
+  streetChanged: boolean,
+): Partial<AddressParts> {
+  const changes: Partial<AddressParts> = { street: next.street, district: next.district, city: next.city, state: next.state };
+  if (streetChanged) {
+    if (value.number === base.number) changes.number = "";
+    if (value.complement === base.complement) changes.complement = "";
+  }
+  return changes;
+}
+
+/**
+ * O RG ao salvar: o órgão emissor sem a UF do fim (`split`, o splitIssuer de constants: "SSP/SP" → "SSP" e "SP") e a UF
+ * do campo; com o campo vazio, a do fim do órgão (outra UF no campo: vale a do campo e o sufixo sai). Vazio vira null.
+ */
+export function rgIssuerFields(
+  split: { issuer: string; state: string | null },
+  fieldState: string,
+): { rg_issuer: string | null; rg_state: string | null } {
+  return { rg_issuer: split.issuer || null, rg_state: fieldState || split.state || null };
 }
 
 // --------------------------------------------------------------------------- e-mails e análises

@@ -33,6 +33,7 @@ import type { MapFocus, MapPlace } from "@/components/LiveMap";
 import { LocationPicker } from "@/components/LocationPicker";
 import { NoAccess } from "@/components/NoAccess";
 import { fold, operationDay, replaceSearch } from "@/components/operacao/hooks";
+import { OperationalPill } from "@/components/technicians/ficha/OperationalPill";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import {
   Button,
@@ -54,17 +55,19 @@ import { formatMinutes, formatShort, formatTime, initials } from "@/lib/format";
 import { useCan } from "@/lib/permissions";
 import { useDayActivities, useLiveTechnicians, useMapDistances, useTeams, useTrackingHistory } from "@/lib/queries";
 import { useConnectionState } from "@/lib/realtime";
-import { technicianHref } from "@/lib/technicians";
+import { isOutOfActive, technicianHref } from "@/lib/technicians";
 import {
   DAY_STATE,
   formatAgo,
   formatKm,
   formatSpeed,
+  idleOutOfActive,
   inCurrentShift,
   isStale,
   isValidCoords,
   LIVE_STATE,
   LIVE_STATE_ORDER,
+  liveLook,
   shiftPosition,
   trailSummary,
 } from "@/lib/tracking";
@@ -97,7 +100,8 @@ function shiftDay(day: string, delta: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-const rank = (state: LiveState) => LIVE_STATE_ORDER.indexOf(state);
+// Pelo estado; Inativo ou Bloqueado em jornada e sem OS em campo ("Em jornada", não "Disponível") logo depois dos disponíveis.
+const rank = (t: LiveTechnician) => LIVE_STATE_ORDER.indexOf(t.state) + (idleOutOfActive(t) ? 0.5 : 0);
 
 // Preferências do mapa neste navegador (o que mostrar por padrão).
 const PREFS_KEY = "mf-mapa-preferencias";
@@ -184,7 +188,7 @@ function LiveMapView() {
   const teams = useTeams();
   const live = useLiveTechnicians(teamId || null);
   const liveById = useMemo(() => new Map((live.data ?? []).map((t) => [t.id, t])), [live.data]);
-  // Só vale quem está na lista (ativo e no grupo escolhido): um link antigo ou um técnico desativado
+  // Só vale quem está na lista (com acesso ao app e no grupo escolhido): um link antigo ou um técnico sem acesso
   // não deixa a tela presa num técnico que não aparece.
   const selectedId = pickedId && liveById.has(pickedId) ? pickedId : null;
   const history = useTrackingHistory(selectedId, day);
@@ -207,24 +211,33 @@ function LiveMapView() {
 
   const technicians = useMemo(() => {
     const list = [...(live.data ?? [])];
-    // Com loja escolhida: do mais perto para o mais longe (agora, em jornada, ou de casa).
+    // Com loja escolhida: do mais perto para o mais longe (agora, em jornada, ou de casa); quem não recebe OS (Inativo
+    // ou Bloqueado) vai para o fim, mesmo perto.
     if (place && distances.data) {
       return list.sort(
-        (a, b) => closeness(distanceById.get(a.id), now) - closeness(distanceById.get(b.id), now) || a.name.localeCompare(b.name),
+        (a, b) =>
+          Number(isOutOfActive(a)) - Number(isOutOfActive(b)) ||
+          closeness(distanceById.get(a.id), now) - closeness(distanceById.get(b.id), now) ||
+          a.name.localeCompare(b.name),
       );
     }
-    return list.sort((a, b) => rank(a.state) - rank(b.state) || a.name.localeCompare(b.name));
+    return list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   }, [live.data, place, distances.data, distanceById, now]);
   const counts = useMemo(() => {
     const c = Object.fromEntries(LIVE_STATE_ORDER.map((s) => [s, 0])) as Record<LiveState, number>;
-    technicians.forEach((t) => (c[t.state] += 1));
+    // Inativo ou Bloqueado sem OS em campo não conta como "Disponível".
+    technicians.forEach((t) => {
+      if (!idleOutOfActive(t)) c[t.state] += 1;
+    });
     return c;
   }, [technicians]);
   const visible = useMemo(() => {
     const term = fold(q.trim());
     return technicians.filter(
       (t) =>
-        (stateFilter.size ? stateFilter.has(t.state) : !(prefs.hideOffline && t.state === "offline")) &&
+        (stateFilter.size
+          ? !idleOutOfActive(t) && stateFilter.has(t.state)
+          : !(prefs.hideOffline && t.state === "offline")) &&
         (!term || fold(t.name).includes(term) || fold(t.current_ticket?.code).includes(term)),
     );
   }, [technicians, q, stateFilter, prefs.hideOffline]);
@@ -447,7 +460,7 @@ function LiveMapView() {
               teamId ? (
                 <EmptyState
                   icon={<MapPinned className="size-6" />}
-                  title="Nenhum técnico ativo neste grupo"
+                  title="Nenhum técnico com acesso ao app neste grupo"
                   action={<Button onClick={() => changeTeam("")}>Ver todos os grupos</Button>}
                 />
               ) : (
@@ -633,7 +646,8 @@ function TechnicianRow({
   /** Com loja escolhida: de onde ele está (em jornada) e de casa até a loja. */
   distance?: TechnicianDistance;
 }) {
-  const state = LIVE_STATE[tech.state];
+  // "Disponível" só para quem está Ativo: Inativo ou Bloqueado sem OS em campo fica neutro, com o selo da situação.
+  const state = liveLook(tech);
   const pos = shiftPosition(tech);
   // Em jornada e sem posição nova há mais de 5 min: o técnico pode já estar em outro lugar.
   const stale = !!pos && isStale(pos.recorded_at, now);
@@ -658,7 +672,10 @@ function TechnicianRow({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center justify-between gap-2">
-            <span className="truncate text-sm font-semibold text-ink">{tech.name}</span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-sm font-semibold text-ink">{tech.name}</span>
+              <OperationalPill tech={tech} />
+            </span>
             {pos ? (
               <span
                 className={clsx("shrink-0 text-xs tabular-nums", stale ? "text-red-700 dark:text-red-400" : "text-ink-muted")}
@@ -815,7 +832,10 @@ function TechnicianDetail({
     <div className="space-y-2.5 bg-surface-2/60 p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-ink">{tech.name}</p>
+          <p className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-sm font-bold text-ink">{tech.name}</span>
+            <OperationalPill tech={tech} />
+          </p>
           {tech.open_tickets ? (
             <Link
               href={`/chamados?assignee_id=${tech.id}&open_only=true`}

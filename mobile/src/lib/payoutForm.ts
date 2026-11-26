@@ -1,7 +1,8 @@
 // Formas de recebimento (Configurações › Formas de recebimento): as regras da folha de chave PIX e conta bancária, o
-// corpo das rotas /me/profile/payout-methods, a próxima preferencial ao excluir e os textos da forma (cartão, leitor de
-// tela, linha de Configurações e Faturamento). Sem React nem React Native: entra na sonda tests/payout-form.test.mjs
-// (imports de valor só ./banks, ./constants, ./masks e ./pix). As regras são as do servidor (contrato §6.4), que confere
+// corpo das rotas /me/profile/payout-methods, a próxima preferencial ao excluir, os erros depois dos quais a tela relê a
+// lista (payoutListStale) e os textos da forma (cartão, leitor de tela, linha de Configurações e Faturamento). Sem React
+// nem React Native: entra na sonda tests/payout-form.test.mjs (imports de valor só ./banks, ./constants, ./masks e
+// ./pix). As regras são as do servidor (contrato §6.4), que confere
 // de novo; as mensagens daqui terminam com ponto. O técnico nunca vê nada interno (titular diferente, "Nova").
 
 import { bankByCode, bankByName } from "./banks";
@@ -351,6 +352,27 @@ export function payoutChanged(draft: PayoutDraft, base: PayoutDraft): boolean {
 }
 
 // --------------------------------------------------------------------------- a lista
+
+/** Os códigos do servidor que dizem que a lista da tela não é a dele (contrato §6.4). */
+const STALE_LIST: Readonly<Record<number, string>> = {
+  404: "PAYOUT_METHOD_NOT_FOUND",
+  409: "PAYOUT_METHOD_DUPLICATE",
+  422: "PAYOUT_METHODS_LIMIT",
+};
+
+/**
+ * Depois deste erro de uma gravação das formas, a lista na memória pode estar velha e a tela relê o cadastro: sem
+ * resposta (status 0: tempo esgotado ou queda de rede, e o servidor pode ter gravado), a forma que a central excluiu
+ * (404 PAYOUT_METHOD_NOT_FOUND) e a repetida ou o limite que a lista da tela não acusou (409 PAYOUT_METHOD_DUPLICATE,
+ * 422 PAYOUT_METHODS_LIMIT: em geral, a forma da tentativa anterior entrou e a resposta se perdeu). Recebe o ApiError
+ * (lib/api.ts) pelos campos `status` e `code`, sem importá-lo: a sonda roda sem React Native.
+ */
+export function payoutListStale(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const { status, code } = error as { status?: unknown; code?: unknown };
+  if (status === 0) return true;
+  return typeof status === "number" && STALE_LIST[status] !== undefined && STALE_LIST[status] === code;
+}
 
 const timeOf = (iso: string) => {
   const at = Date.parse(iso);

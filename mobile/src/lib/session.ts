@@ -193,19 +193,30 @@ export const session = {
     });
   },
 
-  /** Novo par de tokens vindo de /auth/refresh. */
+  /**
+   * Novo par de tokens vindo de /auth/refresh (e da troca de senha). O usuário vem como está no servidor: o e-mail novo
+   * validado pelo link (fora do app, sem derrubar a sessão) chega por aqui e vira também o último login, para o login
+   * não vir com o endereço antigo se a sessão acabar antes de o app abrir de novo.
+   */
   async setTokens(data: TokenResponse) {
+    const emailChanged = data.user.email !== state.lastEmail;
     await Promise.all([
       write(KEYS.access, data.access_token),
       write(KEYS.refresh, data.refresh_token),
       write(KEYS.user, JSON.stringify(data.user)),
+      emailChanged ? write(KEYS.lastEmail, data.user.email) : null,
     ]);
-    update({ accessToken: data.access_token, refreshToken: data.refresh_token, user: data.user });
+    update({
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      user: data.user,
+      ...(emailChanged ? { lastEmail: data.user.email } : {}),
+    });
   },
 
   /**
-   * Usuário atualizado (ex.: depois da troca de senha, do aceite do termo de rastreamento ou do Meu cadastro).
-   * O e-mail vai junto para o último login: depois de trocar o e-mail, o login já vem com o novo.
+   * Usuário atualizado (ex.: depois da troca de senha, do aceite do termo de rastreamento ou do cadastro, que traz o
+   * login de agora). O e-mail vai junto para o último login: depois de validar o e-mail novo, o login já vem com ele.
    */
   async updateUser(user: User) {
     await Promise.all([write(KEYS.user, JSON.stringify(user)), write(KEYS.lastEmail, user.email)]);

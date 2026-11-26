@@ -6,8 +6,9 @@
 // Fica só na memória: endereço, documentos, chaves e contas nunca vão para o SQLite nem para o SecureStore, e somem ao
 // sair da conta. Nada entra na fila offline (a senha pedida para o e-mail, os dados da empresa e as formas de
 // recebimento não fica guardada, e o aviso à central sai na hora): abrir, salvar e trocar a foto pedem internet. Nome,
-// e-mail e celular atualizam também o usuário da sessão (session.updateUser grava o e-mail de login para preencher o
-// login; o e-mail novo só vira login depois do link).
+// e-mail e celular atualizam também o usuário da sessão, e o e-mail de login vira o último login (session.updateUser,
+// para preencher o login). O e-mail novo só vira login depois do link, aberto fora do app: a leitura do cadastro (ou a
+// renovação do token, session.setTokens) traz o novo.
 //
 // Gravações em fila (salvar, foto, formas de recebimento e e-mail): uma só sai depois de a anterior responder. O
 // "salvar ao tocar" do perfil técnico nunca corre junto de outra gravação, e cada resposta já inclui a anterior. As
@@ -70,13 +71,14 @@ session.subscribe(() => {
 
 /**
  * Guarda a resposta do servidor, se quem pediu ainda é quem está na sessão (o "Sair" no meio do pedido não pode
- * trazer o cadastro de volta), e leva nome, e-mail e celular para o usuário da sessão.
+ * trazer o cadastro de volta), e leva nome, e-mail e celular para o usuário da sessão. O último login também segue o
+ * e-mail do cadastro, mesmo com o usuário da sessão já igual (a renovação do token trouxe o e-mail novo antes).
  */
 async function keep(profile: MyProfile, askedBy: string | null): Promise<MyProfile> {
-  const { status, user } = session.get();
+  const { status, user, lastEmail } = session.get();
   if (status !== "signedIn" || !user || user.id !== askedBy || profile.id !== user.id) return profile;
   publish({ profile, loadedAt: Date.now() });
-  if (user.name !== profile.name || user.email !== profile.email || user.phone !== profile.phone) {
+  if (user.name !== profile.name || user.email !== profile.email || user.phone !== profile.phone || lastEmail !== profile.email) {
     await session
       .updateUser({ ...user, name: profile.name, email: profile.email, phone: profile.phone })
       .catch((error: unknown) => console.warn("Falha ao guardar o usuário da sessão", error));

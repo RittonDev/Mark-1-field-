@@ -32,7 +32,6 @@ import {
   Field,
   Input,
   LoadingBlock,
-  Pill,
   SectionTitle,
   Select,
   Skeleton,
@@ -45,17 +44,9 @@ import { formatDate, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useCan } from "@/lib/permissions";
 import { useFavorites } from "@/lib/queries";
-import { OPERATIONAL_STATUS_COLOR } from "@/lib/technicians";
-import type {
-  FavoriteCity,
-  FavoriteCityDetail,
-  FavoritesOut,
-  FavoriteTechnician,
-  OperationalStatus,
-  Technician,
-  UUID,
-} from "@/lib/types";
+import type { FavoriteCity, FavoriteCityDetail, FavoritesOut, FavoriteTechnician, Technician, UUID } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
+import { OperationalPill } from "./ficha/OperationalPill";
 import { GrantAccessDialog } from "./GrantAccessDialog";
 import { TechnicianLink } from "./TechnicianLink";
 
@@ -73,19 +64,6 @@ const ICON_BUTTON =
 const ICON_BORDERED = "border border-line bg-surface text-ink-muted shadow-elev-1 hover:border-line-strong hover:text-ink";
 const TEXT_LINK =
   "rounded text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none";
-
-/**
- * "Inativo" / "Bloqueado" (cor só para problema; Ativo não tem selo). Fora de Ativo, não recebe OS nem entra no
- * automático; o fixado continua na lista.
- */
-function StatusPill({ status }: { status: OperationalStatus | undefined }) {
-  if (!status || status === "active") return null;
-  return (
-    <span title="Não recebe OS" className="inline-flex">
-      <Pill color={OPERATIONAL_STATUS_COLOR[status]}>{OPERATIONAL_STATUS[status]}</Pill>
-    </span>
-  );
-}
 
 /** Endereço da aba já filtrada na cidade (a OS e a ficha do técnico levam até ela). */
 export function favoritesHref(state: string, city: string): string {
@@ -808,7 +786,8 @@ function FavoriteRow({
               Fixado
             </span>
           ) : null}
-          <StatusPill status={t.operational_status} />
+          {/* "Inativo" / "Bloqueado" com o motivo: fora de Ativo, não recebe OS nem entra no automático (o fixado fica). */}
+          <OperationalPill tech={t} />
           {t.is_active ? null : (
             <span className={CHIP} title="Não recebe OS até liberar o acesso">
               Sem acesso ao app
@@ -1087,7 +1066,7 @@ function IncludeDialog({
                       <span className="block truncate text-sm font-medium">{t.name}</span>
                       <span className="block truncate text-xs text-ink-muted">{regionOf(t)}</span>
                     </span>
-                    <StatusPill status={t.operational_status} />
+                    <OperationalPill tech={t} />
                     {t.is_active ? null : <span className={CHIP}>Sem acesso ao app</span>}
                   </button>
                 </li>

@@ -3,9 +3,10 @@
 import { Field, Input } from "@/components/ui";
 import { PROFILE_LIMITS } from "@/lib/constants";
 import { isValidCnpj, maskCnpj } from "@/lib/onboarding";
+import { isLegacyDetail } from "@/lib/technicians";
 import type { Technician } from "@/lib/types";
 import { fichaLabel } from "../FichaNav";
-import { SectionCard, SectionForm } from "../SectionCard";
+import { LegacyNote, SectionCard, SectionForm } from "../SectionCard";
 import { type SectionErrors, useSectionForm } from "../useSectionForm";
 
 interface CompanyForm {
@@ -36,15 +37,20 @@ function validate(v: CompanyForm): SectionErrors {
   return v.name.trim() || v.tradeName.trim() ? { document: "Informe o CNPJ." } : {};
 }
 
-/** Dados empresariais (opcionais): CNPJ ou MEI, razão social e nome fantasia. A central muda sem pedir senha. */
+/**
+ * Dados empresariais (opcionais): CNPJ ou MEI, razão social e nome fantasia. A central muda sem pedir senha. Com a API de
+ * antes (até a publicação), só leitura.
+ */
 export function CompanySection({ tech, canEdit }: { tech: Technician; canEdit: boolean }) {
   const label = fichaLabel("dados-empresariais");
+  const legacy = isLegacyDetail(tech);
   const form = useSectionForm({ tech, label, read, body, validate, savedTitle: "Dados empresariais salvos" });
   const { value, set, errors } = form;
 
   return (
     <SectionCard title={label}>
-      <SectionForm form={form} canEdit={canEdit}>
+      {legacy ? <LegacyNote /> : null}
+      <SectionForm form={form} canEdit={canEdit && !legacy}>
         <Field label="CNPJ" error={errors.document} className="sm:max-w-xs">
           <Input
             value={value.document}

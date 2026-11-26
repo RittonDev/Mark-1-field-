@@ -367,7 +367,8 @@ export function useSearchController({
       for (const t of data.technicians) {
         // A ficha do técnico.
         const href = technicianHref(t.id);
-        const detail = [t.city, t.active ? null : "inativo"].filter(Boolean).join(" · ");
+        // `active` é o acesso ao app (a situação na operação, Inativo ou Bloqueado, a busca não traz).
+        const detail = [t.city, t.active ? null : "sem acesso ao app"].filter(Boolean).join(" · ");
         found.push({
           id: `tc-${t.id}`,
           group: GROUP.technicians,

@@ -53,6 +53,14 @@ export function SectionCard({
   );
 }
 
+/** O aviso da parte nova da ficha com a API de antes (isLegacyDetail): ela fica só leitura até a publicação. */
+export const LEGACY_TEXT = "Indisponível no momento.";
+
+/** O aviso da seção só leitura com a API de antes, no topo da seção. */
+export function LegacyNote({ children = LEGACY_TEXT }: { children?: React.ReactNode }) {
+  return <p className="text-sm text-ink-muted">{children}</p>;
+}
+
 /** Título de um bloco dentro da seção ("Indisponibilidade", "E-mail de login"). */
 export function SubTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="text-xs font-bold tracking-wide text-ink-muted uppercase">{children}</h3>;

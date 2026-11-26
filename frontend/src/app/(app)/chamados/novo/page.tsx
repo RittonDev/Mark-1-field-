@@ -97,7 +97,7 @@ import {
 import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { OPERATIONAL_STATUS, periodShort, PRIORITY, PRIORITY_ORDER, ROLE, TICKET_TYPE, unavailableOn } from "@/lib/constants";
+import { OPERATIONAL_STATUS, periodShort, PRIORITY, PRIORITY_ORDER, ROLE, TICKET_TYPE, unavailableBetween } from "@/lib/constants";
 import { dayKey, formatMinutes, formatMoney, formatTime, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useUnsavedChanges } from "@/lib/hooks";
 import { useCan, useQueueScope } from "@/lib/permissions";
@@ -476,13 +476,16 @@ function NewTicket() {
       };
     });
   }, [people, favoriteRank]);
-  // A indisponibilidade vale no dia da visita (sem data, hoje); o "até 30/11" conta de hoje. No fuso da operação.
+  // A indisponibilidade vale nos dias da visita, do início ao fim que a API grava (início + duração estimada; sem a
+  // duração, só o dia do início; sem data, hoje); o "até 30/11" conta de hoje. No fuso da operação.
   const today = dayKey(now);
   const visitDay = f.date || today;
-  const awayOn = (u: AssignableUser | undefined) => (u && !offStatus(u) ? unavailableOn(u.unavailability, visitDay) : null);
+  const visitLast = startIso && minutes ? dayKey(Date.parse(startIso) + minutes * 60_000) || visitDay : visitDay;
+  const awayOn = (u: AssignableUser | undefined) =>
+    u && !offStatus(u) ? unavailableBetween(u.unavailability, visitDay, visitLast) : null;
   const personOf = (id: UUID | "") => (id ? people.find((u) => u.id === id) : undefined);
   // O responsável e os que vão junto (escolhidos agora ou vindos do rascunho) que saíram de Ativo ou avisaram que não
-  // atendem no dia: o aviso embaixo do Colaborador (sempre à vista; os que vão junto ficam em "Mais detalhes").
+  // atendem nos dias da visita: o aviso embaixo do Colaborador (sempre à vista; os que vão junto ficam em "Mais detalhes").
   const receiveCaution = (id: UUID | "") => {
     const person = personOf(id);
     const off = person ? offStatus(person) : null;

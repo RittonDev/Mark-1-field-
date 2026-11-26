@@ -3,12 +3,13 @@
 import { useRef } from "react";
 import { CepField } from "@/components/CepField";
 import { Field, Input, Select, Textarea } from "@/components/ui";
-import { CEP_TEXT, PROFILE_LIMITS } from "@/lib/constants";
+import { CEP_TEXT, PROFILE_LIMITS, sameStreet } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
 import { maskCep, UFS } from "@/lib/onboarding";
+import { addressAfterCep, addressNumberText, isLegacyDetail } from "@/lib/technicians";
 import type { Technician } from "@/lib/types";
 import { fichaLabel } from "../FichaNav";
-import { SectionCard, SectionForm } from "../SectionCard";
+import { LegacyNote, SectionCard, SectionForm } from "../SectionCard";
 import { type SectionErrors, useSectionForm } from "../useSectionForm";
 
 interface AddressForm {
@@ -38,7 +39,8 @@ const zipDigits = (text: string) => text.replace(/\D/g, "");
 const body = (v: AddressForm) => ({
   address_zip: zipDigits(v.zip) || null,
   address_line: v.street.trim() || null,
-  address_number: v.number.trim() || null,
+  // Como a API grava: em maiúsculas, com "S/N" (o mesmo número escrito de outro jeito não conta como mudança).
+  address_number: addressNumberText(v.number) || null,
   address_complement: v.complement.trim() || null,
   address_district: v.district.trim() || null,
   home_city: v.city.trim() || null,
@@ -57,9 +59,12 @@ const regionText = (city: string | null | undefined, state: string | null | unde
 /**
  * Endereço em partes, com o CEP que preenche logradouro, bairro, cidade e UF (o digitado fica; diferente, "Usar este
  * endereço"), e a região que atende. Abaixo, só leitura, a região de atuação calculada (histórico de OS ou endereço).
+ * Com a API de antes (até a publicação), só leitura: o Logradouro ainda é a linha inteira, e salvar só a rua apagaria o
+ * número e o complemento gravados nela (a API antiga descarta os campos novos).
  */
 export function AddressSection({ tech, canEdit }: { tech: Technician; canEdit: boolean }) {
   const label = fichaLabel("endereco");
+  const legacy = isLegacyDetail(tech);
   const form = useSectionForm({ tech, label, read, body, validate, savedTitle: "Endereço salvo" });
   const { value, base, set, patch, errors } = form;
   // O CEP achado leva o foco ao Número (CEP geral, sem logradouro: ao Logradouro).
@@ -69,7 +74,9 @@ export function AddressSection({ tech, canEdit }: { tech: Technician; canEdit: b
 
   return (
     <SectionCard title={label}>
-      <SectionForm form={form} canEdit={canEdit}>
+      {legacy ? <LegacyNote /> : null}
+      {/* Com a API de antes, o fieldset travado trava também o CEP (sem digitar, ele não busca). */}
+      <SectionForm form={form} canEdit={canEdit && !legacy}>
         <CepField
           label="CEP"
           className="sm:max-w-xs"
@@ -79,20 +86,9 @@ export function AddressSection({ tech, canEdit }: { tech: Technician; canEdit: b
           address={{ street: value.street, district: value.district, city: value.city, state: value.state }}
           // O endereço gravado: campo igual a ele é livre para o CEP.
           opened={{ street: base.street, district: base.district, city: base.city, state: base.state }}
-          onApply={(next) => {
-            const changes: Partial<AddressForm> = {
-              street: next.street,
-              district: next.district,
-              city: next.city,
-              state: next.state,
-            };
-            // Outro logradouro: número e complemento que não foram digitados agora (os gravados) saem.
-            if (next.street !== value.street) {
-              if (value.number === base.number) changes.number = "";
-              if (value.complement === base.complement) changes.complement = "";
-            }
-            patch(changes);
-          }}
+          // Outro logradouro de fato (a mesma rua com outra grafia não conta): número e complemento que não foram
+          // digitados agora (os gravados) saem.
+          onApply={(next) => patch(addressAfterCep(value, base, next, !sameStreet(next.street, value.street)))}
           focusRef={numberRef}
           streetRef={streetRef}
           error={errors.zip}
@@ -111,9 +107,10 @@ export function AddressSection({ tech, canEdit }: { tech: Technician; canEdit: b
             <Input
               ref={numberRef}
               value={value.number}
-              onChange={(e) => set("number", e.target.value)}
+              onChange={(e) => set("number", e.target.value.toUpperCase())}
               maxLength={PROFILE_LIMITS.addressNumber}
               autoComplete="off"
+              autoCapitalize="characters"
             />
           </Field>
           <Field label="Complemento">

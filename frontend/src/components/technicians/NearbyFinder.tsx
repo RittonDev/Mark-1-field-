@@ -7,16 +7,15 @@ import Link from "next/link";
 import { useId, useState } from "react";
 import { LocationPicker } from "@/components/LocationPicker";
 import { Tabs } from "@/components/motion";
-import { buttonClassName, Card, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, Pill, Select } from "@/components/ui";
+import { buttonClassName, Card, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, Select } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
-import { OPERATIONAL_STATUS } from "@/lib/constants";
 import { formatDate, formatMinutes, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { UFS } from "@/lib/onboarding";
-import { OPERATIONAL_STATUS_COLOR } from "@/lib/technicians";
 import { estimateDrive, formatKm } from "@/lib/tracking";
 import type { Location, NearbyResult, NearbyTechnician, TechnicianRegion } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
+import { OperationalPill } from "./ficha/OperationalPill";
 import { TechnicianLink } from "./TechnicianLink";
 import { useCopy } from "./useCopy";
 
@@ -73,7 +72,6 @@ function ResultRow({ tech, rank, placeLabel }: { tech: NearbyTechnician; rank: n
   const avatar = absoluteApiUrl(tech.avatar_url);
   const drive = estimateDrive(tech.distance_km);
   const first = tech.name.trim().split(/\s+/)[0];
-  const status = tech.operational_status ?? "active";
   // Convite pronto: os parceiros são chamados por atendimento, pelo WhatsApp (sem telefone, o WhatsApp
   // abre para escolher o contato).
   const invite = whatsappUrl(
@@ -93,11 +91,8 @@ function ResultRow({ tech, rank, placeLabel }: { tech: NearbyTechnician; rank: n
           >
             {tech.name}
           </TechnicianLink>
-          {status !== "active" ? (
-            <span title="Não recebe OS" className="inline-flex">
-              <Pill color={OPERATIONAL_STATUS_COLOR[status]}>{OPERATIONAL_STATUS[status]}</Pill>
-            </span>
-          ) : null}
+          {/* "Inativo" / "Bloqueado" com o motivo no title: não recebe OS. */}
+          <OperationalPill tech={tech} />
           {tech.is_active ? null : (
             <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-ink-muted ring-1 ring-line ring-inset">
               Sem acesso ao app

@@ -444,9 +444,17 @@ async def _data_error(_: Request, exc: DataError) -> JSONResponse:
 
 
 def _route_path(request: Request) -> str:
-    """O caminho da rota com os parâmetros por nome ("/public/onboarding/{token}"): o caminho
-    pedido pode levar o token de um link público."""
-    return str(getattr(request.scope.get("route"), "path", "") or "?")
+    """O caminho da rota com os parâmetros por nome ("/api/v1/public/onboarding/{token}"), nunca o
+    pedido (ele pode levar o token de um link público). A rota guarda o caminho sem o prefixo do
+    roteador incluído (API_PREFIX): ele volta na frente."""
+    template = str(getattr(request.scope.get("route"), "path", "") or "")
+    if not template:
+        return "?"
+    prefix = settings.API_PREFIX.rstrip("/")
+    inside = prefix and request.url.path.startswith(f"{prefix}/")
+    if inside and not template.startswith(f"{prefix}/"):
+        return prefix + template
+    return template
 
 
 @app.exception_handler(DBAPIError)
