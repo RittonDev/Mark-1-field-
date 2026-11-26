@@ -225,7 +225,10 @@ powershell -ExecutionPolicy Bypass -File scripts/dev-preview.ps1
 - O script troca o web de produção da porta 3001 por um servidor de desenvolvimento (`mc-web-dev`) e sobe o Expo (`mc-expo`).
 - A cada 2 s ele copia para dentro dos containers os arquivos alterados, porque o Docker daqui não monta pastas do drive D:.
 - Mudou `package.json`? O script reinstala as dependências e reinicia o container.
-- A API continua vindo do `docker compose` (porta 8000).
+- A API continua vindo do `docker compose` (porta 8000). Ela só muda quando o backend é publicado: até lá, a web e o
+  app da prévia ficam à frente dela (campos novos vazios, rotas novas com erro, partes novas da ficha do técnico só de
+  leitura). Publique a API logo depois de terminar uma entrega com backend novo (ver
+  [docs/API.md](docs/API.md#cadastro-v2-2026-11-25), **Publicação**).
 - `-Stop` desliga a pré-visualização e volta o web de produção.
 
 Se o celular não abrir o app: o Windows bloqueia conexões vindas de outros aparelhos quando o Wi-Fi está marcado como **rede pública**. Em *Configurações → Rede e Internet → Wi-Fi → (sua rede)*, marque **Rede privada**, ou libere o Docker Desktop no firewall.
@@ -287,7 +290,10 @@ O site recebe só um código de uso único (60 s) e troca pelos tokens, que nunc
 - **Logs sem tokens:** o WebSocket e os links de anexo levam o token na URL; o log da API grava `token=***`.
 - **Erros do banco sem dados pessoais:** o erro do banco vai para o log com o SQL sem os valores (`hide_parameters`), e
   valor que o banco recusa (texto maior que a coluna, caractere nulo) responde 422 "Algum valor está fora do tamanho ou
-  do formato aceito. Confira os campos." em qualquer rota, em vez de 500.
+  do formato aceito. Confira os campos." em qualquer rota, em vez de 500. O registro repetido (409), o valor recusado
+  (422) e a gravação desfeita por outra ao mesmo tempo (503 "Outra gravação ao mesmo tempo. Tente de novo") deixam no
+  log só o SQLSTATE, o nome da restrição e a rota (pelo nome dos parâmetros), nunca o texto do erro do banco, que
+  traria o valor (o CPF de um índice único, por exemplo).
 - **Texto livre sem invisíveis:** os nomes de aptidão, curso, instituição e ferramenta se gravam sem caracteres de
   controle nem invisíveis (espaço de largura zero, marcas de direção como U+202E), que fariam dois nomes iguais
   parecerem diferentes ou embaralhariam a ficha e o CSV; no app, a conferência é a mesma.
@@ -297,12 +303,16 @@ O site recebe só um código de uso único (60 s) e troca pelos tokens, que nunc
   redefiniu. O e-mail novo só vira o login depois de validado pelo link.
 - **Links por e-mail:** validar o e-mail e criar uma senha nova usam links de uso único. O banco guarda só o hash
   (SHA-256) e o token vai no fragmento da URL (`#token=`), que não chega a servidor nem a log. A validação vale 72 h e
-  a senha nova 2 h (a primeira senha, pela boas-vindas, 72 h). O "Esqueci minha senha" responde igual exista ou não o
-  e-mail e só manda o link ao técnico com acesso e o e-mail validado; os pedidos e as aberturas de link têm limite por
-  IP e por e-mail. Trocar a senha, gerar a provisória ou cortar o acesso invalidam os links de senha.
+  a senha nova 2 h (a primeira senha, pela boas-vindas, 72 h, e só para e-mail validado: sem a validação, a central
+  manda a senha provisória pelo WhatsApp). O "Esqueci minha senha" responde igual exista ou não o e-mail e só manda o
+  link ao técnico com acesso e o e-mail validado; os pedidos e as aberturas de link têm limite por IP e por e-mail.
+  Trocar a senha, gerar a provisória ou cortar o acesso invalidam os links de senha, e o pedido de antes disso que
+  ainda estava na fila não sai mais; com o acesso cortado, o link responde "Acesso ao app desativado".
 - **E-mails sem resposta e sem dados no log:** o remetente não recebe resposta (sem Reply-To, com `Auto-Submitted`), o
   log leva só o id e o modelo do e-mail, as credenciais do SMTP ficam só no `.env` e, em produção, a API não sobe com
-  `SMTP_SECURITY=none`. O CEP buscado também não fica no log (nem nas URLs do ViaCEP e da BrasilAPI).
+  `SMTP_SECURITY=none`. O CEP buscado também não fica no log (nem nas URLs do ViaCEP e da BrasilAPI). A saudação usa o
+  primeiro nome só quando ele é um nome (senão, "Olá."), e a ficha pública recusa nome com site, "www" ou números
+  ("Use só letras no nome"): o e-mail de validação vai para o endereço digitado e não pode levar um link alheio.
 
 ## Simular o rastreamento (desenvolvimento)
 

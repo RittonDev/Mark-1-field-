@@ -644,8 +644,10 @@ Perfil). Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do técnico",
 
 - **Dados pessoais e cadastrais**: Foto do perfil (a foto à direita; enviando ou removendo, o andamento), Dados
   pessoais (o nome), Endereço ("Cidade Exemplo/SP" ou "Não informado"), Contato ("(11) 98888-7777"; "Sem celular" ou,
-  com a troca de e-mail esperando o link, "E-mail pendente", em âmbar), Senha (abre "Trocar senha") e Mini biografia
-  (o texto numa linha ou "Não informada"; o leitor de tela fala só o começo).
+  com a troca de e-mail esperando o link, "E-mail pendente", em âmbar; com o envio de e-mail ligado e o login que recebe
+  e-mail ainda sem validação, "E-mail não validado", neutro: sem validar, o "Esqueci minha senha" não chega a ele),
+  Senha (abre "Trocar senha") e Mini biografia (o texto numa linha, com os parágrafos juntados, ou "Não informada"; o
+  leitor de tela fala só o começo).
 - **Dados financeiros e empresariais**: Dados empresariais (o nome fantasia, senão a razão social, senão o CNPJ; nada,
   "Não informados") e Formas de recebimento (a preferencial mascarada, "PIX CPF •••.456.789-••" ou "Banco Exemplo
   ••••5678-9"; sem nenhuma, "Nenhuma" em âmbar; o leitor de tela fala só o tipo da chave ou o banco).
@@ -659,7 +661,8 @@ Perfil). Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do técnico",
   "Desligadas", "Bloqueadas" em âmbar ou "Indisponíveis") e Sincronização (o mesmo resumo do Perfil).
 - A tela abre sempre, até sem internet: lendo, os resumos são esqueletos; sem rede, "Sem internet: para mudar o
   cadastro, conecte o aparelho."; com erro, "Não foi possível carregar seu cadastro." com **Tentar de novo**. Puxar para
-  atualizar relê o cadastro e o resumo das notificações. Com a API de antes do cadastro V2 (`hasCadastroV2` em
+  atualizar relê o cadastro e o resumo das notificações; voltar ao app (do navegador, do e-mail) com uma tela do
+  cadastro aberta também relê, sem esconder a tela. Com a API de antes do cadastro V2 (`hasCadastroV2` em
   `lib/profile.ts`), Dados pessoais, Endereço, Contato, Mini biografia, Dados empresariais e Formas de recebimento dizem
   "Indisponível"; Foto, Senha e o Perfil profissional seguem como antes.
 - Grupo, cargo, acesso ao app, situação na operação, serviços e jornada ficam com a central; o CPF, depois de
@@ -673,7 +676,9 @@ Dados pessoais, Endereço, Contato, Mini biografia e Dados empresariais
 **Salvar** do rodapé fixo. O app confere antes, com as regras e as mensagens do servidor (que confere de novo; aqui,
 com ponto final); só o que mudou é conferido, e um dado antigo fora da regra não trava outra mudança. Os erros aparecem
 depois do primeiro "Salvar", e o primeiro vai também para o rodapé. Sair com alteração não salva pergunta "Descartar as
-alterações?". Salvou: avisa e volta. Com a API de antes do cadastro V2 (`hasCadastroV2`), essas cinco telas e Formas de
+alterações?". Salvou: avisa e volta. Puxar a tela relê o cadastro, e voltar ao app com a tela aberta (o link do e-mail
+abre no navegador) também relê (`AppState` "active", em `useProfileLoad`), sem esconder a tela: o que o técnico já
+digitou fica. Com a API de antes do cadastro V2 (`hasCadastroV2`), essas cinco telas e Formas de
 recebimento mostram "Indisponível no momento" / "O servidor ainda não tem esta parte do cadastro. Tente de novo mais
 tarde." com **Tentar de novo**
 ([src/components/settings/CadastroUnavailable.tsx](src/components/settings/CadastroUnavailable.tsx)) e não gravam nada.
@@ -688,19 +693,29 @@ tarde." com **Tentar de novo**
     fale com a central.". Inválido: "CPF inválido."; em outro cadastro, o servidor responde "Este CPF já está em outro
     cadastro".
   - **RG**: número, órgão emissor e UF vão juntos, e os três vazios limpam: "Informe o número do RG.", "Confira o número
-    do RG.", "Informe o órgão emissor.", "Informe a UF do RG." e "UF inválida.". O órgão aceita só letras (a UF tem
-    campo próprio).
+    do RG.", "Informe o órgão emissor.", "Informe a UF do RG." e "UF inválida.". O órgão aceita letras, "/" e "-": ao
+    sair do campo, "SSP/SP" ou "SSP-SP" fica "SSP" e a UF vai para o campo UF quando ele está vazio (`issuerParts`, com
+    `splitIssuer` de `lib/constants.ts`); com outra UF no campo, vale a do campo e o fim sai. O órgão confere de 2 a 20
+    letras já separado.
   - **Data de nascimento**: o seletor vai de 90 a 18 anos atrás, sem o atalho "Hoje" (vazio, abre 30 anos atrás), com a
     dica "É preciso ter 18 anos ou mais."; fora disso, "O cadastro é para maiores de 18 anos: confira a data de
-    nascimento." ou "Confira a data de nascimento.".
-- **Endereço**: CEP, logradouro, número (até 10, "S/N" vale) e complemento (até 60), bairro, cidade e UF (obrigatórias
-  só aqui) e a região que atende. Logradouro, número e complemento vão juntos quando um muda. Não pede senha.
+    nascimento." ou "Confira a data de nascimento.". No iPhone, abre nas rodas de dia, mês e ano
+    (`iosDisplay="spinner"`), e **OK** fecha (com o campo vazio, grava a data que o seletor mostra); no Android, o
+    diálogo do sistema. Nas outras telas, o campo de data (`components/forms/DateField.tsx`) usa o calendário, que no
+    iPhone grava cada mudança e fecha no toque num dia do mês à vista (`isDayTap`, em `lib/dateField.ts`) ou no **OK**:
+    trocar o mês ou o ano pelo cabeçalho não fecha.
+- **Endereço**: CEP, logradouro, número (até 10, em maiúsculas, "S/N" vale; "SN" e "S / N" viram "S/N", como o
+  servidor grava, e "s/n" contra o "S/N" gravado não conta como mudança: `addressNumberOf`) e complemento (até 60),
+  bairro, cidade e UF (obrigatórias só aqui) e a região que atende. Logradouro, número e complemento vão juntos quando
+  um muda. Não pede senha.
   - **CEP** ([src/lib/cep.ts](src/lib/cep.ts)): com os 8 números, a tela busca o endereço (`GET /public/cep/{cep}`,
     logado), com "Buscando o CEP…" e o indicador no campo. Achou: preenche o que está livre (vazio, igual ao gravado ou
     posto pela busca anterior: `cepFill` de `lib/constants.ts`, a mesma regra da central e da ficha da homologação) e o
-    foco vai para o Número (no CEP geral, sem logradouro, para o Logradouro); trocou de rua, número e complemento que o
-    técnico não mexeu ficam vazios. O que ele digitou fica e, se difere, aparece "CEP de Rua Exemplo, Centro - Cidade
-    Exemplo-SP." com **Usar este endereço**. Não achou: "CEP não encontrado."; sem rede, fora do ar, pedidos demais ou a
+    foco vai para o Número (no CEP geral, sem logradouro, para o Logradouro). O CEP geral não mexe no que o técnico
+    digitou nem no gravado, mas esvazia o logradouro e o bairro que ainda são da busca anterior (o `stale` de
+    `cepFill`, também no **Usar este endereço**). Número e complemento que o técnico não mexeu só ficam vazios quando a
+    rua muda de fato (`sameStreet`: acento, maiúscula e espaços não contam). O que ele digitou fica e, se difere,
+    aparece "CEP de Rua Exemplo, Centro - Cidade Exemplo-SP." com **Usar este endereço**. Não achou: "CEP não encontrado."; sem rede, fora do ar, pedidos demais ou a
     API de antes: "Busca de CEP indisponível. Preencha o endereço.". Nada trava o Salvar, e a resposta de um CEP já
     trocado é ignorada. Ao salvar, o CEP incompleto dá "CEP inválido: use os 8 números.".
 - **Contato**: o celular (WhatsApp), sempre com DDD; o **Telefone secundário**, opcional (10 ou 11 números: "Informe o
