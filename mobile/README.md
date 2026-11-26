@@ -1142,7 +1142,7 @@ Saíram nesta versão: `components/EarningsView.tsx` (virou `components/billing/
 `billing/PixRow.tsx`) e o formulário de `app/meu-cadastro.tsx` (virou `app/configuracoes/`). No cadastro V2
 (25/11/2026), a tela Chave PIX (`app/configuracoes/pix.tsx`) virou só um redirecionamento para Formas de recebimento
 (`recebimento.tsx`), e saíram de `profileForm.ts` as regras dela (`PIX_SECTION`, `reviewPix`, `pixSummary`, `NO_PIX`) e
-o `NAME_SECTION` (o nome entrou em Dados pessoais, `PERSONAL_SECTION`).
+o `NAME_SECTION` (Dados pessoais agora é o `PERSONAL_SECTION`, com o nome, o CPF, o RG e o nascimento).
 
 ## Verificações
 
@@ -1159,10 +1159,14 @@ npx expo export --platform android
 ```
 
 As **sondas** (`tests/*.test.mjs`) testam as regras puras com o `node:test` (Node 22.6 ou mais, que tira os tipos do
-TypeScript): a chave PIX, as telas do cadastro, o perfil técnico e o salvar ao tocar, o gráfico das Estatísticas (com
-as caixas do eixo), as seções do Histórico e as datas e a área da oferta. O módulo testado não importa React nem React
-Native (só `import type`), e o gancho `tests/resolve-ts.mjs` resolve os imports relativos sem extensão (`./masks` →
-`./masks.ts`). Duas fogem disso: `ticket-hold.test.mjs` roda o `db.ts` de verdade (a OS segura na tela e o
+TypeScript): a chave PIX, as máscaras de documentos e contas e as regras de RG, órgão emissor e placa (`masks`), as
+telas do cadastro com o CEP, o e-mail, o veículo e os resumos do menu (`profile-form`), as formas de recebimento e os
+bancos (`payout-form`), a indisponibilidade (`unavailability`), o "Esqueci minha senha" (`forgot-password`), o perfil
+técnico e o salvar ao tocar, o gráfico das Estatísticas (com as caixas do eixo), as seções do Histórico e as datas e a
+área da oferta. A de indisponibilidade compara também as mensagens com as do servidor
+(`backend/app/services/unavailability.py`) e pula esse caso quando a pasta `backend` não está ao lado (num contêiner
+só com o `mobile`). O módulo testado não importa React nem React Native (só `import type`), e o gancho
+`tests/resolve-ts.mjs` resolve os imports relativos sem extensão (`./masks` → `./masks.ts`). Duas fogem disso: `ticket-hold.test.mjs` roda o `db.ts` de verdade (a OS segura na tela e o
 `pruneOld`) sobre o `node:sqlite` (Node 22.13 ou mais), com dublês de `expo-sqlite`, `react-native`, `./changes` e
 `./ops` registrados nela mesma; e `billing-offer.test.mjs` lê o código das telas do Faturamento e da oferta (que
 importam o React Native) e confere as regras que não podem voltar (o mês com nota, o Outro mês, a nota noutra
@@ -1214,13 +1218,28 @@ docker start -a mc-mobile-check
   uma OS mudada enquanto o aparelho não sincronizou ainda sai com o horário antigo.
 - **A API sobe antes do app.** A API desta entrega está publicada desde 20/11/2026. O perfil técnico, o ferramental,
   as Estatísticas, o Histórico e os meses do Faturamento precisam dela. Com uma API anterior, o app novo mostra
-  "Indisponível no momento" nas telas de Atendimento (e "Indisponível" nas linhas de Configurações), as mensagens de
-  servidor antigo nas Estatísticas e no Histórico, "—" no total do Perfil e "Não foi possível carregar o faturamento."
-  na aba Faturamento. Ali, o mês (`GET /me/earnings?month=`, que a API anterior tem) abre pelo **Outro mês** (ou por um
-  cartão) só com os meses guardados de uma busca anterior que deu certo; sem nada guardado, a aba fica sem cartões e
-  sem o Outro mês, e o mês e o "Enviar nota fiscal" ficam fora de alcance. Sem o `invoices` dos meses (API de antes
-  de 24/11/2026), o mês sem valores e com nota fica sem cartão e abre pelo Outro mês. A API nova com o app antigo
-  funciona.
+  "Indisponível no momento" nas telas do Perfil profissional (e "Indisponível" nas linhas de Configurações), as
+  mensagens de servidor antigo nas Estatísticas e no Histórico, "—" no total do Perfil e "Não foi possível carregar o
+  faturamento." na aba Faturamento. Ali, o mês (`GET /me/earnings?month=`, que a API anterior tem) abre pelo **Outro
+  mês** (ou por um cartão) só com os meses guardados de uma busca anterior que deu certo; sem nada guardado, a aba fica
+  sem cartões e sem o Outro mês, e o mês e o "Enviar nota fiscal" ficam fora de alcance. Sem o `invoices` dos meses
+  (API de antes de 24/11/2026), o mês sem valores e com nota fica sem cartão e abre pelo Outro mês. A API nova com o app
+  antigo funciona.
+- **O cadastro V2 (25/11/2026) também pede a API dele, que sobe antes do app.** Com uma API anterior (o
+  `GET /me/profile` sem os campos novos, `hasCadastroV2`), Dados pessoais, Endereço, Contato, Mini biografia, Dados
+  empresariais e Formas de recebimento mostram "Indisponível no momento" sem gravar nada (também o nome e o celular,
+  que a API anterior aceitava), Dias e horários fica só com os turnos, o Transporte sem o veículo, o Faturamento com a
+  chave PIX de antes, o "Esqueci minha senha" com o caminho de antes (pedir à central) e o Trocar senha sem "Esqueci a
+  senha atual". A API nova com o app antigo funciona, com três diferenças: ela ainda manda a chave PIX (a preferencial,
+  quando é PIX), mas gravar a chave recebe "Atualize o app: a chave PIX agora fica em Configurações › Formas de
+  recebimento"; o e-mail novo fica pendente até o link (o aviso do app antigo diz para entrar com ele antes disso); e o
+  endereço numa linha só vira o logradouro e limpa o número e o complemento.
+- **Envio de e-mail desligado** (servidor sem SMTP, `mail_enabled` falso): tudo funciona, mas o e-mail de Contato fica
+  só leitura e sem o estado da validação, o "Esqueci minha senha" manda pedir à central pelo WhatsApp e o "Esqueci a
+  senha atual" não aparece. A troca de e-mail e a senha nova ficam com a central (senha provisória).
+- **Bancos**: os 29 de `lib/banks.ts` são uma lista fixa no app, com os códigos de compensação do desenho, que precisam
+  ser conferidos na lista de participantes do STR (Banco Central) antes de publicar. Banco fora dela vai pelo nome e
+  pelo código que o técnico digita.
 - Rótulos e transições vêm das constantes copiadas da web, não de `GET /meta`; as ações exibidas vêm de
   `allowed_transitions` do servidor (recalculadas no aparelho só depois de uma ação offline).
 - Sem assinatura do cliente, edição dos dados da OS (`update`) ou abertura de OS pelo app.

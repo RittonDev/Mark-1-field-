@@ -1635,11 +1635,12 @@ histórico do cadastro. Motivo da senha e do histórico: uma conta invadida não
 - `DELETE /me/profile/photo` → `MyProfile`: tira a foto enviada e também a que veio do Field Control
   (`avatar_external_url`); sem foto, 200 sem histórico.
 
-**Chave PIX** (`core/pix.py`; os mesmos formatos em `formatPixKey` de `constants.ts`). Erro na chave: 422 com `label`
-"Chave PIX"; titular vazio: "Informe o nome do titular da conta" (`label` "Titular da conta"). No app (Configurações ›
-Chave PIX e a linha "Recebe no PIX" do Faturamento), a chave aparece mascarada por `maskPixKey` de `constants.ts`, a
-mesma regra da coluna "Mascarada" com "•" no lugar de "*" ("CPF •••.456.789-••"); a web segue com a de
-`frontend/src/lib/pix.ts` (com "*") no extrato do WhatsApp.
+**Chave PIX** (`core/pix.py`; os mesmos formatos em `formatPixKey` de `constants.ts`). Desde 25/11/2026 são as regras
+da chave de cada forma de recebimento PIX (`pix_key_type` e `pix_key`; erro na chave: 422 com `label` "Chave PIX";
+vazia: "Informe a chave PIX"; o titular e as contas: ver [Cadastro V2](#cadastro-v2-2026-11-25)). No app (Configurações
+› Formas de recebimento e a linha "Recebe no PIX" do Faturamento), a chave aparece mascarada por `maskPixKey` de
+`constants.ts`, a mesma regra da coluna "Mascarada" com "•" no lugar de "*" ("CPF •••.456.789-••"). O extrato do
+WhatsApp na web usa o mesmo texto mascarado (`payoutMethodText`) para todos os tipos de chave e para as contas.
 
 | Tipo | Fica gravada | Mostra | Mascarada | Erro |
 |---|---|---|---|---|
@@ -1650,25 +1651,36 @@ mesma regra da coluna "Mascarada" com "•" no lugar de "*" ("CPF •••.456.
 | `random` | 8-4-4-4-12 em minúsculas (32 hexadecimais) | como está | `…4000` | "Chave aleatória inválida: copie a chave do app do seu banco" |
 
 **Histórico do cadastro** (tabela `user_changes`): uma linha por gravação, `UserChange {id, created_at, via:
-"app"|"central", actor: Ref|null, changes: [{field, from, to}]}`, com o texto pronto para a tela:
-- `name`, `email`, `phone`, `job_title`, `home_city`, `home_state`, `coverage_area`, `address_line`,
+"app"|"central"|"ficha"|"link", actor: Ref|null, note: string|null, changes: [{field, from, to}]}` (`ficha`, `link`
+e `note` desde 25/11/2026: a aprovação na Homologação, o técnico pelo link do e-mail e o motivo da situação na
+operação), com o texto pronto para a tela:
+- `name`, `email`, `phone`, `job_title`, `home_city`, `home_state`, `coverage_area`, `address_line` (o logradouro),
   `address_district`, `address_zip`: o valor como está;
-- `team`: o nome do grupo; `is_active`: "Liberado" ou "Bloqueado"; `role`: o rótulo do papel; `work_schedule`:
-  "08:00–17:00, intervalo 12:00–13:00"; `services`: "12 serviços";
-- `pix`: a chave mascarada (`"CPF ***.456.789-**"`), null sem chave; `pix_holder`: o titular da conta;
+- `team`: o nome do grupo; `is_active`: "Liberado" ou "Sem acesso" (até 24/11/2026, "Bloqueado": a migração trocou as
+  linhas antigas); `role`: o rótulo do papel; `work_schedule`: "08:00–17:00, intervalo 12:00–13:00"; `services`: "12
+  serviços";
+- `pix`: a chave mascarada (`"CPF ***.456.789-**"`), null sem chave; `pix_holder`: o titular da conta (só nas linhas
+  de antes de 25/11/2026; agora são `payout_methods` e `payout_preferred`);
 - `avatar`: `to` "nova" na troca e null na remoção (`from` "anterior"); `password`: `to` "provisória" (Redefinir senha
-  em Técnicos), "definida pela central" (Usuários), "criada no app" (o técnico trocou a provisória) ou "trocada no app";
+  em Técnicos), "definida pela central" (Usuários), "criada no app" (o técnico trocou a provisória), "trocada no app"
+  e, pelo link do e-mail, "criada pelo link do e-mail" ou "redefinida pelo link do e-mail";
 - perfil técnico: `tools`, `availability`, `skills` e `education` com o que **saiu** em `from` e o que **entrou** em
-  `to`, e `transport` de → para (ver [Perfil técnico](#perfil-técnico-2026-11-19)).
+  `to`, e `transport` de → para (ver [Perfil técnico](#perfil-técnico-2026-11-19));
+- os campos do cadastro V2 (dados pessoais, empresa, veículo, e-mail pendente e validado, situação, formas de
+  recebimento, indisponibilidade, `application`, `password_link`): ver [Cadastro V2](#cadastro-v2-2026-11-25).
 
-E-mail e celular ficam em claro (a central desfaz uma troca indevida); a chave PIX, nunca. Gravam o histórico: o
-`PATCH /me/profile`, a foto e o `POST /auth/change-password` de técnico (via app, autor o técnico);
-`PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`,
-`DELETE /technicians/{id}/pix` e o `PATCH /users/{id}` de técnico (via central, com o autor). A importação por planilha
-e a do Field Control não entram, nem a aprovação da ficha (o perfil técnico que vem da ficha entra sem histórico).
+E-mail e celular ficam em claro (a central desfaz uma troca indevida); chave PIX e conta, nunca. Gravam o histórico: o
+`PATCH /me/profile`, o cancelamento da troca de e-mail, as rotas das formas de recebimento, a foto e o
+`POST /auth/change-password` de técnico
+(via app, autor o técnico); `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`,
+`POST /technicians/{id}/operational-status`, `POST /technicians/{id}/password-reset-link`, `POST`/`DELETE
+/technicians/{id}/photo`, `DELETE /technicians/{id}/payout-methods/{method_id}` e o `PATCH /users/{id}` de técnico (via
+central, com o autor); a aprovação da ficha (via ficha, autor: quem aprovou; a linha "Aprovado na homologação", e o
+perfil técnico que vem da ficha entra sem linha própria); e o link do e-mail (via link: a senha nova e o e-mail
+validado). A importação por planilha e a do Field Control não entram.
 
 Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisória)", "Senha definida pela central",
-"Senha criada no app" ou "Senha trocada no app".
+"Senha criada no app" ou "Senha trocada no app" (e as duas pelo link do e-mail).
 
 **Central.**
 - `GET /technicians/{id}` (Técnicos, ver) → `TechnicianOut`; 404 "Técnico não encontrado" (também para quem não é
