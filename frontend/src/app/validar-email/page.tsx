@@ -47,7 +47,7 @@ export default function VerifyEmailPage() {
         <PublicPanel
           icon={<Link2Off className="size-10 text-ink-muted" />}
           title="Link incompleto"
-          text="Abra de novo pelo botão “Confirmar e-mail”, no e-mail que você recebeu."
+          text="Abra de novo o link do e-mail que você recebeu."
         />
       ) : verify.data ? (
         <PublicPanel icon={<MailCheck className="size-10 text-brand" />} title="E-mail validado" text={doneText(verify.data)} />

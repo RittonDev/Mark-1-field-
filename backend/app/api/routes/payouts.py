@@ -1,5 +1,5 @@
-"""Valor de cada técnico por OS, o fechamento dos pagamentos e os ganhos do técnico (o mês e o
-Faturamento do app)."""
+"""Valor de cada técnico por OS, o fechamento dos pagamentos, as formas de recebimento dos técnicos
+(a central vê e remove) e os ganhos do técnico (o mês e o Faturamento do app)."""
 
 import uuid
 from datetime import date
@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from app.api.deps import DB, CurrentUser, access_user, require_roles
 from app.core.enums import PayoutStatus, UserRole
 from app.models import User
+from app.models.user_change import VIA_CENTRAL
 from app.schemas.payout import (
     EarningsMonths,
     MyEarnings,
@@ -19,6 +20,8 @@ from app.schemas.payout import (
     PayoutIn,
     PayoutOut,
 )
+from app.schemas.payout_method import PayoutMethodAdmin
+from app.services import payout_methods, user_history
 from app.services import payouts as svc
 from app.services import tickets as tickets_svc
 from app.services.realtime import commit_and_publish
@@ -75,10 +78,11 @@ async def list_payouts(
     concluded: bool | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
-    with_pix: bool = False,
+    with_payout_methods: bool = False,
 ) -> PayoutBoard:
-    """`with_pix=true`: `pix` com a chave PIX dos técnicos das linhas e do `technician_id` (só os
-    que têm chave); sem ele, `pix` vem vazio (Relatórios não pede)."""
+    """`with_payout_methods=true`: `payout_methods` com a forma preferencial (inteira) e quantas
+    formas têm os técnicos das linhas e do `technician_id` (o técnico sem forma fica fora); sem
+    ele, `payout_methods` vem vazio (Relatórios não pede)."""
     if any(d is not None and not 2000 <= d.year <= 2100 for d in (date_from, date_to)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, BAD_PERIOD)
     listed = await svc.list_payouts(
@@ -91,7 +95,7 @@ async def list_payouts(
         viewer=user,
     )
     ids: set[uuid.UUID] = set()
-    if with_pix:
+    if with_payout_methods:
         ids = {line.technician.id for line in listed.items}
         if technician_id is not None:
             ids.add(technician_id)
@@ -99,8 +103,33 @@ async def list_payouts(
         items=listed.items,
         summary=listed.summary,
         total_count=listed.total_count,
-        pix=await svc.pix_map(db, ids),
+        payout_methods=await payout_methods.summary_map(db, ids),
     )
+
+
+@router.get("/technicians/{user_id}/payout-methods", response_model=list[PayoutMethodAdmin])
+async def technician_payout_methods(
+    user_id: uuid.UUID, db: DB, _: PayoutsView
+) -> list[PayoutMethodAdmin]:
+    """As formas de recebimento do técnico (a preferencial primeiro, depois as mais novas), com a
+    chave e a conta inteiras para quem paga, "Titular diferente" (`holder_differs`) e o destino
+    novo (`destination_changed_at`). Quem cadastra é o técnico, no app. 404 se não for técnico."""
+    return await payout_methods.admin_list(db, user_id)
+
+
+@router.delete(
+    "/technicians/{user_id}/payout-methods/{method_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def remove_technician_payout_method(
+    user_id: uuid.UUID, method_id: uuid.UUID, db: DB, actor: PayoutsEdit
+) -> Response:
+    """A central remove uma forma (chave errada ou suspeita); quem cadastra uma nova é o técnico,
+    no app. Era a preferencial: a mais nova das que ficam passa a ser. Histórico via "central" e
+    aviso à gestão. 404 PAYOUT_METHOD_NOT_FOUND quando a forma não existe mais."""
+    user, changes = await payout_methods.remove_by_central(db, user_id, method_id, actor)
+    await db.commit()
+    await user_history.publish_changed(user, changes, via=VIA_CENTRAL, actor=actor)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/payouts/pay", response_model=PayoutChanged)

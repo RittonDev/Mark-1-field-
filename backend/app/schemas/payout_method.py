@@ -118,9 +118,7 @@ class PayoutMethodIn(BaseModel):
     account_number: str | None = Field(default=None, max_length=40, validate_default=True)
     account_digit: str | None = Field(default=None, max_length=4, validate_default=True)
     account_type: str | None = Field(default=None, max_length=32, validate_default=True)
-    holder_name: str | None = Field(
-        default=None, max_length=HOLDER_NAME_MAX, validate_default=True
-    )
+    holder_name: str | None = Field(default=None, max_length=HOLDER_NAME_MAX, validate_default=True)
     holder_document: str | None = Field(default=None, max_length=40, validate_default=True)
 
     # ------------------------------------------------------------------ PIX

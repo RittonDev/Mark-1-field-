@@ -1,7 +1,7 @@
-"""Busca de CEP dos formulários de endereço (os 6 lugares: ficha pública, Técnicos, Clientes, Locais,
-Empresa e o Endereço no app). Pública: a ficha chama sem login e o limite é por IP; a central e o
-app chamam logados e o limite é por pessoa (a central inteira pode sair pelo mesmo IP). A regra de
-preencher o formulário fica nas telas (cepFill de lib/constants.ts)."""
+"""Busca de CEP dos formulários de endereço (os 6 lugares: ficha pública, Técnicos, Clientes,
+Locais, Empresa e o Endereço no app). Pública: a ficha chama sem login e o limite é por IP; a
+central e o app chamam logados e o limite é por pessoa (a central inteira pode sair pelo mesmo
+IP). A regra de preencher o formulário fica nas telas (cepFill de lib/constants.ts)."""
 
 from typing import Annotated
 

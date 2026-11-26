@@ -135,6 +135,17 @@ export async function login(email: string, password: string, apiUrl: string) {
   await session.signIn(data);
 }
 
+/**
+ * "Esqueci minha senha": POST /auth/forgot-password, sem login. A resposta é a mesma (202) exista ou não o e-mail; o link
+ * (2 h, uso único) só vai para técnico com acesso e e-mail validado e abre a página web "Definir nova senha", que derruba
+ * as sessões. Com `apiUrl` (a tela sem login, no desenvolvimento), grava o servidor antes, como o login. Recusas que a
+ * tela trata (lib/forgotPassword.ts): 404 (a API de antes, sem a rota), 429 (pedidos demais) e 503 MAIL_DISABLED.
+ */
+export async function requestPasswordReset(email: string, apiUrl?: string): Promise<void> {
+  if (apiUrl) await session.setApiUrl(apiUrl);
+  await request<unknown>("/auth/forgot-password", { method: "POST", body: { email: email.trim() }, auth: false });
+}
+
 export async function logout() {
   // Sair encerra a jornada: nada é coletado depois do logout. Com sinal ruim, não espera mais que
   // alguns segundos: o fim da jornada que não chegou ao servidor fica guardado e vai no próximo login,

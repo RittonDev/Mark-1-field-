@@ -708,6 +708,8 @@ async def nearby(
                 "email": u.email,
                 "phone": u.phone,
                 "is_active": u.is_active,
+                # Inativo e Bloqueado aparecem (a web mostra o selo): não recebem OS.
+                "operational_status": u.operational_status,
                 "avatar_url": avatar_url(u),
                 "base_city": u.base_city,
                 "base_state": u.base_state,

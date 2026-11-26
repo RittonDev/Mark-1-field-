@@ -13,12 +13,16 @@ from app.core.enums import ApplicationStatus
 from app.core.security import InvalidToken, create_token, decode_token
 from app.db.base import utcnow
 from app.models import OnboardingInvite, TechnicianApplication
+from app.models.user_change import VIA_FICHA
+from app.schemas.account import EmailQueued
 from app.schemas.onboarding import (
     ApplicationApprove,
+    ApplicationApproved,
     ApplicationDetail,
     ApplicationIn,
     ApplicationReceived,
     ApplicationReject,
+    ApplicationReopen,
     ApplicationSummary,
     InviteCheck,
     InviteCreate,
@@ -28,7 +32,7 @@ from app.schemas.onboarding import (
     catalog,
 )
 from app.schemas.user import UserOut
-from app.services import login_guard
+from app.services import account, login_guard, mail, user_history
 from app.services import onboarding as svc
 
 # Formulário que o técnico abre pelo link, sem login.
@@ -47,6 +51,8 @@ TOO_MANY = "Muitas fichas enviadas por este link. Tente mais tarde."
 # reutilizável (o que circula em grupo de WhatsApp) por dia.
 MAX_PER_IP_HOUR = 5
 MAX_PER_INVITE_DAY = 100
+# Reenvio da validação do e-mail da ficha pela gestão, por hora.
+MAX_RESENDS_HOUR = 5
 
 
 @public.get("/catalog", response_model=OnboardingCatalog)
@@ -67,6 +73,9 @@ async def check_invite(token: str, db: DB) -> InviteCheck:
 async def submit_application(
     token: str, body: ApplicationIn, db: DB, request: Request
 ) -> ApplicationReceived:
+    """Recebe a ficha e põe na fila o link de validação do e-mail (sai logo depois do commit):
+    `email_verification` diz se foi para a fila, se o envio está desligado ou se o endereço não
+    recebe mensagens."""
     try:
         # Trava a linha do convite: duas fichas juntas no link de uso único não passam as duas.
         invite = await svc.active_invite(db, token, lock=True)
@@ -83,9 +92,12 @@ async def submit_application(
             headers={"Retry-After": str(exc.retry_after)},
         ) from exc
     application = await svc.submit(db, invite, body)
+    row, verification = await svc.queue_verification(db, application)
     await db.commit()
+    if row is not None and verification == "queued":
+        mail.deliver_soon([row.id])
     await svc.publish_submitted(application)
-    return ApplicationReceived(protocol=svc.protocol(application))
+    return ApplicationReceived(protocol=svc.protocol(application), email_verification=verification)
 
 
 # ------------------------------------------------------------------ convites
@@ -150,6 +162,8 @@ async def pending_count(db: DB, _: OnboardingView) -> dict[str, int]:
 def _detail(application: TechnicianApplication) -> ApplicationDetail:
     out = ApplicationDetail.model_validate(application)
     out.invite_label = application.invite.label if application.invite else None
+    out.has_password = application.password_hash is not None
+    out.purge_at = svc.purge_at(application)
     if application.photo_key:
         token = create_token(f"application:{application.id}", "download", timedelta(minutes=30))
         out.photo_url = (
@@ -190,23 +204,85 @@ async def delete_application(application_id: uuid.UUID, db: DB, _: OnboardingDel
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/applications/{application_id}/approve", response_model=UserOut)
+@router.post("/applications/{application_id}/approve", response_model=ApplicationApproved)
 async def approve_application(
-    application_id: uuid.UUID, body: ApplicationApprove, db: DB, user: OnboardingEdit
-) -> UserOut:
-    """Aprova: o técnico entra na base e já acessa o app com o e-mail e a senha da ficha."""
-    application = await svc.get_application(db, application_id)
-    technician = await svc.approve(db, application, body, user)
+    application_id: uuid.UUID,
+    db: DB,
+    user: OnboardingEdit,
+    body: ApplicationApprove | None = None,
+) -> ApplicationApproved:
+    """Aprova num passo (corpo opcional): o técnico entra na base com tudo o que a ficha coletou e
+    já acessa o app com o e-mail e a senha da ficha (sem senha, a boas-vindas leva o link para
+    criar). CPF já de outro usuário: 409. `welcome` diz se a boas-vindas foi para a fila."""
+    application = await svc.get_application(db, application_id, lock=True)
+    approval = await svc.approve(db, application, body or ApplicationApprove(), user)
     await db.commit()
+    welcome = approval.welcome
+    if welcome is not None and approval.welcome_status == "queued":
+        mail.deliver_soon([welcome.id])
+    technician = approval.user
+    await user_history.publish_changed(technician, approval.changes, via=VIA_FICHA, actor=user)
+    await account.publish_onboarding_updated(application, "approved")
     await db.refresh(technician, ["team"])
-    return UserOut.model_validate(technician)
+    return ApplicationApproved(
+        technician=UserOut.model_validate(technician),
+        welcome=mail.queued(welcome, approval.welcome_status),
+    )
 
 
 @router.post("/applications/{application_id}/reject", response_model=ApplicationDetail)
 async def reject_application(
     application_id: uuid.UUID, body: ApplicationReject, db: DB, user: OnboardingEdit
 ) -> ApplicationDetail:
-    application = await svc.get_application(db, application_id)
+    """Reprova com o motivo (o candidato não vê): a senha da ficha sai e a exclusão automática
+    conta daqui."""
+    application = await svc.get_application(db, application_id, lock=True)
     await svc.reject(db, application, body.reason, user)
     await db.commit()
+    await db.refresh(application, ["reviewed_by"])
+    await account.publish_onboarding_updated(application, "rejected")
     return _detail(application)
+
+
+@router.post("/applications/{application_id}/reopen", response_model=ApplicationDetail)
+async def reopen_application(
+    application_id: uuid.UUID, body: ApplicationReopen, db: DB, user: OnboardingEdit
+) -> ApplicationDetail:
+    """Reabre a ficha reprovada para uma nova análise, com o motivo (3 a 500). 409: não está
+    reprovada, já há usuário com o e-mail ou o CPF dela, ou há outra ficha da pessoa em análise ou
+    aprovada."""
+    application = await svc.get_application(db, application_id, lock=True)
+    await svc.reopen(db, application, body.reason, user)
+    await db.commit()
+    await db.refresh(application, ["reviewed_by", "reopened_by"])
+    await account.publish_onboarding_updated(application, "reopened")
+    return _detail(application)
+
+
+@router.post(
+    "/applications/{application_id}/email-verification",
+    response_model=EmailQueued,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def resend_application_verification(
+    application_id: uuid.UUID, db: DB, user: OnboardingEdit
+) -> EmailQueued:
+    """Reenvia o link de validação do e-mail da ficha: só a pendente e ainda não validada (409);
+    até 5 por hora (429). Com o envio desligado, "not_configured" (nada sai)."""
+    application = await svc.get_application(db, application_id)
+    svc.check_resend(application)
+    try:
+        await login_guard.hit(
+            "mail-resend-application", str(application.id), MAX_RESENDS_HOUR, 3600
+        )
+    except login_guard.RateLimited as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            str(exc),
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    row, queued = await svc.queue_verification(db, application, user)
+    await db.commit()
+    if row is not None and queued == "queued":
+        mail.deliver_soon([row.id])
+    return mail.queued(row, queued)

@@ -6,6 +6,7 @@ from sqlalchemy import func, or_, select, text
 
 from app.api.deps import DB, AdminUser, StaffUser, TicketManagerUser, access_user
 from app.core.access import channel_metadata
+from app.core.config import settings
 from app.core.enums import TicketPriority, UserRole
 from app.core.labels import enum_options
 from app.models import (
@@ -54,11 +55,14 @@ ServiceTypesEdit = access_user("setup.service_types", level="edit")
 
 @router.get("/meta")
 async def meta() -> dict:
-    """Status, transições, prioridades e rótulos. Público (o app lê antes do login)."""
+    """Status, transições, prioridades e rótulos. Público (o app lê antes do login).
+    `mail_enabled`: o envio de e-mail está ligado (SMTP configurado); desligado, a central segue
+    pelo WhatsApp e pela senha provisória."""
     return {
         **workflow_metadata(),
         **enum_options(),
         "access_channels": channel_metadata(),
+        "mail_enabled": settings.mail_enabled,
     }
 
 

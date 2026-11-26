@@ -1,7 +1,7 @@
 """Formas de recebimento do técnico parceiro (pago por chamado): chaves PIX e contas bancárias.
 
-- Quem cadastra e muda é o técnico, no app (services/my_profile.py confere a senha antes, com o mesmo
-  contador da troca de senha, e fecha tudo com a senha provisória); a central vê e remove em
+- Quem cadastra e muda é o técnico, no app (services/my_profile.py confere a senha antes, com o
+  mesmo contador da troca de senha, e fecha tudo com a senha provisória); a central vê e remove em
   Pagamentos (GET/DELETE /technicians/{id}/payout-methods), com histórico via "central".
 - Com a lista não vazia, sempre uma é a preferencial (onde a central paga): a 1ª nasce preferencial;
   `preferred` ou "Tornar preferencial" movem (preferred_since na nova, null na antiga); excluir a

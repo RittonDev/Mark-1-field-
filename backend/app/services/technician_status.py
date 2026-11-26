@@ -94,9 +94,7 @@ def unavailable_between(stored: Iterable[Any] | None, first: date, last: date) -
     return next((p for p in unavailability.current(stored, first) if p["start"] <= end), None)
 
 
-def unavailable_for_visit(
-    user: User, start: datetime | None, end: datetime | None
-) -> dict | None:
+def unavailable_for_visit(user: User, start: datetime | None, end: datetime | None) -> dict | None:
     """O período de indisponibilidade que toca os dias da visita (sem horário: hoje)."""
     first, last = unavailability.days_of(start, end)
     return unavailable_between(user.unavailability, first, last)
@@ -124,9 +122,7 @@ async def _locked(db: AsyncSession, user_id: uuid.UUID) -> User:
 
 
 def _same(status: OperationalStatus) -> CodedError:
-    return CodedError(
-        SAME_STATUS.format(label=LABELS[status.value].lower()), SAME_STATUS_CODE, 409
-    )
+    return CodedError(SAME_STATUS.format(label=LABELS[status.value].lower()), SAME_STATUS_CODE, 409)
 
 
 async def apply(

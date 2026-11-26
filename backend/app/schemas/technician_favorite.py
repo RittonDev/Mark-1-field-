@@ -6,6 +6,7 @@ import uuid
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic_core import PydanticCustomError
 
+from app.core.enums import OperationalStatus
 from app.schemas.common import Ref
 
 # Tamanho máximo da nota (do fixado) ou do motivo (do tirado da lista).
@@ -19,6 +20,8 @@ class FavoriteTechnician(BaseModel):
     phone: str | None
     avatar_url: str | None
     is_active: bool
+    # Situação na operação: Inativo e Bloqueado ficam fora do automático (o fixado continua).
+    operational_status: OperationalStatus = OperationalStatus.ACTIVE
     on_shift: bool
     open_tickets: int
     base_city: str | None

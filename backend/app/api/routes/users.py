@@ -6,13 +6,14 @@ from sqlalchemy import and_, func, or_, select
 
 from app.api.deps import DB, MANAGER_ROLES, NoTechnicianUser, TicketManagerUser, access_user
 from app.core import permissions
-from app.core.enums import UserRole
+from app.core.enums import AccountTokenPurpose, OperationalStatus, UserRole
 from app.core.permissions import PROFILE_ROLES
 from app.core.security import hash_password_async
 from app.db.base import utcnow
 from app.models import Customer, Team, Ticket, User
 from app.models.access import AccessProfile
 from app.models.user_change import VIA_CENTRAL
+from app.schemas import personal
 from app.schemas.access import UserAccessIn
 from app.schemas.user import (
     AssignableUser,
@@ -24,8 +25,8 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services import access as access_svc
+from app.services import account, unavailability, user_history
 from app.services import tickets as tickets_svc
-from app.services import user_history
 from app.services.errors import AccessDenied
 from app.services.realtime import commit_and_publish
 from app.services.workflow import OPEN_STATUSES
@@ -127,6 +128,9 @@ async def list_users(
 async def assignable_users(
     db: DB, _: TicketManagerUser, team_id: uuid.UUID | None = None
 ) -> list[AssignableUser]:
+    """Quem pode ser escolhido na OS: só com acesso ao app. Técnico Inativo ou Bloqueado vem com a
+    situação e o motivo (a web mostra e não deixa escolher; quem já está na OS fica); os períodos
+    de indisponibilidade que não terminaram vêm para a web avisar (não travam a escolha)."""
     load = (
         select(Ticket.assignee_id, func.count().label("n"))
         .where(Ticket.status.in_(OPEN_STATUSES), Ticket.assignee_id.is_not(None))
@@ -145,17 +149,26 @@ async def assignable_users(
     if team_id is not None:
         stmt = stmt.where(User.team_id == team_id)
     rows = (await db.execute(stmt)).all()
-    return [
-        AssignableUser(
-            id=u.id,
-            name=u.name,
-            role=u.role,
-            team_id=u.team_id,
-            team_name=u.team.name if u.team else None,
-            open_tickets=n,
+    today = personal.local_today()
+    out: list[AssignableUser] = []
+    for u, n in rows:
+        status_ = u.operational_status or OperationalStatus.ACTIVE
+        out.append(
+            AssignableUser(
+                id=u.id,
+                name=u.name,
+                role=u.role,
+                team_id=u.team_id,
+                team_name=u.team.name if u.team else None,
+                open_tickets=n,
+                operational_status=status_,
+                operational_reason=(
+                    u.operational_reason if status_ != OperationalStatus.ACTIVE else None
+                ),
+                unavailability=unavailability.current(u.unavailability, today),
+            )
         )
-        for u, n in rows
-    ]
+    return out
 
 
 @router.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -303,6 +316,13 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: Users
     # (ex.: a conta vazou e o admin trocou a senha).
     if deactivated or REVOKING_FIELDS.intersection(changed):
         user.sessions_revoked_at = utcnow()
+    # Senha definida aqui ou acesso cortado: os links de senha mandados por e-mail deixam de valer.
+    if deactivated or password:
+        await account.revoke(db, user_id=user.id, purpose=AccountTokenPurpose.RESET_PASSWORD)
+    # E-mail de técnico trocado: o login muda na hora, a validação recomeça e o link vai para o
+    # novo (sai depois do commit), como em Técnicos.
+    if "email" in fields and new_role == UserRole.TECHNICIAN:
+        await account.central_email_changed(db, user, actor)
     history: list[dict] = []
     if history_before is not None:
         history = await user_history.track(

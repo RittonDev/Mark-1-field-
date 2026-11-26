@@ -12,6 +12,7 @@ import {
   cepLineFill,
   companyLineFill,
   companyLineFromCep,
+  companyLineWithCep,
   NO_ADDRESS,
 } from "../src/lib/address.ts";
 
@@ -172,5 +173,21 @@ describe("companyLineFill", () => {
   it("CEP geral: confere pela cidade", () => {
     assert.equal(companyLineFill("Rua Exemplo, 10 - Centro - Cidade Exemplo - SP", GENERAL).differs, false);
     assert.equal(companyLineFill("Rua Exemplo, 10 - Centro - Outra Cidade - SP", GENERAL).differs, true);
+  });
+});
+
+describe("companyLineWithCep (o CEP digitado vai para a linha ao salvar, com a busca ou sem ela)", () => {
+  it("sem CEP na linha: acrescenta no fim, sem separador repetido", () => {
+    assert.equal(companyLineWithCep("Rua Exemplo, 10 - Cidade Exemplo - SP", "13000-000"), "Rua Exemplo, 10 - Cidade Exemplo - SP, 13000-000");
+    assert.equal(companyLineWithCep("Rua Exemplo, 10 - ", "13000000"), "Rua Exemplo, 10, 13000-000");
+  });
+
+  it("com outro CEP: troca o último; com o mesmo (até sem hífen), a linha fica como está", () => {
+    assert.equal(companyLineWithCep("Rua Exemplo, 10 - SP, 13000-001", "13000-000"), "Rua Exemplo, 10 - SP, 13000-000");
+    assert.equal(companyLineWithCep("Rua Exemplo, 10 - SP 13000000", "13000-000"), "Rua Exemplo, 10 - SP 13000000");
+  });
+
+  it("linha vazia: só o CEP", () => {
+    assert.equal(companyLineWithCep("", "13000-000"), "13000-000");
   });
 });

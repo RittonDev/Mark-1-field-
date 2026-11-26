@@ -92,7 +92,17 @@ from app.schemas.ticket import (
     WorklogCreate,
     format_ticket_code,
 )
-from app.services import client_report, durations, geo, schedule, search, sla, storage, tag_rules
+from app.services import (
+    client_report,
+    durations,
+    geo,
+    schedule,
+    search,
+    sla,
+    storage,
+    tag_rules,
+    technician_status,
+)
 from app.services import field as field_rules
 from app.services import payouts as payouts_svc
 from app.services.errors import (
@@ -898,12 +908,18 @@ async def close_pending_offers(
 
 
 async def close_technician_offers(
-    db: AsyncSession, technician_id: uuid.UUID, actor: User | None, *, now: datetime | None = None
+    db: AsyncSession,
+    technician_id: uuid.UUID,
+    actor: User | None,
+    *,
+    now: datetime | None = None,
+    note: str | None = None,
 ) -> int:
     """O técnico ficou sem acesso ao app (desativado em Técnicos ou em Usuários, ou fora do papel
-    de técnico): ninguém responde as ofertas dele, que fecham como canceladas pela central (e
-    reativar não as traz de volta). Trava as OS, em ordem de id, antes das ofertas: a ordem do
-    aceite. Os avisos saem no commit da rota (`commit_and_publish`). Devolve quantas fecharam.
+    de técnico) ou saiu de Ativo na operação (`note` diz qual: o padrão é OFFER_NO_ACCESS_NOTE):
+    ninguém responde as ofertas dele, que fecham como canceladas pela central (e reativar não as
+    traz de volta). Trava as OS, em ordem de id, antes das ofertas: a ordem do aceite. Os avisos
+    saem no commit da rota (`commit_and_publish`). Devolve quantas fecharam.
 
     Chame antes de mexer no usuário: assim a linha dele trava depois das OS, como no aceite. O
     que já estiver pendente na sessão vai ao banco antes (a releitura das ofertas traz o técnico
@@ -953,7 +969,7 @@ async def close_technician_offers(
             actor,
             reason=OfferCancelReason.CENTRAL,
             now=now,
-            note=OFFER_NO_ACCESS_NOTE,
+            note=note or OFFER_NO_ACCESS_NOTE,
         )
     await db.flush()
     return len(offers)
@@ -987,13 +1003,17 @@ async def _assign(
 
     `via`: como o técnico entrou na OS, gravado no evento (ex.: "offer", aceitou a oferta).
     Definir o técnico fecha as ofertas pendentes da OS (o aceite fecha as outras antes, como
-    "outro técnico aceitou")."""
+    "outro técnico aceitou"). O técnico que entra precisa estar Ativo na operação
+    (technician_status.ensure_can_receive); salvar a OS com o mesmo responsável não confere de
+    novo, e a indisponibilidade não trava (a web avisa)."""
     prev_id = ticket.assignee_id
     assignee: User | None = None
     if assignee_id is not None:
         assignee = await db.get(User, assignee_id)
         if assignee is None or not assignee.is_active or not assignee.is_staff:
             raise WorkflowError("Responsável inválido ou inativo")
+        if assignee_id != prev_id:
+            technician_status.ensure_can_receive(assignee)
 
     team_changed = False
     if team_id is not None and team_id != ticket.team_id:
@@ -1211,6 +1231,9 @@ async def _set_helpers(
     removed = [h for user_id, h in before.items() if user_id not in after]
     if not added and not removed:
         return False
+    # Quem entra precisa estar Ativo na operação; quem já estava na visita fica.
+    for user in added:
+        technician_status.ensure_can_receive(user)
     if added:
         # Quem entra na visita precisa estar livre no horário (como o responsável).
         await schedule.check_slot(
@@ -1325,6 +1348,14 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     helpers = await _helper_users(
         db, [] if is_requester else data.helper_ids, data.assignee_id, actor
     )
+    # Todos entram agora e precisam estar Ativos na operação; o responsável também (_assign
+    # confere de novo), antes de a OS ganhar número.
+    for helper in helpers:
+        technician_status.ensure_can_receive(helper)
+    if data.assignee_id is not None and not is_requester:
+        chosen = await db.get(User, data.assignee_id)
+        if chosen is not None:
+            technician_status.ensure_can_receive(chosen)
     # Antes de gravar: uma OS barrada por conflito não pode consumir número.
     await schedule.check_slot(
         db,

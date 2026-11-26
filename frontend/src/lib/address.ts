@@ -109,8 +109,11 @@ export function cepFromLine(line: string): string {
   return lastCep(line)?.text ?? "";
 }
 
-/** A linha com este CEP no fim: troca o último CEP escrito nela ou acrescenta ", 01001-000". */
-function lineWithCep(line: string, cep: string): string {
+/**
+ * Configurações › Empresa: a linha com este CEP no fim (troca o último CEP escrito nela ou acrescenta ", 01001-000"). O
+ * campo CEP não é gravado à parte: é assim que o CEP digitado chega ao endereço, com a busca ou sem ela.
+ */
+export function companyLineWithCep(line: string, cep: string): string {
   const text = cepText(cep);
   const current = lastCep(line);
   if (current) return current.text === text ? line : `${line.slice(0, current.start)}${text}${line.slice(current.end)}`;
@@ -130,6 +133,6 @@ export function companyLineFill(line: string, found: CepAddress): { next: { line
   }
   const key = found.street || found.city;
   if (!fold(line).includes(fold(key))) return { next: null, differs: true };
-  const withCep = lineWithCep(line, found.cep);
+  const withCep = companyLineWithCep(line, found.cep);
   return { next: withCep === line ? null : { line: withCep, caret: withCep.length }, differs: false };
 }

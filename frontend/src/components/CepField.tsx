@@ -61,7 +61,8 @@ export type CepFieldProps = CepFieldCommon &
          *  num campo, em `street` (Clientes, Locais). */
         mode: CepMode;
         address: AddressSlots;
-        /** O endereço gravado (campo igual a ele é livre para o CEP). Sem ele, vale o da abertura do formulário. */
+        /** O endereço gravado, ou o que a pessoa não digitou (campo igual a ele é livre para o CEP). Sem ele, vale o da
+         *  abertura do formulário. */
         opened?: AddressSlots;
         /** O formulário grava os campos (e, em "parts", esvazia Número e Complemento livres quando o logradouro mudou). */
         onApply: (next: AddressSlots, info: CepApplyInfo) => void;
@@ -231,7 +232,7 @@ export function CepField(props: CepFieldProps) {
             inputMode="numeric"
             autoComplete="postal-code"
             placeholder="00000-000"
-            maxLength={9}
+            // Sem maxLength: colar "01.001-000" (10 caracteres) perderia o último número; a máscara já para em 9.
             aria-invalid={error ? true : inputProps?.["aria-invalid"]}
             aria-describedby={describedBy}
             className={clsx(lookup.state === "loading" && "pr-9", inputClassName)}

@@ -17,10 +17,12 @@ serviço), e responde "Aceitar por R$ X" ou "Recusar". Não existe contrapropost
   As outras ofertas pendentes da OS fecham como canceladas ("outro técnico aceitou").
 - O técnico fica sempre com o valor que aceitou: quem já tem valor pago nesta OS (foi o técnico
   dela antes) não recebe oferta dela e, pago depois do envio, não aceita.
-- Definir o técnico na mão, colocar o técnico da oferta na visita, deixá-lo sem acesso ao app e
-  cancelar, resolver ou fechar a OS também fecham as pendentes (os ganchos ficam em
-  services/tickets.py). Reenviar para quem já tem oferta pendente (ou vencida) da OS substitui a
-  anterior.
+- Definir o técnico na mão, colocar o técnico da oferta na visita, deixá-lo sem acesso ao app ou
+  fora de Ativo na operação (services/technician_status.py) e cancelar, resolver ou fechar a OS
+  também fecham as pendentes (os ganchos ficam em services/tickets.py). Reenviar para quem já tem
+  oferta pendente (ou vencida) da OS substitui a anterior.
+- Só recebe oferta quem tem acesso ao app, está Ativo e não está indisponível nos dias da visita
+  (sem agenda: hoje); o aceite de quem saiu de Ativo é OFFER_UNAVAILABLE.
 - Prazo vencido não tem rotina: a pendente com `expires_at` passado tem o estado "expired".
 - Não há chat no app: a conversa com o técnico é pelo WhatsApp. Ele fica sabendo pelo tempo real
   (ticket.offer só para ele) e pelo texto que a central cola no grupo dos técnicos.
@@ -39,6 +41,7 @@ from sqlalchemy.orm import noload, selectinload
 from app.core.enums import (
     OfferCancelReason,
     OfferStatus,
+    OperationalStatus,
     PayoutStatus,
     TicketEventType,
     UserRole,
@@ -57,6 +60,7 @@ from app.schemas.offer import (
 from app.schemas.payout import PayoutIn
 from app.schemas.ticket import assume_local, format_ticket_code
 from app.services import payouts as payouts_svc
+from app.services import technician_status
 from app.services import tickets as tickets_svc
 from app.services.errors import NotFound, OfferError, PermissionDenied, WorkflowError
 from app.services.workflow import OPEN_STATUSES
@@ -420,8 +424,9 @@ async def _paid_technicians(
 
 
 async def _technicians(db: AsyncSession, ticket: Ticket, ids: list[uuid.UUID]) -> list[User]:
-    """Os técnicos da oferta, sem repetir: técnicos de campo ativos (o inativo não entra no app),
-    que ainda não estão na OS e sem valor pago nela."""
+    """Os técnicos da oferta, sem repetir: técnicos de campo com acesso ao app, Ativos na operação
+    (Inativo e Bloqueado não recebem OS) e disponíveis nos dias da visita (sem agenda: hoje), que
+    ainda não estão na OS e sem valor pago nela."""
     wanted = list(dict.fromkeys(ids))
     found = {u.id: u for u in await db.scalars(select(User).where(User.id.in_(wanted)))}
     helpers = {h.id for h in ticket.helpers}
@@ -437,6 +442,8 @@ async def _technicians(db: AsyncSession, ticket: Ticket, ids: list[uuid.UUID]) -
             raise WorkflowError(
                 f"{user.name} está sem acesso ao app: libere o acesso em Técnicos antes de ofertar"
             )
+        technician_status.ensure_can_receive(user)
+        technician_status.ensure_available(user, ticket.scheduled_start, ticket.scheduled_end)
         if user.id in helpers:
             raise WorkflowError(f"{user.name} já está na OS")
         if user.id in paid:
@@ -734,6 +741,10 @@ async def accept(
     if offer.status == OfferStatus.DECLINED:
         raise _error(ANSWERED)
     _check_answerable(offer, ticket, now)
+    # Saiu de Ativo na operação (a mudança fecha as ofertas em aberto; esta pega a que escapou):
+    # para ele, só "não está mais disponível" (o técnico nunca vê a situação).
+    if technician.operational_status != OperationalStatus.ACTIVE:
+        raise _error(UNAVAILABLE)
     if offer.viewed_at is None:
         raise _error(NOT_VIEWED, status_code=422)
     # Pago depois do envio: o valor pago não muda e ele não ficaria com o valor da oferta. A

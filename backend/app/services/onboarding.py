@@ -1,25 +1,40 @@
-"""Homologação de técnicos: convites, ficha pública e análise (aprovar/reprovar).
+"""Homologação de técnicos: convites, ficha pública e análise (aprovar, reprovar, reabrir).
+
+- Ficha: ao enviar, o link de validação do e-mail vai para a fila (reason "signup"); a gestão
+  reenvia enquanto ela está em análise.
+- Aprovar é um passo só: cria o técnico com tudo o que a ficha coletou (dados pessoais, endereço em
+  partes, empresa, veículo, áreas, a validação do e-mail e o perfil técnico), grava a linha
+  "Aprovado na homologação" no histórico do cadastro (via ficha) e põe a boas-vindas na fila.
+- Reprovar guarda o motivo e apaga a senha da ficha. A reprovada pode ser reaberta (com motivo) e
+  analisada de novo; aprovada sem senha, o técnico cria a dele pelo link da boas-vindas.
+- Cada análise fica em `reviews` (aprovada, reprovada, reaberta, expirada), com quem e quando.
 
 LGPD: a ficha reprovada (ou pendente sem análise) não fica guardada para sempre. Depois de
-ONBOARDING_RETENTION_DAYS a rotina periódica apaga a ficha e a foto (`purge_expired`), e a gestão
-apaga na hora quando o próprio técnico pede (`delete_application`).
+ONBOARDING_RETENTION_DAYS contados da última análise (a pendente, do envio ou da reabertura) a
+rotina periódica apaga a ficha e a foto, com os links e os e-mails dela (`purge_expired`), e a
+gestão apaga na hora quando o próprio técnico pede (`delete_application`).
 """
 
 import hashlib
 import re
 import secrets
 import uuid
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import links
 from app.core.config import settings
-from app.core.enums import ApplicationStatus, UserRole
+from app.core.documents import is_valid_cnpj, is_valid_cpf, normalize_document
+from app.core.enums import ApplicationStatus, EmailTemplate, OperationalStatus, UserRole
 from app.core.security import hash_password_async
 from app.db.base import utcnow
-from app.models import OnboardingInvite, Team, TechnicianApplication, User
+from app.models import EmailOutbox, OnboardingInvite, Team, TechnicianApplication, User
+from app.models.user_change import VIA_FICHA
+from app.schemas.account import EmailQueuedStatus
 from app.schemas.onboarding import (
     PRIVACY_VERSION,
     ApplicationApprove,
@@ -27,14 +42,28 @@ from app.schemas.onboarding import (
     InviteCreate,
     InviteState,
 )
-from app.services import storage, tech_profile
-from app.services.errors import NotFound, WorkflowError
+from app.services import cities, mail, storage, tech_profile, user_history
+from app.services.errors import CodedError, NotFound, WorkflowError
 from app.services.realtime import bus
 
 MAX_PHOTO_BYTES = 2 * 1024 * 1024
 LINK_KIND = "onboarding"
 EXPIRED_NOTE = "Expirada sem análise"
 COMPANY_EMAIL = "Use um e-mail que não seja da empresa"
+# Aprovar, reabrir e reenviar a validação: (texto, code) dos 409.
+USER_EMAIL_TAKEN = "Já existe um usuário com este e-mail"
+CPF_TAKEN = ("Este CPF já está em outro cadastro", "CPF_TAKEN")
+REOPEN_NOT_REJECTED = ("Só a ficha reprovada pode ser reaberta", "APPLICATION_NOT_REJECTED")
+REOPEN_EMAIL_TAKEN = (USER_EMAIL_TAKEN, "EMAIL_TAKEN")
+OTHER_APPLICATION = ("Há outra ficha desta pessoa em análise ou aprovada", "APPLICATION_DUPLICATE")
+RESEND_NOT_PENDING = ("Reenvio só para ficha em análise", "APPLICATION_NOT_PENDING")
+EMAIL_ALREADY_VERIFIED = ("E-mail já validado", "EMAIL_ALREADY_VERIFIED")
+APPROVED_LINE = "Aprovado na homologação ({protocol})"
+
+
+def _conflict(pair: tuple[str, str]) -> CodedError:
+    message, code = pair
+    return CodedError(message, code, 409)
 
 
 class InviteUnavailable(Exception):
@@ -130,16 +159,64 @@ async def email_taken(db: AsyncSession, email: str, exclude_id: uuid.UUID | None
 
 
 async def document_taken(db: AsyncSession, document: str) -> bool:
-    """CPF já numa ficha pendente ou aprovada (a mesma pessoa não se cadastra duas vezes)."""
+    """CPF já numa ficha pendente ou aprovada, ou no cadastro de um usuário (a mesma pessoa não se
+    cadastra duas vezes)."""
     found = await db.scalar(
-        select(TechnicianApplication.id).where(
+        select(TechnicianApplication.id)
+        .where(
             TechnicianApplication.document == document,
             TechnicianApplication.status.in_(
                 (ApplicationStatus.PENDING, ApplicationStatus.APPROVED)
             ),
         )
+        .limit(1)
     )
-    return found is not None
+    return found is not None or await cpf_in_use(db, document)
+
+
+async def cpf_in_use(db: AsyncSession, cpf: str | None) -> bool:
+    """O CPF já é de um usuário (users.cpf, único)."""
+    if not cpf:
+        return False
+    return (await db.scalar(select(User.id).where(User.cpf == cpf).limit(1))) is not None
+
+
+def _ficha_cpf(application: TechnicianApplication) -> str | None:
+    """O CPF da ficha como o cadastro grava (11 números válidos); senão nada."""
+    digits = re.sub(r"\D", "", application.document or "")
+    return digits if len(digits) == 11 and is_valid_cpf(digits) else None
+
+
+def _ficha_cnpj(application: TechnicianApplication) -> str | None:
+    """O CNPJ da ficha como o cadastro grava (14 caracteres válidos); senão nada."""
+    value = application.company_document or ""
+    if not value.strip() or not is_valid_cnpj(value):
+        return None
+    normalized = normalize_document(value)
+    return normalized if normalized and len(normalized) == 14 else None
+
+
+def review_entry(
+    action: str, actor: User | None, note: str | None, at: datetime | None = None
+) -> dict[str, Any]:
+    """Uma entrada de `reviews`: {action, at (ISO, UTC), by: {id, name} | null, note}."""
+    return {
+        "action": action,
+        "at": (at or utcnow()).isoformat(),
+        "by": {"id": str(actor.id), "name": actor.name} if actor is not None else None,
+        "note": note,
+    }
+
+
+def _add_review(
+    application: TechnicianApplication,
+    action: str,
+    actor: User | None,
+    note: str | None,
+    at: datetime,
+) -> None:
+    # Uma lista nova: mudar a lista no lugar não grava (JSONB).
+    application.reviews = [*(application.reviews or []), review_entry(action, actor, note, at)]
 
 
 async def submit(
@@ -167,13 +244,23 @@ async def submit(
         full_name=data.full_name,
         email=data.email,
         phone=data.phone.strip(),
+        phone_secondary=data.phone_secondary,
         document=data.document,
+        rg_number=data.rg_number,
+        rg_issuer=data.rg_issuer,
+        rg_state=data.rg_state,
         birth_date=data.birth_date,
+        bio=data.bio,
         postal_code=(data.postal_code or "").strip() or None,
-        address=(data.address or "").strip() or None,
+        address=" ".join((data.address or "").split()) or None,
+        address_number=data.address_number,
+        address_complement=data.address_complement,
+        address_district=data.address_district,
         city=data.city,
         state=data.state,
         company_document=data.company_document,
+        company_name=data.company_name,
+        company_trade_name=data.company_trade_name,
         years_experience=data.years_experience,
         service_areas=data.service_areas,
         skills=[s.model_dump() for s in data.skills],
@@ -181,6 +268,8 @@ async def submit(
         tools=(data.tools or "").strip() or None,
         has_vehicle=data.has_vehicle,
         vehicle_type=data.vehicle_type if data.has_vehicle else None,
+        vehicle_model=data.vehicle_model if data.has_vehicle else None,
+        vehicle_plate=data.vehicle_plate if data.has_vehicle else None,
         has_driver_license=data.has_driver_license,
         coverage_area=data.coverage_area,
         availability=data.availability,
@@ -189,11 +278,35 @@ async def submit(
         password_hash=password_hash,
         privacy_consent_at=utcnow(),
         privacy_version=PRIVACY_VERSION,
+        reviews=[],
     )
     db.add(application)
     invite.use_count += 1
     await db.flush()
     return application
+
+
+async def queue_verification(
+    db: AsyncSession, application: TechnicianApplication, actor: User | None = None
+) -> tuple[EmailOutbox | None, EmailQueuedStatus]:
+    """O link de validação do e-mail da ficha na fila (reason "signup"); o commit e o
+    `mail.deliver_soon` são da rota."""
+    return await mail.enqueue(
+        db,
+        template=EmailTemplate.VERIFY_EMAIL,
+        to_email=application.email,
+        application=application,
+        context={"name": application.full_name, "reason": "signup"},
+        created_by=actor,
+    )
+
+
+def check_resend(application: TechnicianApplication) -> None:
+    """Reenviar a validação: só a ficha em análise e ainda não validada (409)."""
+    if application.status != ApplicationStatus.PENDING:
+        raise _conflict(RESEND_NOT_PENDING)
+    if application.email_verified_at is not None:
+        raise _conflict(EMAIL_ALREADY_VERIFIED)
 
 
 def protocol(application: TechnicianApplication) -> str:
@@ -212,8 +325,20 @@ async def publish_submitted(application: TechnicianApplication) -> None:
     )
 
 
-async def get_application(db: AsyncSession, application_id: uuid.UUID) -> TechnicianApplication:
-    application = await db.get(TechnicianApplication, application_id)
+async def get_application(
+    db: AsyncSession, application_id: uuid.UUID, *, lock: bool = False
+) -> TechnicianApplication:
+    """A ficha. `lock` (aprovar, reprovar, reabrir) trava a linha até o fim da transação e relê:
+    duas análises juntas não passam as duas."""
+    if lock:
+        application = await db.scalar(
+            select(TechnicianApplication)
+            .where(TechnicianApplication.id == application_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    else:
+        application = await db.get(TechnicianApplication, application_id)
     if application is None:
         raise NotFound("Ficha não encontrada")
     return application
@@ -224,25 +349,54 @@ def _ensure_pending(application: TechnicianApplication) -> None:
         raise WorkflowError("Esta ficha já foi analisada")
 
 
+def purge_at(application: TechnicianApplication) -> datetime | None:
+    """Reprovada: quando a rotina apaga a ficha (ONBOARDING_RETENTION_DAYS da última análise; a de
+    antes sem análise, do envio ou da reabertura). As outras: None."""
+    if application.status != ApplicationStatus.REJECTED:
+        return None
+    base = application.reviewed_at or application.reopened_at or application.created_at
+    return base + timedelta(days=settings.ONBOARDING_RETENTION_DAYS) if base else None
+
+
+@dataclass
+class Approval:
+    """O técnico criado na aprovação, a linha do histórico e a boas-vindas na fila."""
+
+    user: User
+    changes: list[dict[str, Any]]
+    welcome: EmailOutbox | None
+    welcome_status: EmailQueuedStatus
+
+
 async def approve(
     db: AsyncSession, application: TechnicianApplication, data: ApplicationApprove, actor: User
-) -> User:
-    """Cria o técnico com o cadastro da ficha e o perfil técnico que ela já traz (disponibilidade,
-    transporte e CNH, aptidões; tech_profile.from_ficha, via "ficha"), sem histórico do cadastro:
-    o histórico do técnico começa vazio. Ferramentas e certificações (texto livre) ficam só na
-    ficha."""
+) -> Approval:
+    """Aprovação num passo (trave a ficha antes: get_application(lock=True)). Cria o técnico com
+    tudo o que a ficha coletou: contato, a senha (sem ela, uma aleatória e a troca obrigatória: a
+    boas-vindas leva o link para criar a dele), a foto, a cidade na grafia padrão, o endereço em
+    partes, CPF, nascimento, RG, empresa, veículo, mini biografia, as áreas, a validação do
+    e-mail e o perfil técnico (disponibilidade, transporte e CNH, aptidões; tech_profile.from_ficha,
+    via "ficha"). Ferramentas e certificações (texto livre) ficam só na ficha. O histórico do
+    cadastro começa com "Aprovado na homologação (HOM-…)" (via ficha, ator = quem aprovou) e a
+    boas-vindas vai para a fila (o commit, o `deliver_soon` e os avisos são da rota)."""
     _ensure_pending(application)
     if await db.scalar(select(User.id).where(func.lower(User.email) == application.email)):
-        raise WorkflowError("Já existe um usuário com este e-mail")
+        raise WorkflowError(USER_EMAIL_TAKEN)
+    cpf = _ficha_cpf(application)
+    if await cpf_in_use(db, cpf):
+        raise _conflict(CPF_TAKEN)
     if data.team_id is not None and await db.get(Team, data.team_id) is None:
         raise WorkflowError("Grupo não encontrado")
     zip_digits = re.sub(r"\D", "", application.postal_code or "")
+    company_document = _ficha_cnpj(application)
+    now = utcnow()
     user = User(
         id=uuid.uuid4(),
         name=application.full_name,
         email=application.email,
         phone=application.phone,
-        # Ficha sem senha (antiga): senha aleatória e troca obrigatória no primeiro acesso.
+        phone_secondary=application.phone_secondary,
+        # Ficha sem senha (antiga ou reprovada e reaberta): senha aleatória e troca obrigatória.
         password_hash=application.password_hash
         or await hash_password_async(secrets.token_urlsafe(24)),
         role=UserRole.TECHNICIAN,
@@ -252,34 +406,114 @@ async def approve(
         # Ele mesmo escolheu a senha na ficha: não precisa trocar no primeiro acesso.
         must_change_password=application.password_hash is None,
         avatar_key=application.photo_key,
-        home_city=application.city,
+        home_city=await cities.canonical_city(db, application.state, application.city),
         home_state=application.state,
         coverage_area=application.coverage_area,
-        # Endereço e CEP da ficha: a distância casa → loja usa mais que só a cidade.
+        # Endereço em partes e CEP da ficha: a distância casa → loja usa mais que só a cidade.
         address_line=application.address,
+        address_number=application.address_number,
+        address_complement=application.address_complement,
+        address_district=application.address_district,
         address_zip=f"{zip_digits[:5]}-{zip_digits[5:]}" if len(zip_digits) == 8 else None,
+        cpf=cpf,
+        birth_date=application.birth_date,
+        rg_number=application.rg_number,
+        rg_issuer=application.rg_issuer,
+        rg_state=application.rg_state,
+        bio=application.bio,
+        company_document=company_document,
+        company_name=application.company_name if company_document else None,
+        company_trade_name=application.company_trade_name if company_document else None,
+        vehicle_model=application.vehicle_model,
+        vehicle_plate=application.vehicle_plate,
+        service_areas=list(application.service_areas or []),
+        email_verified_at=application.email_verified_at,
+        operational_status=OperationalStatus.ACTIVE,
         **tech_profile.from_ficha(application),
     )
     db.add(user)
+    note = (data.note or "").strip() or None
     application.status = ApplicationStatus.APPROVED
     application.user_id = user.id
     application.reviewed_by_id = actor.id
-    application.reviewed_at = utcnow()
-    application.review_note = (data.note or "").strip() or None
+    application.reviewed_at = now
+    application.review_note = note
     application.password_hash = None  # a senha passa a existir só no usuário
+    _add_review(application, "approved", actor, note, now)
     await db.flush()
-    return user
+    changes = [
+        {
+            "field": "application",
+            "from": None,
+            "to": APPROVED_LINE.format(protocol=protocol(application)),
+        }
+    ]
+    user_history.record(db, user, changes, via=VIA_FICHA, actor=actor)
+    welcome, status = await mail.enqueue(
+        db,
+        template=EmailTemplate.WELCOME,
+        to_email=user.email,
+        user=user,
+        context={"name": user.name, "email": user.email},
+        created_by=actor,
+    )
+    return Approval(user=user, changes=changes, welcome=welcome, welcome_status=status)
 
 
 async def reject(
     db: AsyncSession, application: TechnicianApplication, reason: str, actor: User
 ) -> None:
+    """Reprova (trave a ficha antes): guarda o motivo, apaga a senha e anota a análise."""
     _ensure_pending(application)
+    now = utcnow()
+    note = reason.strip()
     application.status = ApplicationStatus.REJECTED
     application.reviewed_by_id = actor.id
-    application.reviewed_at = utcnow()
-    application.review_note = reason.strip()
+    application.reviewed_at = now
+    application.review_note = note
     application.password_hash = None
+    _add_review(application, "rejected", actor, note, now)
+    await db.flush()
+
+
+async def reopen(
+    db: AsyncSession, application: TechnicianApplication, reason: str, actor: User
+) -> None:
+    """Reabre a ficha reprovada (também a expirada) para uma nova análise (trave a ficha antes).
+    409 quando não está reprovada, quando já há usuário com o e-mail ou com o CPF dela, ou outra
+    ficha da mesma pessoa (e-mail ou CPF) em análise ou aprovada. Volta a pendente, sem a última
+    análise (fica em `reviews`, com a reabertura e o motivo); a retenção passa a contar daqui."""
+    if application.status != ApplicationStatus.REJECTED:
+        raise _conflict(REOPEN_NOT_REJECTED)
+    email = (application.email or "").strip().lower()
+    if await db.scalar(select(User.id).where(func.lower(User.email) == email).limit(1)):
+        raise _conflict(REOPEN_EMAIL_TAKEN)
+    other = await db.scalar(
+        select(TechnicianApplication.id)
+        .where(
+            TechnicianApplication.id != application.id,
+            TechnicianApplication.status.in_(
+                (ApplicationStatus.PENDING, ApplicationStatus.APPROVED)
+            ),
+            or_(
+                func.lower(TechnicianApplication.email) == email,
+                TechnicianApplication.document == application.document,
+            ),
+        )
+        .limit(1)
+    )
+    if other is not None:
+        raise _conflict(OTHER_APPLICATION)
+    if await cpf_in_use(db, _ficha_cpf(application)):
+        raise _conflict(CPF_TAKEN)
+    now = utcnow()
+    application.status = ApplicationStatus.PENDING
+    application.reopened_at = now
+    application.reopened_by_id = actor.id
+    application.reviewed_by_id = None
+    application.reviewed_at = None
+    application.review_note = None
+    _add_review(application, "reopened", actor, reason, now)
     await db.flush()
 
 
@@ -315,33 +549,36 @@ async def delete_application(db: AsyncSession, application: TechnicianApplicatio
 
 
 async def purge_expired(db: AsyncSession) -> int:
-    """Rotina periódica: ficha pendente sem análise além do prazo vira reprovada ("Expirada sem
-    análise", sem a senha); reprovada além do prazo é apagada com a foto. Grava (a foto só sai do
-    disco com a exclusão gravada) e devolve quantas mudaram.
+    """Rotina periódica: ficha pendente sem análise além do prazo (contado do envio ou da
+    reabertura) vira reprovada ("Expirada sem análise", sem a senha, anotada em `reviews`);
+    reprovada além do prazo (contado da última análise) é apagada com a foto, os links e os
+    e-mails dela. Grava (a foto só sai do disco com a exclusão gravada) e devolve quantas mudaram.
     """
     cutoff = utcnow() - timedelta(days=settings.ONBOARDING_RETENTION_DAYS)
+    since = func.coalesce(TechnicianApplication.reopened_at, TechnicianApplication.created_at)
     stale = list(
         await db.scalars(
             select(TechnicianApplication).where(
                 TechnicianApplication.status == ApplicationStatus.PENDING,
-                TechnicianApplication.created_at < cutoff,
+                since < cutoff,
             )
         )
     )
     now = utcnow()
     for application in stale:
         application.status = ApplicationStatus.REJECTED
+        application.reviewed_by_id = None
         application.reviewed_at = now
         application.review_note = EXPIRED_NOTE
         application.password_hash = None
+        _add_review(application, "expired", None, EXPIRED_NOTE, now)
     old = list(
         await db.scalars(
             select(TechnicianApplication).where(
                 TechnicianApplication.status == ApplicationStatus.REJECTED,
                 or_(
                     TechnicianApplication.reviewed_at < cutoff,
-                    TechnicianApplication.reviewed_at.is_(None)
-                    & (TechnicianApplication.created_at < cutoff),
+                    TechnicianApplication.reviewed_at.is_(None) & (since < cutoff),
                 ),
             )
         )

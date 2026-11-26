@@ -11,11 +11,29 @@ import type { CepAddress } from "./types";
 
 export type CepLookupState = "idle" | "loading" | "found" | "not_found" | "unavailable";
 
+/** A resposta tem o formato de CepAddress (uma página de erro com 200 no meio do caminho não preenche nada). */
+function isCepAddress(value: unknown): value is CepAddress {
+  if (!value || typeof value !== "object") return false;
+  const body = value as Record<string, unknown>;
+  const optional = (v: unknown) => v === null || v === undefined || typeof v === "string";
+  return (
+    typeof body.cep === "string" &&
+    typeof body.city === "string" &&
+    typeof body.state === "string" &&
+    optional(body.street) &&
+    optional(body.district)
+  );
+}
+
 /** A consulta de um CEP (8 números): a mesma chave para a linha de status e para quem aplica o resultado. */
 export function cepQuery(digits: string, auth = true) {
   return queryOptions({
     queryKey: ["cep", digits] as const,
-    queryFn: ({ signal }) => request<CepAddress>(`/public/cep/${digits}`, { auth, timeoutMs: 8000, signal }),
+    queryFn: async ({ signal }) => {
+      const found = await request<unknown>(`/public/cep/${digits}`, { auth, timeoutMs: 8000, signal });
+      if (!isCepAddress(found)) throw new ApiError(503, null);
+      return { ...found, street: found.street ?? null, district: found.district ?? null };
+    },
     staleTime: Infinity,
     gcTime: 3_600_000,
     retry: false,

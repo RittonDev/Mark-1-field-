@@ -3,12 +3,15 @@ import re
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationInfo, field_validator
 
 from app.core.documents import is_valid_cnpj, is_valid_cpf, normalize_document
 from app.core.enums import ApplicationStatus
+from app.schemas import personal
+from app.schemas.account import EmailQueued, EmailQueuedStatus
 from app.schemas.common import ORMModel, Ref
 from app.schemas.records import format_phone
+from app.schemas.user import UserOut
 
 # ----------------------------------------------------------------- catálogo
 # Fonte única dos rótulos: o formulário público e a tela de análise leem daqui.
@@ -77,9 +80,11 @@ UFS = frozenset(
 # para receber pelos chamados. 2026-11-19: texto revisto na revisão de segurança.
 # 2026-11-20: o aviso passa a citar o perfil técnico (ferramental, disponibilidade por turno,
 # transporte e CNH, aptidões e formação) e os registros das ofertas de OS no app (quando o técnico
-# vê a oferta, abre o escopo e responde). Versões "AAAA-MM-DD" ou "AAAA-MM-DD.N" (a segunda do
-# mesmo dia), comparadas como texto.
-PRIVACY_VERSION = "2026-11-20"
+# vê a oferta, abre o escopo e responde). 2026-11-25: RG, nascimento e CPF no cadastro, veículo,
+# dados da empresa, formas de recebimento, biografia, e-mail validado, indisponibilidade, situação
+# na operação, e-mails do cadastro e a reabertura da ficha reprovada. Versões "AAAA-MM-DD" ou
+# "AAAA-MM-DD.N" (a segunda do mesmo dia), comparadas como texto.
+PRIVACY_VERSION = "2026-11-25"
 
 
 class CatalogItem(BaseModel):
@@ -156,6 +161,8 @@ class InviteCheck(BaseModel):
 # caracteres.
 CODE_MAX = 32
 Code = Annotated[str, Field(max_length=CODE_MAX)]
+# Bairro (o tamanho da coluna).
+DISTRICT_MAX = 120
 
 
 class SkillIn(BaseModel):
@@ -164,16 +171,35 @@ class SkillIn(BaseModel):
 
 
 class ApplicationIn(BaseModel):
+    """A ficha pública. Os campos do cadastro V2 são opcionais e usam as regras de
+    schemas/personal.py (as mesmas do app e da central). A ordem dos campos importa para os grupos:
+    o RG (número, órgão emissor e UF) vem junto ou nada; razão social e nome fantasia pedem o
+    CNPJ."""
+
     full_name: str = Field(min_length=5, max_length=160)
     email: EmailStr
     phone: str = Field(min_length=10, max_length=40)
+    phone_secondary: str | None = None
     document: str = Field(description="CPF")
+    rg_number: str | None = None
+    # Conferidos também quando não vêm (o grupo do RG).
+    rg_issuer: str | None = Field(default=None, validate_default=True)
+    rg_state: str | None = Field(default=None, validate_default=True)
     birth_date: dt.date | None = None
     postal_code: str | None = Field(default=None, max_length=12)
+    # O logradouro (sem o número), o número ("S/N" vale), o complemento e o bairro.
     address: str | None = Field(default=None, max_length=255)
+    address_number: str | None = None
+    address_complement: str | None = None
+    address_district: str | None = None
     city: str = Field(min_length=2, max_length=120)
     state: str = Field(min_length=2, max_length=2)
-    company_document: str | None = Field(default=None, description="CNPJ/MEI, se tiver")
+    bio: str | None = None
+    company_name: str | None = None
+    company_trade_name: str | None = None
+    company_document: str | None = Field(
+        default=None, description="CNPJ/MEI, se tiver", validate_default=True
+    )
     years_experience: int | None = Field(default=None, ge=0, le=60)
     service_areas: list[Code] = Field(min_length=1, max_length=len(SERVICE_AREAS))
     skills: list[SkillIn] = Field(default_factory=list, max_length=30)
@@ -181,6 +207,9 @@ class ApplicationIn(BaseModel):
     tools: str | None = Field(default=None, max_length=2000)
     has_vehicle: bool = False
     vehicle_type: Literal["carro", "moto", "outro"] | None = None
+    # Com veículo próprio: modelo e placa (antiga ou Mercosul), opcionais.
+    vehicle_model: str | None = None
+    vehicle_plate: str | None = None
     has_driver_license: bool = False
     coverage_area: str = Field(min_length=2, max_length=1000)
     availability: list[Code] = Field(default_factory=list, max_length=len(AVAILABILITY))
@@ -208,22 +237,73 @@ class ApplicationIn(BaseModel):
             raise ValueError("Informe o celular com DDD")
         return format_phone(digits) or digits
 
-    @field_validator("birth_date")
+    @field_validator("phone_secondary")
     @classmethod
-    def _age(cls, v: dt.date | None) -> dt.date | None:
-        if v is None:
+    def _phone_secondary(cls, v: str | None) -> str | None:
+        return personal.phone(v)
+
+    @field_validator("rg_number")
+    @classmethod
+    def _rg_number(cls, v: str | None) -> str | None:
+        return personal.rg_number(v)
+
+    @field_validator("rg_issuer", "rg_state")
+    @classmethod
+    def _rg_rest(cls, v: str | None, info: ValidationInfo) -> str | None:
+        """Sem o número do RG, órgão e UF ficam vazios; com ele, são obrigatórios."""
+        if not info.data.get("rg_number"):
             return None
-        # O dia da operação (Brasília): o servidor roda em UTC, e entre 21h e 24h o dia UTC já é o
-        # seguinte. Importado aqui para o schema não depender dos serviços ao carregar (ciclo).
+        value = personal.rg_issuer(v) if info.field_name == "rg_issuer" else personal.uf(v)
+        if value is None:
+            raise ValueError(personal.RG_INCOMPLETE)
+        return value
+
+    @field_validator("birth_date", mode="before")
+    @classmethod
+    def _age(cls, v: object) -> object:
+        """De 18 a 90 anos no dia da operação (Brasília): o servidor roda em UTC, e entre 21h e 24h
+        o dia UTC já é o seguinte. A data que não existe: "Confira a data de nascimento"."""
+        if v is None or not isinstance(v, str | dt.date):
+            return v
+        # Importado aqui para o schema não depender dos serviços ao carregar (ciclo).
         from app.services.activities import local_today
 
-        today = local_today()
-        age = today.year - v.year - ((today.month, today.day) < (v.month, v.day))
-        if age < 18:
-            raise ValueError("O cadastro é para maiores de 18 anos: confira a data de nascimento")
-        if age > 90:
-            raise ValueError("Confira a data de nascimento")
-        return v
+        return personal.birth_date(v, today=local_today())
+
+    @field_validator("address_number")
+    @classmethod
+    def _address_number(cls, v: str | None) -> str | None:
+        return personal.clean_text(v, personal.ADDRESS_NUMBER_MAX)
+
+    @field_validator("address_complement")
+    @classmethod
+    def _address_complement(cls, v: str | None) -> str | None:
+        return personal.clean_text(v, personal.ADDRESS_COMPLEMENT_MAX)
+
+    @field_validator("address_district")
+    @classmethod
+    def _address_district(cls, v: str | None) -> str | None:
+        return personal.clean_text(v, DISTRICT_MAX)
+
+    @field_validator("bio")
+    @classmethod
+    def _bio(cls, v: str | None) -> str | None:
+        return personal.bio(v)
+
+    @field_validator("company_name", "company_trade_name")
+    @classmethod
+    def _company_names(cls, v: str | None) -> str | None:
+        return personal.clean_text(v, personal.COMPANY_NAME_MAX)
+
+    @field_validator("vehicle_model")
+    @classmethod
+    def _vehicle_model(cls, v: str | None) -> str | None:
+        return personal.clean_text(v, personal.VEHICLE_MODEL_MAX)
+
+    @field_validator("vehicle_plate")
+    @classmethod
+    def _vehicle_plate(cls, v: str | None) -> str | None:
+        return personal.plate(v)
 
     @field_validator("postal_code")
     @classmethod
@@ -244,8 +324,11 @@ class ApplicationIn(BaseModel):
 
     @field_validator("company_document")
     @classmethod
-    def _cnpj(cls, v: str | None) -> str | None:
+    def _cnpj(cls, v: str | None, info: ValidationInfo) -> str | None:
         if v is None or not v.strip():
+            # Razão social ou nome fantasia sem o CNPJ (os dois vêm antes na ordem dos campos).
+            if info.data.get("company_name") or info.data.get("company_trade_name"):
+                raise ValueError(personal.COMPANY_WITHOUT_CNPJ)
             return None
         if not is_valid_cnpj(v):
             raise ValueError("CNPJ inválido")
@@ -285,6 +368,9 @@ class ApplicationIn(BaseModel):
 
 class ApplicationReceived(BaseModel):
     protocol: str
+    # O link de validação do e-mail que vai no envio: na fila, envio desligado (nada sai) ou o
+    # endereço não recebe mensagens.
+    email_verification: EmailQueuedStatus
 
 
 # ---------------------------------------------------------------- análise
@@ -304,6 +390,10 @@ class ApplicationSummary(ORMModel):
     created_at: dt.datetime
     reviewed_at: dt.datetime | None
     user_id: uuid.UUID | None
+    # null: o candidato ainda não abriu o link de validação.
+    email_verified_at: dt.datetime | None = None
+    # Reprovada que voltou para análise (a retenção da pendente conta daqui).
+    reopened_at: dt.datetime | None = None
 
 
 class SkillOut(BaseModel):
@@ -311,16 +401,39 @@ class SkillOut(BaseModel):
     level: str
 
 
+class ApplicationReview(BaseModel):
+    """Uma análise da ficha (a mais antiga primeiro): aprovada, reprovada, reaberta ou expirada
+    sem análise (a rotina, sem autor)."""
+
+    action: Literal["approved", "rejected", "reopened", "expired"]
+    at: dt.datetime
+    by: Ref | None = None
+    note: str | None = None
+
+
 class ApplicationDetail(ApplicationSummary):
     document: str
     birth_date: dt.date | None
     postal_code: str | None
+    # O logradouro (fichas antigas: a linha inteira do endereço).
     address: str | None
+    address_number: str | None = None
+    address_complement: str | None = None
+    address_district: str | None = None
+    phone_secondary: str | None = None
+    rg_number: str | None = None
+    rg_issuer: str | None = None
+    rg_state: str | None = None
+    bio: str | None = None
     company_document: str | None
+    company_name: str | None = None
+    company_trade_name: str | None = None
     skills: list[SkillOut]
     certifications: str | None
     tools: str | None
     vehicle_type: str | None
+    vehicle_model: str | None = None
+    vehicle_plate: str | None = None
     has_driver_license: bool
     coverage_area: str
     availability: list[str]
@@ -331,13 +444,46 @@ class ApplicationDetail(ApplicationSummary):
     review_note: str | None
     invite_label: str | None = None
     photo_url: str | None = None
+    # O candidato criou a senha na ficha (sem ela, a boas-vindas leva o link para criar).
+    has_password: bool = False
+    reviews: list[ApplicationReview] = []
+    reopened_by: Ref | None = None
+    # Reprovada: quando a rotina apaga a ficha (180 dias da última análise).
+    purge_at: dt.datetime | None = None
 
 
 class ApplicationApprove(BaseModel):
+    """Aprovar num passo: tudo opcional (a tela manda {})."""
+
     team_id: uuid.UUID | None = None
     job_title: str | None = Field(default=None, max_length=120)
     note: str | None = Field(default=None, max_length=2000)
 
 
+class ApplicationApproved(BaseModel):
+    """O técnico criado e a boas-vindas: na fila, envio desligado ou sem endereço que recebe."""
+
+    technician: UserOut
+    welcome: EmailQueued
+
+
 class ApplicationReject(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
+
+
+# Motivo para reabrir a ficha reprovada.
+REOPEN_REASON_MIN, REOPEN_REASON_MAX = 3, 500
+
+
+class ApplicationReopen(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, v: str) -> str:
+        text = personal.clean_text(v, REOPEN_REASON_MAX) or ""
+        if len(text) < REOPEN_REASON_MIN:
+            raise ValueError("Informe o motivo")
+        return text

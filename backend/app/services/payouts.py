@@ -19,7 +19,7 @@ from sqlalchemy import and_, func, not_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import raiseload
 
-from app.core import pix
+from app.core import payout as payout_text
 from app.core.config import settings
 from app.core.enums import (
     ExpenseStatus,
@@ -35,10 +35,10 @@ from app.models.customer import Customer, Location
 from app.models.expense import TicketExpense
 from app.models.invoice import TechnicianInvoice
 from app.models.payout import TicketPayout
+from app.models.payout_method import TechnicianPayoutMethod
 from app.models.ticket import Ticket, TicketEvent
 from app.models.user import User
 from app.schemas.common import Ref
-from app.schemas.my_profile import PixInfo
 from app.schemas.payout import (
     EarningsBucket,
     EarningsMonth,
@@ -512,34 +512,33 @@ async def list_payouts(
     return PayoutList(items=lines, summary=summary, total_count=total_count)
 
 
-async def pix_map(
-    db: AsyncSession, technician_ids: set[uuid.UUID] | list[uuid.UUID]
-) -> dict[uuid.UUID, PixInfo]:
-    """A chave PIX de cada técnico que tem chave (Pagamentos: para onde pagar). Ele cadastra no
-    app; a central só vê e remove."""
+async def _preferred_texts(
+    db: AsyncSession, technician_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """A forma de recebimento preferencial de cada técnico, mascarada (core/payout.describe)."""
     ids = {i for i in technician_ids if i is not None}
     if not ids:
         return {}
-    rows = await db.execute(
-        select(
-            User.id, User.pix_key_type, User.pix_key, User.pix_holder_name, User.pix_updated_at
-        ).where(User.id.in_(ids), User.pix_key.is_not(None), User.pix_key_type.is_not(None))
+    rows = await db.scalars(
+        select(TechnicianPayoutMethod).where(
+            TechnicianPayoutMethod.user_id.in_(ids), TechnicianPayoutMethod.preferred
+        )
     )
-    return {
-        user_id: PixInfo(key_type=key_type, key=key, holder_name=holder, updated_at=updated_at)
-        for user_id, key_type, key, holder, updated_at in rows
-    }
+    return {row.user_id: payout_text.describe(row) for row in rows}
 
 
 async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User, *, paid: bool) -> int:
     """Marca como pago (ou desfaz). Devolve quantos mudaram. Cada mudança fica no histórico da
-    OS (quem pagou, quando e quanto) e a gestão vê na hora. Só os das OS que quem marca vê (os
-    de outra fila ficam como estão)."""
+    OS (quem pagou, quando e quanto, e no pagamento a forma de recebimento preferencial daquele
+    momento, mascarada) e a gestão vê na hora. Só os das OS que quem marca vê (os de outra fila
+    ficam como estão). Sem forma de recebimento, o pagamento sai do mesmo jeito (a nota e o
+    pagamento nunca travam por isso)."""
     stmt = select(TicketPayout).where(TicketPayout.id.in_(ids))
     vis = _visibility(actor)
     if vis is not None:
         stmt = stmt.join(Ticket, Ticket.id == TicketPayout.ticket_id).where(vis)
     payouts = list(await db.scalars(stmt))
+    destinations = await _preferred_texts(db, {p.technician_id for p in payouts}) if paid else {}
     now = utcnow()
     changed: list[TicketPayout] = []
     for payout in payouts:
@@ -561,9 +560,10 @@ async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User, *, paid
             "amount": money_text(payout.amount),
             "action": "paid" if paid else "unpaid",
         }
-        if paid and technician is not None and technician.pix_key_type and technician.pix_key:
-            # A chave daquele momento, mascarada (o histórico da OS não guarda a chave inteira).
-            data["pix"] = pix.describe(technician.pix_key_type, technician.pix_key)
+        if paid and payout.technician_id in destinations:
+            # A forma daquele momento, mascarada (o histórico da OS não guarda a chave nem a conta
+            # inteiras). Os eventos de antes têm "pix" no lugar: a web lê os dois.
+            data["payout_method"] = destinations[payout.technician_id]
         _event(
             db,
             payout.ticket_id,

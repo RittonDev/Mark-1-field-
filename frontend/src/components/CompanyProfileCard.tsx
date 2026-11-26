@@ -8,7 +8,7 @@ import { CepField } from "@/components/CepField";
 import { FieldError, useLeaveGuard } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox, Field, Input, LoadingBlock } from "@/components/ui";
-import { cepFromLine } from "@/lib/address";
+import { cepDigits, cepFromLine, companyLineWithCep } from "@/lib/address";
 import { api, errorMessage } from "@/lib/api";
 import { formatDocument } from "@/lib/format";
 import type { CompanyProfile } from "@/lib/types";
@@ -33,6 +33,9 @@ function isValidCnpj(value: string): boolean {
 
 /** CNPJ como a API guarda: sem pontuação e em maiúsculas. */
 const cleanDocument = (v: string) => v.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+
+/** O endereço numa linha (o mesmo limite da API). */
+const ADDRESS_MAX = 300;
 
 /** Dados da empresa: aparecem no cabeçalho do orçamento e do relatório que o cliente recebe. */
 export function CompanyProfileCard({ readOnly = false }: { readOnly?: boolean }) {
@@ -87,6 +90,10 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
   const cnpj = cleanDocument(form.document);
   const documentValid = !cnpj || isValidCnpj(cnpj);
   const documentProblem = documentValid ? undefined : "CNPJ inválido: confira os 14 caracteres e os dígitos verificadores.";
+  // O endereço que vai ser gravado: com o CEP completo no fim da linha (o achado já foi para lá; sem a busca, como CEP não
+  // achado ou busca fora do ar, ele entra ao salvar, em vez de sumir). Até os 300 caracteres da linha.
+  const withCep = cepDigits(cep).length === 8 ? companyLineWithCep(form.address, cep) : form.address;
+  const address = withCep.length <= ADDRESS_MAX ? withCep : form.address;
   const normalized = (f: typeof form) =>
     JSON.stringify({
       name: f.name.trim(),
@@ -96,7 +103,7 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
       address: f.address.trim(),
       website: f.website.trim(),
     });
-  const dirty = normalized(form) !== normalized(start);
+  const dirty = normalized({ ...form, address }) !== normalized(start);
   useLeaveGuard(dirty && !readOnly, "Os dados da empresa alterados ainda não foram salvos.");
 
   const save = useMutation({
@@ -106,7 +113,7 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
         document: cnpj || null,
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
-        address: form.address.trim() || null,
+        address: address.trim() || null,
         website: form.website.trim() || null,
       }),
     onSuccess: (data) => {
@@ -169,7 +176,7 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
               ref={addressRef}
               value={form.address}
               onChange={set("address")}
-              maxLength={300}
+              maxLength={ADDRESS_MAX}
               placeholder="Rua, número - bairro - cidade - UF"
               disabled={readOnly}
             />
@@ -205,7 +212,7 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
             {cnpj ? <p>CNPJ: {formatDocument(cnpj)}</p> : null}
             {form.email.trim() ? <p className="truncate">E-mail: {form.email.trim()}</p> : null}
             {form.phone.trim() ? <p>Telefone: {form.phone.trim()}</p> : null}
-            {form.address.trim() ? <p>Endereço: {form.address.trim()}</p> : null}
+            {address.trim() ? <p>Endereço: {address.trim()}</p> : null}
           </div>
         </div>
       </div>

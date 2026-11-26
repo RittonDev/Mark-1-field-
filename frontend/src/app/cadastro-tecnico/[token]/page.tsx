@@ -23,7 +23,7 @@ import { CepField } from "@/components/CepField";
 import { useConfirm } from "@/components/Confirm";
 import { PublicPanel, PublicShell } from "@/components/PublicPage";
 import { Button, buttonClassName, Card, Checkbox, ErrorBox, Field, Input, LoadingBlock, Select, Textarea } from "@/components/ui";
-import { NO_ADDRESS } from "@/lib/address";
+import { type AddressSlots, NO_ADDRESS } from "@/lib/address";
 import { ApiError, errorMessage, request } from "@/lib/api";
 import {
   ageAt,
@@ -629,6 +629,9 @@ export default function TechnicianSignupPage() {
   const focusStepRef = useRef(false);
   const streetRef = useRef<HTMLInputElement>(null);
   const numberRef = useRef<HTMLInputElement>(null);
+  // O que a busca do CEP pôs no endereço. A ficha não tem endereço gravado: o "aberto" do CepField é isto, para o campo
+  // ainda com o valor da busca continuar livre depois de a pessoa ir a outra etapa e voltar (o campo monta de novo).
+  const [cepFilled, setCepFilled] = useState<AddressSlots>(NO_ADDRESS);
   const companyTitleId = useId();
   // A versão do aviso relida no servidor (ao chegar à última etapa e no envio); antes disso, vale a do catálogo.
   const [latestPrivacy, setLatestPrivacy] = useState<string | null>(null);
@@ -900,6 +903,7 @@ export default function TechnicianSignupPage() {
     clearDraft();
     setForeign(null);
     setForm(EMPTY);
+    setCepFilled(NO_ADDRESS);
     setProblem(null);
     goTo(0);
   };
@@ -1160,17 +1164,18 @@ export default function TechnicianSignupPage() {
                       value={form.postal_code}
                       onChange={(v) => set("postal_code", v)}
                       address={{ street: form.address, district: form.address_district, city: form.city, state: form.state }}
-                      // Nada aqui foi gravado: tudo o que está na ficha foi a pessoa que digitou (ou a busca anterior).
-                      opened={NO_ADDRESS}
-                      onApply={(found) =>
+                      // Nada aqui foi gravado: livre é o vazio e o que a busca anterior pôs; o resto a pessoa digitou.
+                      opened={cepFilled}
+                      onApply={(found, info) => {
+                        setCepFilled((before) => ({ ...before, ...Object.fromEntries(info.filled.map((key) => [key, found[key]])) }));
                         setForm((f) => ({
                           ...f,
                           address: found.street,
                           address_district: found.district,
                           city: found.city,
                           state: found.state,
-                        }))
-                      }
+                        }));
+                      }}
                       auth={false}
                       focusRef={numberRef}
                       streetRef={streetRef}

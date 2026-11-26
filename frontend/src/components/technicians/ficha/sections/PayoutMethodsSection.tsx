@@ -33,6 +33,14 @@ function kindText(m: PayoutMethodAdmin): string {
   return m.kind === "pix" ? `${PAYOUT_KIND.pix} · ${PIX_KEY_TYPE[m.pix_key_type] ?? m.pix_key_type}` : PAYOUT_KIND.bank;
 }
 
+/** O documento do titular com o nome: "CPF 123.456.789-09" | "CNPJ 12.345.678/0001-95" (chave antiga: sem). */
+function holderDocumentLabel(doc: string | null): string | null {
+  if (!doc) return null;
+  if (doc.length === 11) return `CPF ${formatDocument(doc)}`;
+  if (doc.length === 14) return `CNPJ ${formatDocument(doc)}`;
+  return doc;
+}
+
 /**
  * Formas de recebimento (só com Pagamentos; remover com Pagamentos em Editar). Quem cadastra e troca é o técnico, no
  * app, com a senha: a central vê, copia para pagar e remove. "Nova": o destino do pagamento mudou há menos de
@@ -115,14 +123,21 @@ export function PayoutMethodsSection({ tech }: { tech: Technician }) {
         <ul className="flex flex-col divide-y divide-line" aria-busy={remove.isPending || undefined}>
           {list.map((m) => {
             const fresh = now - Date.parse(m.destination_changed_at) < PAYOUT_RECENT_DAYS * DAY_MS;
-            const holder = [m.holder_name, m.holder_document ? formatDocument(m.holder_document) : null].filter(Boolean).join(" · ");
+            const holder = [m.holder_name, holderDocumentLabel(m.holder_document)].filter(Boolean).join(" · ");
             return (
               <li key={m.id} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0">
                 <div className="min-w-0 flex-1 basis-64">
                   <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-ink">
                     {kindText(m)}
                     {m.preferred ? <Pill color="var(--brand)">Preferencial</Pill> : null}
-                    {fresh ? <Pill color={AMBER}>Nova</Pill> : null}
+                    {fresh ? (
+                      <span
+                        title={`Mudou em ${formatDate(m.destination_changed_at)}: confirme com ele no grupo antes de pagar.`}
+                        className="inline-flex"
+                      >
+                        <Pill color={AMBER}>Nova</Pill>
+                      </span>
+                    ) : null}
                     {m.holder_differs ? (
                       <span title={`Titular: ${holder}`} className="inline-flex">
                         <Pill color={AMBER}>Titular diferente</Pill>
@@ -135,7 +150,11 @@ export function PayoutMethodsSection({ tech }: { tech: Technician }) {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Button size="sm" onClick={() => copyMethod(m)}>
+                  <Button
+                    size="sm"
+                    onClick={() => copyMethod(m)}
+                    aria-label={m.kind === "pix" ? `Copiar a chave PIX ${destinationText(m)}` : `Copiar os dados da conta ${m.bank_name}`}
+                  >
                     <Copy className="size-3.5" />
                     Copiar
                   </Button>
@@ -145,6 +164,7 @@ export function PayoutMethodsSection({ tech }: { tech: Technician }) {
                       variant="ghost"
                       disabled={remove.isPending}
                       onClick={() => void askRemove(m)}
+                      aria-label={`Remover ${kindText(m)}: ${m.kind === "pix" ? destinationText(m) : m.bank_name}`}
                       className="text-red-700 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
                     >
                       <Trash2 className="size-3.5" />

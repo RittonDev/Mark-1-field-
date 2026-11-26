@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from app.core.enums import InvoiceStatus, PayoutStatus, TicketStatus
 from app.schemas.common import ORMModel, Ref
 from app.schemas.expense import Money
-from app.schemas.my_profile import PixInfo
+from app.schemas.payout_method import PayoutMethodSummary
 
 
 class PayoutOut(ORMModel):
@@ -88,10 +88,11 @@ class PayoutList(BaseModel):
 
 
 class PayoutBoard(PayoutList):
-    """GET /payouts (central). Com with_pix=true, a chave PIX de cada técnico das linhas (e do
-    filtro technician_id) que tem chave; sem ele, vazio."""
+    """GET /payouts (central). Com with_payout_methods=true, a forma de recebimento preferencial
+    (inteira: quem paga copia) e quantas formas tem cada técnico das linhas (e do filtro
+    technician_id); o técnico sem forma fica fora do mapa. Sem o parâmetro, vazio."""
 
-    pix: dict[uuid.UUID, PixInfo] = {}
+    payout_methods: dict[uuid.UUID, PayoutMethodSummary] = {}
 
 
 class MyEarnings(PayoutList):

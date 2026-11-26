@@ -8,6 +8,10 @@ A disponibilidade informada no app (os turnos do perfil técnico) é um sinal pe
 horário da visita: dentro, poucos pontos a mais e sem motivo; fora, poucos pontos a menos e o
 motivo "Fora da disponibilidade (sáb · tarde)"; sem disponibilidade informada, nada muda. Nunca
 tira ninguém da lista.
+
+Só entra quem pode receber a OS: acesso ao app liberado, Ativo na operação
+(services/technician_status.py) e sem período de indisponibilidade nos dias da visita (sem
+horário: hoje). As áreas de atuação são as do cadastro (users.service_areas).
 """
 
 import math
@@ -21,7 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.enums import ApplicationStatus, TicketStatus, UserRole
+from app.core.enums import ApplicationStatus, OperationalStatus, TicketStatus, UserRole
 from app.models import (
     Location,
     Project,
@@ -36,6 +40,8 @@ from app.services import (
     technician_favorites,
     technician_levels,
     technician_regions,
+    technician_status,
+    unavailability,
 )
 from app.services.schedule import busy_people, visit_end
 from app.services.workflow import OPEN_STATUSES
@@ -203,16 +209,24 @@ def _order(row: dict) -> tuple:
 async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict]:
     """Ranking para atribuir: distância (histórico, endereço, ao vivo) e o que mais ajuda.
 
-    Só técnicos ativos (a OS só pode ir para quem está no app). A distância e as visitas a
-    esta mesma loja vêm do mesmo cálculo de "técnicos mais próximos". Os favoritos da cidade da
-    loja ganham pontos e vaga garantida entre os `limit`. Com horário, a disponibilidade
-    informada no app soma ou tira poucos pontos (tech_profile.AVAILABILITY_*_POINTS).
+    Só quem pode receber a OS: com acesso ao app, Ativo na operação e sem indisponibilidade nos
+    dias da visita (sem horário: hoje). A distância e as visitas a esta mesma loja vêm do mesmo
+    cálculo de "técnicos mais próximos". Os favoritos da cidade da loja ganham pontos e vaga
+    garantida entre os `limit`. Com horário, a disponibilidade informada no app soma ou tira
+    poucos pontos (tech_profile.AVAILABILITY_*_POINTS).
     """
-    techs = list(
-        await db.scalars(
-            select(User).where(User.role == UserRole.TECHNICIAN, User.is_active.is_(True))
+    first_day, last_day = unavailability.days_of(target.start, target.end)
+    techs = [
+        tech
+        for tech in await db.scalars(
+            select(User).where(
+                User.role == UserRole.TECHNICIAN,
+                User.is_active.is_(True),
+                User.operational_status == OperationalStatus.ACTIVE,
+            )
         )
-    )
+        if technician_status.unavailable_between(tech.unavailability, first_day, last_day) is None
+    ]
     if not techs:
         return []
     ids = [t.id for t in techs]
@@ -229,15 +243,23 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
 
     # Em jornada: a aberta e dentro do limite (a esquecida aberta não conta).
     on_shift = set(await active_shifts(db, ids))
-    areas = {
-        a.user_id: set(a.service_areas or [])
-        for a in await db.scalars(
-            select(TechnicianApplication).where(
-                TechnicianApplication.user_id.in_(ids),
-                TechnicianApplication.status == ApplicationStatus.APPROVED,
+    # Áreas de atuação: as do cadastro; sem elas, as da ficha aprovada (cadastro de antes da
+    # cópia na aprovação).
+    without_areas = [t.id for t in techs if not t.service_areas]
+    ficha_areas = (
+        {
+            user_id: list(found or [])
+            for user_id, found in await db.execute(
+                select(TechnicianApplication.user_id, TechnicianApplication.service_areas).where(
+                    TechnicianApplication.user_id.in_(without_areas),
+                    TechnicianApplication.status == ApplicationStatus.APPROVED,
+                )
             )
-        )
-    }
+        }
+        if without_areas
+        else {}
+    )
+    areas = {t.id: set(t.service_areas or ficha_areas.get(t.id) or []) for t in techs}
     point = await technician_regions.point_for_place(
         db,
         location=target.location,

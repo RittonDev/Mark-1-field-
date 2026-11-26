@@ -74,8 +74,9 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("GET", "/tickets/{ticket_id}/offers"): (("commercial.payouts",), V),
     ("POST", "/tickets/{ticket_id}/offers"): (("commercial.payouts",), E),
     ("POST", "/tickets/{ticket_id}/offers/{offer_id}/cancel"): (("commercial.payouts",), E),
-    # Chave PIX do técnico: a central só remove (quem cadastra é ele, no app).
-    ("DELETE", "/technicians/{user_id}/pix"): (("commercial.payouts",), E),
+    # Formas de recebimento do técnico: a central vê e remove (quem cadastra é ele, no app).
+    ("GET", "/technicians/{user_id}/payout-methods"): (("commercial.payouts",), V),
+    ("DELETE", "/technicians/{user_id}/payout-methods/{method_id}"): (("commercial.payouts",), E),
     # Notas fiscais dos técnicos: a central vê e confere em Pagamentos (nunca apaga).
     ("GET", "/technician-invoices"): (("commercial.payouts",), V),
     ("POST", "/technician-invoices/{invoice_id}/check"): (("commercial.payouts",), E),
@@ -114,6 +115,11 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("POST", "/technicians/{user_id}/level/waivers"): (("base.technicians",), E),
     ("DELETE", "/technicians/{user_id}/level/waivers/{waiver_id}"): (("base.technicians",), E),
     ("POST", "/technicians/levels/refresh"): (("base.technicians",), E),
+    # Cadastro V2: e-mails enviados, situação na operação, validação do e-mail e link de senha.
+    ("GET", "/technicians/{user_id}/emails"): (("base.technicians",), V),
+    ("POST", "/technicians/{user_id}/operational-status"): (("base.technicians",), E),
+    ("POST", "/technicians/{user_id}/email-verification"): (("base.technicians",), E),
+    ("POST", "/technicians/{user_id}/password-reset-link"): (("base.technicians",), E),
     ("GET", "/onboarding/invites"): (("base.onboarding",), V),
     ("GET", "/onboarding/applications"): (("base.onboarding",), V),
     ("GET", "/onboarding/applications/pending-count"): (("base.onboarding",), V),
@@ -122,6 +128,12 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("DELETE", "/onboarding/invites/{invite_id}"): (("base.onboarding",), E),
     ("POST", "/onboarding/applications/{application_id}/approve"): (("base.onboarding",), E),
     ("POST", "/onboarding/applications/{application_id}/reject"): (("base.onboarding",), E),
+    # Reabrir a ficha reprovada e reenviar a validação do e-mail dela.
+    ("POST", "/onboarding/applications/{application_id}/reopen"): (("base.onboarding",), E),
+    ("POST", "/onboarding/applications/{application_id}/email-verification"): (
+        ("base.onboarding",),
+        E,
+    ),
     ("DELETE", "/onboarding/applications/{application_id}"): (("base.onboarding",), E, MANAGER),
     # Análise
     ("GET", "/dashboard/summary"): (("analysis.dashboard",), V),
@@ -280,6 +292,13 @@ OTHER: dict[tuple[str, str], str] = {
     ("PATCH", "/me/profile"): "TECHNICIAN",
     ("POST", "/me/profile/photo"): "TECHNICIAN",
     ("DELETE", "/me/profile/photo"): "TECHNICIAN",
+    # E-mail novo (validar pelo link ou cancelar) e as formas de recebimento (pedem a senha).
+    ("POST", "/me/profile/email/verification"): "TECHNICIAN",
+    ("DELETE", "/me/profile/email/pending"): "TECHNICIAN",
+    ("POST", "/me/profile/payout-methods"): "TECHNICIAN",
+    ("PUT", "/me/profile/payout-methods/{method_id}"): "TECHNICIAN",
+    ("POST", "/me/profile/payout-methods/{method_id}/preferred"): "TECHNICIAN",
+    ("POST", "/me/profile/payout-methods/{method_id}/remove"): "TECHNICIAN",
     # Notas fiscais (o próprio técnico, na aba Faturamento)
     ("GET", "/me/invoices"): "TECHNICIAN",
     ("GET", "/me/invoices/payouts"): "TECHNICIAN",
@@ -312,6 +331,13 @@ OTHER: dict[tuple[str, str], str] = {
     ("GET", "/repair-photos/{photo_id}"): "PUB",
     ("GET", "/users/{user_id}/avatar"): "PUB",
     ("GET", "/technician-invoices/{invoice_id}/download"): "PUB",
+    # Busca de CEP: bearer + optional_user (logado, o limite é por pessoa), sem get_current_user.
+    ("GET", "/public/cep/{cep}"): "PUB",
+    # Esqueci minha senha e os links do e-mail (o token vem no corpo).
+    ("POST", "/auth/forgot-password"): "PUB",
+    ("POST", "/auth/password-reset/check"): "PUB",
+    ("POST", "/auth/password-reset"): "PUB",
+    ("POST", "/auth/verify-email"): "PUB",
     ("WS", "/ws"): "WS",
 }
 

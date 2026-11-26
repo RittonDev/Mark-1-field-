@@ -427,7 +427,11 @@ async def update(
     """`actor`: quem alterou (autor do fechamento das ofertas do técnico desativado e do link de
     validação do e-mail novo). O histórico é da rota (user_history.track)."""
     fields = data.model_dump(exclude_unset=True)
-    if fields.get("cpf") and fields["cpf"] != user.cpf and await cpf_in_use(db, fields["cpf"], user.id):
+    if (
+        fields.get("cpf")
+        and fields["cpf"] != user.cpf
+        and await cpf_in_use(db, fields["cpf"], user.id)
+    ):
         raise CodedError(CPF_TAKEN, CPF_TAKEN_CODE, 409)
     _group(fields, user, ("rg_number", "rg_issuer", "rg_state"), personal.rg_group)
     _group(
@@ -517,12 +521,14 @@ def verification_target(user: User) -> tuple[str, str]:
     sem ele, o login ainda não validado ("check"). Já validado e sem pedido: 409; endereço que não
     recebe mensagens: 422."""
     if user.email_pending:
-        return user.email_pending, "change"
-    if user.email_verified_at is not None:
+        address, reason = user.email_pending, "change"
+    elif user.email_verified_at is not None:
         raise CodedError(EMAIL_ALREADY_VERIFIED, EMAIL_ALREADY_VERIFIED_CODE, 409)
-    if not mail.sendable(user.email):
+    else:
+        address, reason = user.email, "check"
+    if not mail.sendable(address):
         raise WorkflowError(NO_VALID_EMAIL)
-    return user.email, "check"
+    return address, reason
 
 
 def check_password_link(user: User) -> None:
@@ -538,8 +544,6 @@ async def queue_verification(
 ) -> tuple[EmailOutbox | None, EmailQueuedStatus]:
     """A validação do e-mail na fila (o commit e o `deliver_soon` são da rota)."""
     address, reason = verification_target(user)
-    if not mail.sendable(address):
-        raise WorkflowError(NO_VALID_EMAIL)
     return await mail.enqueue(
         db,
         template=EmailTemplate.VERIFY_EMAIL,

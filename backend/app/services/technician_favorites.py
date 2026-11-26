@@ -1,11 +1,13 @@
 """Técnicos favoritos por cidade: a regra automática e as decisões da central.
 
 Automático (calculado na hora, nada gravado): até 3 por cidade, entre quem mais atendeu nas lojas
-da cidade nos últimos 365 dias, com pelo menos 2 OS. Atendimento é o mesmo de "Base em X (N OS)"
-(technician_regions.footprint): responsável ou outro técnico da visita numa OS não cancelada que
-teve chegada ou foi concluída, ou quem apontou trabalho; conta 1 por técnico e OS. Desempate:
-quem tem acesso ao app, depois a visita mais recente, depois o nome. Os inativos (parceiros do
-Field Control sem acesso ao app) entram no ranking; só não recebem OS nem aparecem nas sugestões.
+da cidade nos últimos 365 dias, com pelo menos 2 OS e Ativo na operação. Atendimento é o mesmo de
+"Base em X (N OS)" (technician_regions.footprint): responsável ou outro técnico da visita numa OS
+não cancelada que teve chegada ou foi concluída, ou quem apontou trabalho; conta 1 por técnico e
+OS. Desempate: quem tem acesso ao app, depois a visita mais recente, depois o nome. Os sem acesso
+ao app (parceiros do Field Control) entram no ranking e no automático (a central libera o acesso
+por ali); só não recebem OS nem aparecem nas sugestões. Inativo e Bloqueado ficam no ranking, mas
+fora do automático (o fixado pela central continua, com o selo da situação).
 
 Manual (tabela technician_favorites): a central fixa qualquer técnico na cidade (até 10, com
 nota) ou tira um automático, e aí o próximo sobe. Favorito efetivo = fixado ou automático.
@@ -27,7 +29,7 @@ from sqlalchemy import delete, func, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import UserRole
+from app.core.enums import OperationalStatus, UserRole
 from app.db.base import utcnow
 from app.models import Location, Ticket, User
 from app.models.technician_favorite import FavoriteKind, TechnicianFavorite
@@ -70,6 +72,7 @@ class Visit:
     is_active: bool
     visits: int
     last_visit_at: datetime | None
+    operational_status: OperationalStatus = OperationalStatus.ACTIVE
 
 
 def _rank_key(v: Visit) -> tuple:
@@ -81,9 +84,16 @@ def rank_city(
     rows: Iterable[Visit], hidden: frozenset[uuid.UUID] = frozenset()
 ) -> tuple[list[Visit], list[uuid.UUID]]:
     """Ranking completo da cidade (mais OS, acesso ao app, visita mais recente, nome) e os
-    automáticos: os 3 primeiros com pelo menos 2 OS que a central não tirou da lista."""
+    automáticos: os 3 primeiros com pelo menos 2 OS, Ativos na operação, que a central não tirou
+    da lista."""
     ranked = sorted(rows, key=_rank_key)
-    automatic = [v.user_id for v in ranked if v.visits >= MIN_VISITS and v.user_id not in hidden]
+    automatic = [
+        v.user_id
+        for v in ranked
+        if v.visits >= MIN_VISITS
+        and v.user_id not in hidden
+        and v.operational_status == OperationalStatus.ACTIVE
+    ]
     return ranked, automatic[:TOP]
 
 
@@ -174,6 +184,7 @@ async def _cities(
             fp.c.at,
             User.name,
             User.is_active,
+            User.operational_status,
         )
         .select_from(fp)
         .join(Location, Location.id == fp.c.location_id)
@@ -194,17 +205,25 @@ async def _cities(
             v.c.user_id,
             v.c.name,
             v.c.is_active,
+            v.c.operational_status,
             func.count(v.c.ticket_id.distinct()),
             func.max(v.c.at),
         ).group_by(
             func.grouping_sets(
-                tuple_(v.c.state, v.c.city, v.c.user_id, v.c.name, v.c.is_active),
+                tuple_(
+                    v.c.state,
+                    v.c.city,
+                    v.c.user_id,
+                    v.c.name,
+                    v.c.is_active,
+                    v.c.operational_status,
+                ),
                 tuple_(v.c.state, v.c.city),
             )
         )
     )
     merged: dict[tuple[CityKey, uuid.UUID], Visit] = {}
-    for raw_state, raw_city, user_id, name, is_active, count, last_at in rows.all():
+    for raw_state, raw_city, user_id, name, is_active, status, count, last_at in rows.all():
         place = _key(raw_state, raw_city)
         city = out.get(place) if place is not None else None
         if place is None or city is None:
@@ -216,7 +235,14 @@ async def _cities(
         if before is not None:  # a mesma cidade escrita de outro jeito
             count += before.visits
             last_at = max((d for d in (last_at, before.last_visit_at) if d), default=None)
-        merged[(place, user_id)] = Visit(user_id, name, is_active, count, last_at)
+        merged[(place, user_id)] = Visit(
+            user_id,
+            name,
+            is_active,
+            count,
+            last_at,
+            OperationalStatus(status or OperationalStatus.ACTIVE),
+        )
     for (place, _), visit in merged.items():
         out[place].rows.append(visit)
     return out
@@ -358,6 +384,7 @@ def _technician(board: _Board, user: User, people: _People) -> FavoriteTechnicia
         phone=user.phone,
         avatar_url=technicians.avatar_url(user),
         is_active=user.is_active,
+        operational_status=user.operational_status,
         on_shift=user.id in people.on_shift,
         open_tickets=people.open_tickets.get(user.id, 0),
         base_city=user.base_city,

@@ -55,7 +55,7 @@ export default function SetPasswordPage() {
         <PublicPanel
           icon={<Link2Off className="size-10 text-ink-muted" />}
           title="Link incompleto"
-          text="Abra de novo pelo botão do e-mail que você recebeu."
+          text="Abra de novo o link do e-mail que você recebeu."
         />
       ) : save.data && check.data ? (
         <PublicPanel

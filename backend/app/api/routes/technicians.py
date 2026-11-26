@@ -11,11 +11,13 @@ from app.core.enums import UserRole
 from app.core.security import InvalidToken, decode_token
 from app.models import Category, Location, Project, ServiceType, User, UserChange
 from app.models.user_change import VIA_CENTRAL
+from app.schemas.account import EmailLogOut, EmailQueued
 from app.schemas.my_profile import UserChangeOut
 from app.schemas.tech_profile import DayPeriod, Weekday
 from app.schemas.technician import (
     ImportResult,
     NearbyOut,
+    OperationalStatusIn,
     RegionRefresh,
     RegionState,
     TechnicianCreate,
@@ -24,7 +26,7 @@ from app.schemas.technician import (
     TechnicianUpdate,
     TemporaryPassword,
 )
-from app.services import suggestions, user_history
+from app.services import login_guard, mail, suggestions, technician_status, user_history
 from app.services import technician_levels as levels_svc
 from app.services import technician_regions as regions_svc
 from app.services import technicians as svc
@@ -34,14 +36,19 @@ from app.services.spreadsheet import MAX_BYTES, SpreadsheetError, read_upload
 
 router = APIRouter(tags=["technicians"])
 
-# Tela de Técnicos ("Editar" inclui Liberar acesso). As regiões também aparecem na Homologação
-# e os técnicos perto da loja, no detalhe do Local. As sugestões ficam com toda a gestão.
+# Tela de Técnicos ("Editar" inclui Liberar acesso, a situação na operação e os e-mails de
+# validação e de senha). As regiões também aparecem na Homologação e os técnicos perto da loja,
+# no detalhe do Local. As sugestões ficam com toda a gestão. As formas de recebimento do técnico
+# são de Pagamentos (api/routes/payouts.py).
 TechniciansView = access_user("base.technicians")
 TechniciansEdit = access_user("base.technicians", level="edit")
 RegionsView = access_user("base.technicians", "base.onboarding")
 NearbyView = access_user("base.technicians", "base.locations")
-# Chave PIX do técnico: é dado de Pagamentos. A central só remove (quem cadastra é o técnico).
-PixEdit = access_user("commercial.payouts", level="edit")
+
+# E-mails da central para um técnico (validação e link de senha): por hora, cada um.
+EMAILS_PER_HOUR = 5
+# GET /technicians/{id}/changes?field=: um campo do histórico ("operational_status").
+HISTORY_FIELD = r"^[a-z_]{1,40}$"
 
 
 async def _one(db: DB, user: User) -> TechnicianOut:
@@ -67,6 +74,18 @@ async def _ensure_levels(db: DB) -> None:
     leem a conta guardada; a rotina periódica mantém em dia)."""
     if await levels_svc.ensure_computed(db):
         await db.commit()
+
+
+async def _email_limit(scope: str, user_id: uuid.UUID) -> None:
+    """Até EMAILS_PER_HOUR e-mails do mesmo tipo por técnico na hora: 429 com Retry-After."""
+    try:
+        await login_guard.hit(scope, str(user_id), EMAILS_PER_HOUR, 3600)
+    except login_guard.RateLimited as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            str(exc),
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
 
 
 @router.get("/technicians", response_model=list[TechnicianOut])
@@ -164,9 +183,11 @@ async def create_technician(
 async def update_technician(
     user_id: uuid.UUID, body: TechnicianUpdate, db: DB, actor: TechniciansEdit
 ) -> TechnicianOut:
-    """Desativar fecha as ofertas em aberto dele (o tempo real das OS sai no commit). O que mudou
-    fica no histórico do cadastro (via central). O perfil técnico não muda por aqui (o técnico
-    mantém no app; campo que a ficha não tem é ignorado)."""
+    """Só os campos enviados mudam. Desativar fecha as ofertas em aberto dele (o tempo real das OS
+    sai no commit) e invalida os links de senha. Trocar o e-mail troca o login na hora, zera a
+    validação e manda o link para o novo (sai depois do commit). CPF repetido: 409. O que mudou
+    fica no histórico do cadastro (via central). O perfil técnico e o veículo não mudam por aqui
+    (o técnico mantém no app; campo que a ficha não tem é ignorado)."""
     user = await svc.get_technician(db, user_id)
     before = await user_history.snapshot(db, user)
     await svc.update(db, user, body, actor)
@@ -178,7 +199,8 @@ async def update_technician(
 
 @router.post("/technicians/{user_id}/reset-password", response_model=TemporaryPassword)
 async def reset_password(user_id: uuid.UUID, db: DB, actor: TechniciansEdit) -> TemporaryPassword:
-    """Esqueceu a senha: gera uma provisória e encerra as sessões abertas do técnico."""
+    """Esqueceu a senha: gera uma provisória e encerra as sessões abertas do técnico (os links de
+    senha mandados por e-mail deixam de valer)."""
     user = await svc.get_technician(db, user_id)
     password = await svc.reset_password(db, user)
     changes = [dict(user_history.PASSWORD_TEMPORARY)]
@@ -327,33 +349,94 @@ async def technician_changes(
     viewer: TechniciansView,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     before: str | None = None,
+    field: Annotated[str | None, Query(pattern=HISTORY_FIELD)] = None,
 ) -> list[UserChange] | list[UserChangeOut]:
-    """Histórico do cadastro, do mais novo para o mais antigo: pelo técnico (app) e pela central,
-    com quem fez. A chave PIX vem só mascarada; para quem não tem Pagamentos, nem isso: a chave
-    vira "***" e o titular não vem (user_history.for_viewer). Páginas: `before` =
-    "{created_at}|{id}" da última linha recebida traz as `limit` linhas seguintes (mais antigas);
-    estragado, 422 "Página do histórico inválida. Recarregue a ficha.". Sem ele, as mais novas."""
+    """Histórico do cadastro, do mais novo para o mais antigo: pelo técnico (app ou link do
+    e-mail), pela central e pela aprovação da ficha, com quem fez e o motivo (`note`). Dados de
+    recebimento vêm só mascarados; para quem não tem Pagamentos, nem isso (user_history.for_viewer).
+    `field`: só as linhas que mexeram nesse campo (a situação: "operational_status"). Páginas:
+    `before` = "{created_at}|{id}" da última linha recebida traz as `limit` linhas seguintes (mais
+    antigas); estragado, 422 "Página do histórico inválida. Recarregue a ficha.". Sem ele, as mais
+    novas."""
     user = await svc.get_technician(db, user_id)
-    rows = await user_history.list_changes(db, user.id, limit, before)
+    rows = await user_history.list_changes(db, user.id, limit, before, field=field)
     return user_history.for_viewer(rows, viewer)
 
 
-@router.delete("/technicians/{user_id}/pix", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_technician_pix(user_id: uuid.UUID, db: DB, actor: PixEdit) -> Response:
-    """A central só remove a chave PIX (ex.: chave errada ou suspeita); quem cadastra uma nova é o
-    técnico, no app. Sem chave: nada muda."""
+@router.post("/technicians/{user_id}/operational-status", response_model=TechnicianOut)
+async def change_operational_status(
+    user_id: uuid.UUID, body: OperationalStatusIn, db: DB, actor: TechniciansEdit
+) -> TechnicianOut:
+    """Situação na operação (Ativo, Inativo, Bloqueado) com o motivo (3 a 500): o motivo e o
+    registro são a autorização. A mesma situação: 409. Inativo ou Bloqueado sai das sugestões,
+    das ofertas (as em aberto fecham) e da escolha de técnico; as OS que ele já tem ficam.
+    `cut_access` corta também o acesso ao app; reativar não devolve o acesso. Histórico via
+    central, com o motivo."""
+    user, changes = await technician_status.apply(db, user_id, body, actor)
+    await commit_and_publish(db)
+    await user_history.publish_changed(user, changes, via=VIA_CENTRAL, actor=actor)
+    return await _one(db, user)
+
+
+@router.post(
+    "/technicians/{user_id}/email-verification",
+    response_model=EmailQueued,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def send_email_verification(
+    user_id: uuid.UUID, db: DB, actor: TechniciansEdit
+) -> EmailQueued:
+    """Manda (de novo) o link de validação: para o e-mail novo pedido no app ou, sem ele, para o
+    login ainda não validado. Já validado: 409; sem endereço que recebe mensagens: 422; até 5 por
+    hora (429). Com o envio desligado, "not_configured" (nada sai)."""
     user = await svc.get_technician(db, user_id)
-    if svc.has_pix(user):
-        before = await user_history.snapshot(db, user)
-        svc.clear_pix(user)
-        changes = await user_history.track(db, user, before, via=VIA_CENTRAL, actor=actor)
-        await db.commit()
-        await user_history.publish_changed(user, changes, via=VIA_CENTRAL, actor=actor)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    svc.verification_target(user)
+    await _email_limit("mail-resend-central", user.id)
+    row, queued = await svc.queue_verification(db, user, actor)
+    await db.commit()
+    if row is not None and queued == "queued":
+        mail.deliver_soon([row.id])
+    return mail.queued(row, queued)
+
+
+@router.post(
+    "/technicians/{user_id}/password-reset-link",
+    response_model=EmailQueued,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def send_password_link(user_id: uuid.UUID, db: DB, actor: TechniciansEdit) -> EmailQueued:
+    """Manda ao login do técnico o link para criar uma senha nova (vale 2 h; a senha de hoje
+    continua até ele usar o link). Sem acesso ao app: 409; sem endereço que recebe mensagens: 422;
+    até 5 por hora (429). Histórico "Link para nova senha: enviado para {e-mail}" (via central).
+    A senha provisória continua em POST /technicians/{id}/reset-password."""
+    user = await svc.get_technician(db, user_id)
+    svc.check_password_link(user)
+    await _email_limit("password-link", user.id)
+    row, queued, changes = await svc.queue_password_link(db, user, actor)
+    await db.commit()
+    if row is not None and queued == "queued":
+        mail.deliver_soon([row.id])
+    await user_history.publish_changed(user, changes, via=VIA_CENTRAL, actor=actor)
+    return mail.queued(row, queued)
+
+
+@router.get("/technicians/{user_id}/emails", response_model=list[EmailLogOut])
+async def technician_emails(
+    user_id: uuid.UUID,
+    db: DB,
+    _: TechniciansView,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> list[EmailLogOut]:
+    """Os e-mails pedidos para o técnico (validação, boas-vindas, nova senha), o mais novo
+    primeiro, com a situação de cada um ("expired": não saiu no prazo, também com o envio
+    desligado)."""
+    user = await svc.get_technician(db, user_id)
+    return await svc.email_log(db, user, limit)
 
 
 @router.get("/technicians/{user_id}", response_model=TechnicianOut)
 async def get_technician(user_id: uuid.UUID, db: DB, _: TechniciansView) -> TechnicianOut:
-    """Um técnico (o cadastro aberto por link, ?tecnico= na web), com o detalhe do perfil técnico:
-    os nomes das ferramentas ativas, a formação e a data de cada parte. 404 se não for técnico."""
+    """Um técnico (a ficha em /tecnicos/{id} na web), com o detalhe: os nomes das ferramentas
+    ativas, a formação, a data de cada parte do perfil técnico, os dados pessoais, a empresa e o
+    veículo. 404 se não for técnico."""
     return await _one(db, await svc.get_technician(db, user_id))
