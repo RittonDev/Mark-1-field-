@@ -1191,17 +1191,19 @@ npx expo export --platform android
 As **sondas** (`tests/*.test.mjs`) testam as regras puras com o `node:test` (Node 22.6 ou mais, que tira os tipos do
 TypeScript): a chave PIX, as máscaras de documentos e contas e as regras de RG, órgão emissor e placa (`masks`), as
 telas do cadastro com o CEP, o e-mail, o veículo e os resumos do menu (`profile-form`), as formas de recebimento e os
-bancos (`payout-form`), a indisponibilidade (`unavailability`), o "Esqueci minha senha" (`forgot-password`), o perfil
-técnico e o salvar ao tocar, o gráfico das Estatísticas (com as caixas do eixo), as seções do Histórico e as datas e a
-área da oferta. A de indisponibilidade compara também as mensagens com as do servidor
-(`backend/app/services/unavailability.py`) e pula esse caso quando a pasta `backend` não está ao lado (num contêiner
-só com o `mobile`). O módulo testado não importa React nem React Native (só `import type`), e o gancho
-`tests/resolve-ts.mjs` resolve os imports relativos sem extensão (`./masks` → `./masks.ts`). Duas fogem disso:
+bancos (`payout-form`), a indisponibilidade (`unavailability`), o "Esqueci minha senha" (`forgot-password`), o
+calendário do iPhone (`date-field`), o perfil técnico e o salvar ao tocar, o gráfico das Estatísticas (com as caixas do
+eixo), as seções do Histórico e as datas e a área da oferta. A de indisponibilidade compara também as mensagens com as
+do servidor (`backend/app/services/unavailability.py`) e pula esse caso quando a pasta `backend` não está ao lado (num
+contêiner só com o `mobile`). O módulo testado não importa React nem React Native (só `import type`), e o gancho
+`tests/resolve-ts.mjs` resolve os imports relativos sem extensão (`./masks` → `./masks.ts`). Três fogem disso:
 `ticket-hold.test.mjs` roda o `db.ts` de verdade (a OS segura na tela e o `pruneOld`) sobre o `node:sqlite` (Node
-22.13 ou mais), com dublês de `expo-sqlite`, `react-native`, `./changes` e `./ops` registrados nela mesma; e
-`billing-offer.test.mjs` lê o código das telas do Faturamento e da oferta (que importam o React Native) e confere as
-regras que não podem voltar (o mês com nota, o Outro mês, a nota noutra competência, o selo que desce e o foco do
-leitor de tela no voltar):
+22.13 ou mais), com dublês de `expo-sqlite`, `react-native`, `./changes` e `./ops` registrados nela mesma;
+`session-last-email.test.mjs` roda o `session.ts` e o `profile.ts` de verdade (o último e-mail do login depois da
+troca validada fora do app), com os dublês de `tests/stubs` registrados só no processo dela (`module.register`; o
+`node --test` roda cada arquivo num processo); e `billing-offer.test.mjs` lê o código das telas do Faturamento e da
+oferta (que importam o React Native) e confere as regras que não podem voltar (o mês com nota, o Outro mês, a nota
+noutra competência, o selo que desce e o foco do leitor de tela no voltar):
 
 ```bash
 node --experimental-strip-types --import ./tests/resolve-ts.mjs --test "tests/*.test.mjs"
