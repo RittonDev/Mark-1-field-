@@ -27,8 +27,9 @@ export default function ContactScreen() {
   const styles = useStyles(makeStyles);
   const state = useProfileForm(CONTACT_SECTION);
   const { profile, review, errors, update, saving } = state;
-  // "Enviar link" / "Reenviar link" ou "Cancelar troca" no ar.
+  // "Enviar link" / "Reenviar link" ou "Cancelar troca" no ar (o carregando no botão); `acting` trava o segundo toque.
   const [busy, setBusy] = useState<"resend" | "cancel" | null>(null);
+  const acting = useRef(false);
   const phone2Ref = useRef<TextInputInstance>(null);
   const emailRef = useRef<TextInputInstance>(null);
 
@@ -40,14 +41,16 @@ export default function ContactScreen() {
   const editing = review?.body.email !== undefined;
 
   async function sendLink() {
-    if (!profile || busy || saving) return;
+    if (!profile || acting.current || saving) return;
+    // Dois toques seguidos não mandam dois links (a conferência da rede já é assíncrona).
+    acting.current = true;
     const target = profile.email_pending ?? profile.email;
-    if (await noNetwork()) {
-      showToast(NO_INTERNET, { description: "Conecte o aparelho para enviar o link." });
-      return;
-    }
-    setBusy("resend");
     try {
+      if (await noNetwork()) {
+        showToast(NO_INTERNET, { description: "Conecte o aparelho para enviar o link." });
+        return;
+      }
+      setBusy("resend");
       await sendEmailLink();
       haptic.success();
       showToast("Link enviado", { tone: "success", description: `Abra o e-mail em ${target}.` });
@@ -55,23 +58,25 @@ export default function ContactScreen() {
       if (await offlineFailure(error)) showToast(NO_INTERNET, { description: "Conecte o aparelho para enviar o link." });
       else showToast("Não foi possível enviar o link", { tone: "error", description: errorMessage(error) });
     } finally {
+      acting.current = false;
       setBusy(null);
     }
   }
 
   async function cancelChange() {
-    if (!profile || busy || saving) return;
-    const ok = await confirmAction("Cancelar a troca de e-mail?", `Você continua entrando com ${profile.email}.`, {
-      confirmText: "Cancelar troca",
-      cancelText: "Voltar",
-    });
-    if (!ok) return;
-    if (await noNetwork()) {
-      showToast(NO_INTERNET, { description: "Conecte o aparelho para cancelar a troca." });
-      return;
-    }
-    setBusy("cancel");
+    if (!profile || acting.current || saving) return;
+    acting.current = true;
     try {
+      const ok = await confirmAction("Cancelar a troca de e-mail?", `Você continua entrando com ${profile.email}.`, {
+        confirmText: "Cancelar troca",
+        cancelText: "Voltar",
+      });
+      if (!ok) return;
+      if (await noNetwork()) {
+        showToast(NO_INTERNET, { description: "Conecte o aparelho para cancelar a troca." });
+        return;
+      }
+      setBusy("cancel");
       await cancelEmailChange();
       haptic.success();
       showToast("Troca de e-mail cancelada", { tone: "success" });
@@ -79,6 +84,7 @@ export default function ContactScreen() {
       if (await offlineFailure(error)) showToast(NO_INTERNET, { description: "Conecte o aparelho para cancelar a troca." });
       else showToast("Não foi possível cancelar a troca", { tone: "error", description: errorMessage(error) });
     } finally {
+      acting.current = false;
       setBusy(null);
     }
   }

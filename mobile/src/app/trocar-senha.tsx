@@ -42,6 +42,7 @@ export default function ChangePasswordScreen() {
   // O cadastro diz se o e-mail de login está validado e se o servidor envia e-mail ("Esqueci a senha atual").
   const profile = useProfile();
   const [requesting, setRequesting] = useState(false);
+  const asking = useRef(false);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -65,19 +66,21 @@ export default function ChangePasswordScreen() {
       : null;
 
   async function forgotCurrent() {
-    if (!resetEmail || requesting || saving) return;
-    const ok = await confirmAction(
-      "Enviar link para criar uma senha nova?",
-      `Vamos enviar para ${resetEmail}. Ao criar a senha nova, todos os aparelhos saem da conta.`,
-      { confirmText: "Enviar" },
-    );
-    if (!ok) return;
-    if (await noNetwork()) {
-      showToast("Sem internet", { description: "Conecte o aparelho para pedir o link." });
-      return;
-    }
-    setRequesting(true);
+    if (!resetEmail || asking.current || saving) return;
+    // Dois toques seguidos não abrem duas perguntas nem mandam dois pedidos.
+    asking.current = true;
     try {
+      const ok = await confirmAction(
+        "Enviar link para criar uma senha nova?",
+        `Vamos enviar para ${resetEmail}. Ao criar a senha nova, todos os aparelhos saem da conta.`,
+        { confirmText: "Enviar" },
+      );
+      if (!ok) return;
+      if (await noNetwork()) {
+        showToast("Sem internet", { description: "Conecte o aparelho para pedir o link." });
+        return;
+      }
+      setRequesting(true);
       await requestPasswordReset(resetEmail);
       haptic.success();
       showToast("Link enviado", { tone: "success", description: `Abra o e-mail em ${resetEmail}.` });
@@ -93,6 +96,7 @@ export default function ChangePasswordScreen() {
         showToast("Não foi possível enviar o link", { tone: "error", description: errorMessage(e) });
       }
     } finally {
+      asking.current = false;
       setRequesting(false);
     }
   }

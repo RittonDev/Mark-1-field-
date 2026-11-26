@@ -6,7 +6,7 @@
 
 import { router } from "expo-router";
 import { HeaderHeightContext } from "expo-router/react-navigation";
-import { useContext, useState, type ReactNode } from "react";
+import { useContext, useRef, useState, type ReactNode } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../components/Icon";
@@ -39,6 +39,7 @@ export default function ForgotPasswordScreen() {
   const [sentTo, setSentTo] = useState("");
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
+  const sending = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const problem = forgotProblem(email);
@@ -59,13 +60,15 @@ export default function ForgotPasswordScreen() {
   }
 
   async function send(target: string) {
-    if (busy) return;
+    // Dois toques seguidos (ou o "Enviar" do teclado junto do botão) não mandam dois pedidos.
+    if (sending.current) return;
     setError(null);
     const server = serverUrl();
     if ("error" in server) {
       setError(server.error);
       return;
     }
+    sending.current = true;
     setBusy(true);
     try {
       if (await noNetwork()) {
@@ -84,6 +87,7 @@ export default function ForgotPasswordScreen() {
       else if (outcome === "offline") setError((await noNetwork()) ? FORGOT_MSG.offline : SERVER_DOWN);
       else setError(errorMessage(e));
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   }
