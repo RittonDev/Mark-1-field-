@@ -2309,6 +2309,490 @@ total, months}`:
 **Privacidade (LGPD).** São dados do próprio técnico: só ele e a gestão com Técnicos veem; o cliente e o portal nunca. O
 histórico traz só o recorte de campo, e a central vê só contagens.
 
+## Cadastro V2 (2026-11-25)
+
+**Por quê.** O levantamento do QA sobre o cadastro e a gestão dos técnicos pediu um cadastro mais completo, organizado do
+mesmo jeito na central e no app. Entraram: o endereço em partes com busca de CEP; CPF, RG, nascimento, telefone
+secundário e mini biografia; veículo; dados da empresa; várias formas de recebimento (chaves PIX e contas, uma
+preferencial); a indisponibilidade por período; a situação na operação (Ativo, Inativo, Bloqueado), separada do acesso
+ao app; os e-mails transacionais (validação do e-mail, boas-vindas e nova senha, com o "Esqueci minha senha" do app); a
+aprovação da ficha num passo e a reabertura da ficha reprovada. Na central, a ficha do técnico virou a página
+`/tecnicos/{id}` (`?secao=` abre a seção); no app, as Configurações seguem os mesmos grupos e nomes
+(`TECH_SECTION_GROUPS` de `lib/constants.ts`: Dados pessoais e cadastrais, Dados financeiros e empresariais e Perfil
+profissional; no app, "Credenciais" é "Senha"; o grupo Gestão é só da central). Código:
+`services/{mail,mail_templates,account,cep,payout_methods,unavailability,technician_status}.py`, `core/payout.py`,
+`schemas/{personal,payout_method,account,cep}.py`, `models/{payout_method,account_token,email_outbox}.py`,
+`api/routes/cep.py` e as rotas novas em `api/routes/{auth,my_profile,payouts,technicians,onboarding}.py`. Testes:
+`test_cadastro_v2_migration.py`, `test_cep.py`, `test_mail.py`, `test_account_links.py`, `test_payout_methods.py`,
+`test_cadastro_v2_profile.py`, `test_unavailability.py`, `test_operational_status.py`, `test_onboarding_v2.py` e
+`test_technician_credentials.py`.
+
+**Dados** (migração `b7e2d4f6a8c1`, depois de `f5a7c9e1b3d6`).
+- `users`, colunas novas (nulas, salvo indicação):
+
+  | Coluna | Conteúdo |
+  |---|---|
+  | `address_number` (10), `address_complement` (60) | número ("S/N" vale) e complemento; `address_line` passa a ser só o logradouro |
+  | `cpf` (11, único: `uq_users_cpf`) | só os números |
+  | `rg_number` (20), `rg_issuer` (20), `rg_state` (2) | RG, órgão emissor e UF |
+  | `birth_date`, `phone_secondary` (40), `bio` | nascimento, telefone secundário ("(11) 98888-7777") e mini biografia (até 500 pela API) |
+  | `vehicle_model` (60), `vehicle_plate` (7) | veículo; a placa sem hífen |
+  | `company_document` (14), `company_name` e `company_trade_name` (160) | CNPJ (aceita o alfanumérico), razão social e nome fantasia |
+  | `service_areas` (JSONB NOT NULL, `[]`) | as áreas de atuação (copiadas da ficha na aprovação) |
+  | `email_verified_at`, `email_pending` (255), `email_pending_at` | o e-mail de login validado; o e-mail novo pedido no app, à espera do link |
+  | `operational_status` (NOT NULL, `active`), `operational_reason`, `operational_changed_at`, `operational_changed_by_id` (→ users, SET NULL) | a situação na operação |
+  | `unavailability` (JSONB NOT NULL, `[]`) | `[{id, start, end}]`, dias "AAAA-MM-DD", os dois inclusive, sem motivo |
+
+  Saem `pix_key_type`, `pix_key`, `pix_holder_name`, `pix_updated_at` e `ck_users_pix_pair` (depois da cópia para as
+  formas de recebimento).
+- `technician_applications`: `address` passa a ser o logradouro; entram `address_number`, `address_complement`,
+  `address_district` (120), `rg_number`, `rg_issuer`, `rg_state`, `phone_secondary`, `bio`, `company_name`,
+  `company_trade_name`, `vehicle_model`, `vehicle_plate`, `email_verified_at`, `reopened_at`, `reopened_by_id` (SET
+  NULL) e `reviews` (JSONB NOT NULL, `[]`): `[{action, at, by: {id, name} | null, note}]`, com `action` = `approved` |
+  `rejected` | `reopened` | `expired`.
+- `user_changes.note`: o motivo da gravação (a situação na operação).
+- `technician_payout_methods` (`TechnicianPayoutMethod`): `user_id` (→ users, CASCADE), `kind` (`pix` | `bank`),
+  `pix_key_type`, `pix_key` (80), `bank_code` (3), `bank_name` (80), `branch` (4), `account_number` (20),
+  `account_digit` (1: um número ou "X"), `account_type` (`checking` | `savings` | `payment`), `holder_name` (160, NOT
+  NULL), `holder_document` (14: CPF ou CNPJ sem pontuação; null na chave antiga que não é CPF nem CNPJ), `preferred`
+  (NOT NULL, false), `preferred_since` (null fora da preferencial), `changed_at` (NOT NULL: a última troca da chave, da
+  conta ou do titular), `created_at` e `updated_at`. Índices únicos parciais `uq_technician_payout_methods_preferred`
+  (`user_id` onde `preferred`), `uq_technician_payout_methods_pix` (`user_id`, `pix_key_type`, `pix_key` onde
+  `kind = 'pix'`) e `uq_technician_payout_methods_bank` (`user_id`, `bank_code`, `branch`, `account_number`,
+  `account_digit` onde `kind = 'bank'`); checks `ck_technician_payout_methods_pix_fields` e
+  `ck_technician_payout_methods_bank_fields` (os campos de cada tipo preenchidos só nele).
+- `account_tokens` (`AccountToken`): os links por e-mail. `purpose` (`verify_email` | `reset_password`), `reason` (na
+  validação, `signup`, `change` ou `check`; na senha, `self`, `central` ou `welcome`), `token_hash` (SHA-256, único),
+  `user_id` ou `application_id` (um dos dois: `ck_account_tokens_one_target`; CASCADE), `email`, `expires_at`,
+  `used_at`, `revoked_at`, `created_by_id` e `created_at`.
+- `email_outbox` (`EmailOutbox`): a fila e o registro dos e-mails. `template` (`verify_email` | `welcome` |
+  `password_reset`), `to_email`, `user_id` ou `application_id` (CASCADE), `context` (JSONB: o nome e o motivo; nunca o
+  token), `status` (`pending` | `sent` | `failed` | `expired`), `attempts`, `next_attempt_at`, `send_by`, `sent_at`,
+  `last_error` (500, sem endereço nem link), `created_by_id` e `created_at`; índice `ix_email_outbox_status_next`.
+- Passos de dados (laço simples; funções puras testadas em `tests/test_cadastro_v2_migration.py`):
+  1. o endereço "Rua Exemplo, 123 - Apto 4" vira logradouro, número e complemento (`split_address_line`); o que não casa
+     com segurança (também o complemento com mais de 60 caracteres) fica inteiro no logradouro;
+  2. a chave PIX de cada técnico vira a 1ª forma de recebimento, preferencial: o titular é o da chave (sem ele, o nome
+     do técnico), o documento do titular é a própria chave CPF ou CNPJ e as datas são o `pix_updated_at`;
+  3. das fichas aprovadas, só no que está vazio no técnico: o CPF (11 números e de ninguém mais; com duas fichas do
+     mesmo CPF, fica com a aprovada mais antiga), o nascimento, o CNPJ (14 caracteres) e as áreas de atuação;
+  4. cada ficha analisada ganha a entrada em `reviews` (a nota "Expirada sem análise", sem quem analisou, vira
+     `expired`);
+  5. no histórico, o acesso ao app "Bloqueado" vira "Sem acesso".
+
+  Todos os técnicos começam Ativos.
+- Downgrade: a preferencial que é PIX volta às colunas `pix_*` (a data é a mais nova entre `changed_at` e
+  `preferred_since`), o endereço volta a uma linha ("rua, número - complemento"; na ficha, também o bairro), "Sem
+  acesso" volta a "Bloqueado" e as linhas `via` "ficha" e "link" viram "central" e "app" (o código de antes só conhece
+  esses dois). Contas, chaves não preferenciais, situação, indisponibilidade, os dados pessoais novos, as análises, os
+  links e a fila se perdem.
+
+**Rotas** (prefixo `/api/v1`; a classificação está em `tests/test_access_routes.py`; V = Visualizar, E = Editar).
+
+| Rota | Guarda | Entrada → saída |
+|---|---|---|
+| `GET /public/cep/{cep}` | sem login (logado, o limite é por pessoa) | → `CepAddress {cep, street, district, city, state}` |
+| `POST /auth/forgot-password` | sem login | `{email}` → 202 `{detail}` |
+| `POST /auth/password-reset/check` | sem login | `{token}` → `PasswordResetCheck {email, name, kind, app_url}` |
+| `POST /auth/password-reset` | sem login | `{token, password}` (8 a 128) → `PasswordResetDone {email, app_url}` |
+| `POST /auth/verify-email` | sem login | `{token}` → `VerifyEmailResult {email, kind}` |
+| `GET /meta` | sem login | + `mail_enabled` |
+| `GET`/`PATCH /me/profile` | técnico | campos novos → `MyProfile` |
+| `POST /me/profile/email/verification` · `DELETE /me/profile/email/pending` | técnico | → `MyProfile` |
+| `POST /me/profile/payout-methods` · `PUT /me/profile/payout-methods/{method_id}` | técnico | `PayoutMethodCreate` / `PayoutMethodUpdate` → `MyProfile` |
+| `POST /me/profile/payout-methods/{method_id}/preferred` · `…/remove` | técnico | `{current_password}` → `MyProfile` |
+| `GET /technicians/{user_id}/payout-methods` | Pagamentos V | → `PayoutMethodAdmin[]` |
+| `DELETE /technicians/{user_id}/payout-methods/{method_id}` | Pagamentos E | → 204 |
+| `GET /payouts` | Pagamentos V | `with_payout_methods` (sai `with_pix`) → + `payout_methods` (sai `pix`) |
+| `GET /technicians`, `GET`/`PATCH /technicians/{user_id}` | Técnicos V / E | campos novos |
+| `GET /technicians/{user_id}/changes` | Técnicos V | + `field` |
+| `POST /technicians/{user_id}/operational-status` | Técnicos E | `{status, reason, cut_access?}` → `Technician` |
+| `POST /technicians/{user_id}/email-verification` · `…/password-reset-link` | Técnicos E | → 202 `EmailQueued` |
+| `GET /technicians/{user_id}/emails` | Técnicos V | `limit` 1 a 50 (padrão 20) → `EmailLog[]` |
+| `DELETE /technicians/{user_id}/pix` | **saiu** | |
+| `GET /users/assignable`, `/technicians/favorites…`, `/technicians/nearby` | como antes | + a situação (e, em `assignable`, a indisponibilidade) |
+| `GET /onboarding/applications`, `…/{application_id}` | Homologação V | campos novos |
+| `POST /onboarding/applications/{application_id}/approve` | Homologação E | corpo opcional → `ApplicationApproved {technician, welcome}` |
+| `POST /onboarding/applications/{application_id}/reopen` | Homologação E | `{reason}` → `ApplicationDetail` |
+| `POST /onboarding/applications/{application_id}/email-verification` | Homologação E | → 202 `EmailQueued` |
+| `POST /public/onboarding/{token}` | sem login | + campos novos → `{protocol, email_verification}` |
+
+`EmailQueued {status, to}`: `queued` (na fila; sai logo depois do commit), `not_configured` (envio desligado: a linha
+entra e vence sem sair, "Não enviado") ou `not_sendable` (o endereço não recebe mensagens: nada entra; `to` null).
+
+**Erros com código.** `CodedError` (`services/errors.py`) responde o status dele com `{"detail", "code"}`; a web e o app
+reagem pelo `code` e mostram o `detail`. Os 422 de regra sem código continuam `{"detail"}`.
+
+| HTTP | `code` | `detail` |
+|---|---|---|
+| 410 | `LINK_GONE` | senha: "Este link expirou ou já foi usado. Peça outro em “Esqueci minha senha”, no app, ou fale com a central pelo WhatsApp"; validação: "Este link de validação expirou ou já foi usado. Peça um novo no app, em Configurações › Contato, ou à central pelo WhatsApp"; link de senha com o acesso cortado: "Seu acesso ao app está desativado. Fale com a central pelo WhatsApp" |
+| 409 | `EMAIL_IN_USE` | "Este e-mail já está em uso em outro cadastro. Fale com a central pelo WhatsApp" |
+| 503 | `MAIL_DISABLED` | "O envio de e-mail está desligado. Peça à central pelo WhatsApp para redefinir sua senha" (Esqueci minha senha) / "O envio de e-mail está desligado. Fale com a central pelo WhatsApp" (link de validação pelo app) |
+| 404 / 503 | `CEP_NOT_FOUND` / `CEP_UNAVAILABLE` | "CEP não encontrado" / "Busca de CEP indisponível" |
+| 409 | `PAYOUT_METHOD_DUPLICATE` | "Esta chave PIX já está na lista" / "Esta conta já está na lista" |
+| 422 | `PAYOUT_METHODS_LIMIT` | "Limite de 10 formas de recebimento. Exclua uma para incluir outra" |
+| 404 | `PAYOUT_METHOD_NOT_FOUND` | "Esta forma de recebimento não existe mais. Atualize a lista" |
+| 422 | `PAYOUT_METHOD_KIND_LOCKED` | "Para mudar o tipo, exclua e cadastre de novo" |
+| 409 | `CPF_TAKEN` | "Este CPF já está em outro cadastro" |
+| 409 | `EMAIL_ALREADY_VERIFIED` | "Seu e-mail já está validado" (app) / "O e-mail deste técnico já está validado" (Técnicos) / "E-mail já validado" (ficha) |
+| 409 | `OPERATIONAL_STATUS_UNCHANGED` | "O técnico já está ativo" (ou inativo, bloqueado) |
+| 409 | `APP_ACCESS_REQUIRED` | "Libere o acesso ao app antes de enviar o link" |
+| 409 | `APPLICATION_NOT_REJECTED` / `EMAIL_TAKEN` / `APPLICATION_DUPLICATE` | "Só a ficha reprovada pode ser reaberta" / "Já existe um usuário com este e-mail" / "Há outra ficha desta pessoa em análise ou aprovada" |
+| 409 | `APPLICATION_NOT_PENDING` | "Reenvio só para ficha em análise" |
+
+**Dados pessoais** (`schemas/personal.py`: as mesmas regras na ficha pública, no app e na central; o servidor responde
+sem ponto final, as telas com).
+
+| Campo | Regra | Erro (422) |
+|---|---|---|
+| `cpf` | 11 números ("123.456.789-09" vale), com os dígitos verificadores; grava só os números | "CPF inválido" |
+| `company_document` | CNPJ de 14 caracteres (aceita o alfanumérico); grava sem pontuação, em maiúsculas | "CNPJ inválido" |
+| `rg_number` | maiúsculas, só números, letras, ".", "/", "-" e espaço; 5 a 20 com pelo menos 4 números ("12.345.678-X", "MG-12.345.678") | "Confira o número do RG" |
+| `rg_issuer` | letras sem acento e espaço, em maiúsculas (a "/" sai: "SSP/SP" vira "SSPSP"); 2 a 20 | "Confira o órgão emissor" |
+| `rg_state` | uma das 27 UFs | "UF inválida" |
+| RG em grupo | os três ou nenhum; o número vazio limpa os três | "Informe o número, o órgão emissor e a UF do RG" |
+| `vehicle_plate` | antiga (ABC1234) ou Mercosul (ABC1D23); grava sem hífen ("abc-1234" → "ABC1234") e mostra "ABC-1234" | "Placa inválida: confira as letras e os números" |
+| `phone_secondary` | 10 a 13 números; grava como o celular, "(11) 98888-7777" | "Informe o telefone com DDD" |
+| `birth_date` | de 18 a 90 anos completos no dia de Brasília | "O cadastro é para maiores de 18 anos: confira a data de nascimento"; acima de 90 ou data que não existe: "Confira a data de nascimento" |
+| `bio` | texto limpo (sem invisíveis; espaços e quebras de linha viram um espaço), até 500 | "No máximo 500 caracteres" |
+| empresa em grupo | razão social ou nome fantasia pedem o CNPJ | "Informe o CNPJ" |
+
+Os tamanhos (número 10, complemento 60, bairro 120, modelo do veículo 60, razão social e nome fantasia 160) dão "No
+máximo N caracteres", com o rótulo do campo (`main.FIELD_LABELS`: "CPF", "RG", "Órgão emissor", "UF do RG", "Telefone
+secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome fantasia", "Modelo do veículo", "Placa",
+"Indisponibilidade" e os das formas de recebimento). Os mesmos casos estão nas sondas da web e do app
+(`frontend/tests/cadastro.test.mjs`, `mobile/tests/masks.test.mjs`) e no pytest.
+
+**Meu cadastro pelo app** (`PATCH /me/profile`, `extra="forbid"`; o resto em
+[Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
+- Campos novos: `cpf`, `rg_number`, `rg_issuer`, `rg_state`, `birth_date`, `phone_secondary`, `address_number`,
+  `address_complement`, `bio`, `company_document`, `company_name`, `company_trade_name`, `vehicle_model`,
+  `vehicle_plate` e `unavailability` (a lista inteira). Só conta o que muda de verdade.
+- CPF: com o gravado vazio, entra (de outro usuário: 409 `CPF_TAKEN`; até 10 conferências por hora por técnico, 429);
+  gravado e diferente: 422 "O CPF já foi informado. Para corrigir, fale com a central pelo WhatsApp"; igual: nada.
+- RG e empresa vão em grupo: o que não vier no corpo fica como está gravado (e o gravado não é conferido de novo). A
+  empresa pede `current_password` e fica fechada com a senha provisória.
+- `address_line` sem `address_number` no corpo (o app de antes, de campo único): a linha vira o logradouro, e número e
+  complemento ficam vazios (só quando a linha muda).
+- `pix` no corpo: 422 "Atualize o app: a chave PIX agora fica em Configurações › Formas de recebimento" (o `GET`
+  continua mandando `pix`, só de leitura, para o app de antes).
+- E-mail novo: fica em `email_pending` (e `email_pending_at`) até o técnico abrir o link de validação; **o login não
+  muda** até lá e as sessões continuam. As guardas, na ordem: envio desligado (422 "O envio de e-mail está desligado:
+  para trocar o e-mail, fale com a central pelo WhatsApp"), endereço que não recebe mensagens (422 "Este e-mail não
+  recebe mensagens"), senha provisória, e-mail da empresa, senha atual, 10 trocas por hora e "E-mail já cadastrado" (ver
+  "Ordem do `PATCH`" em [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)). O mesmo pendente de novo: nada
+  (não reenvia). O e-mail do login com um pedido aberto: cancela o pedido, sem senha. Trocar o pendente revoga os links
+  do anterior e vence os e-mails dele que não saíram.
+- `POST /me/profile/email/verification`: manda (de novo) o link para o e-mail pendente ou, sem ele, para o login ainda
+  não validado. Validado e sem pendente: 409 `EMAIL_ALREADY_VERIFIED`; não recebe: 422 "Este e-mail não recebe
+  mensagens. Troque o e-mail"; envio desligado: 503 `MAIL_DISABLED`; 3 por hora por técnico: 429 "Aguarde N minutos
+  para pedir outro link" (`Retry-After`). Responde o `MyProfile`, com o `email_link_sent_at` novo.
+- `DELETE /me/profile/email/pending`: cancela o pedido (os links dele deixam de valer e os e-mails que não saíram
+  vencem), com a linha `email_pending` no histórico; sem pedido, 200 igual.
+- `MyProfile` ganha os campos acima e `email_pending`, `email_verified_at`, `email_link_sent_at` (o último link de
+  validação, na fila ou enviado, para o e-mail que falta validar), `mail_enabled`, `payout_methods: PayoutMethod[]` (a
+  preferencial primeiro, depois as mais novas) e `unavailability` (os períodos que não acabaram, pelo início). `pix`
+  fica só de leitura (a preferencial quando é PIX, com `updated_at` = `changed_at`). Nada de situação na operação em
+  `/me/*`. O app novo só mostra as telas do cadastro quando a API manda esses campos (`hasCadastroV2`, em
+  `mobile/src/lib/profile.ts`).
+
+**Formas de recebimento** (`services/payout_methods.py`, `schemas/payout_method.py`, `core/payout.py`).
+- Entrada (`PayoutMethodIn`, um corpo só para os dois tipos, pelo `kind`; os campos do outro tipo são ignorados):
+  - PIX: `pix_key_type` e `pix_key`, normalizada por `core/pix` (as mensagens de lá; vazia: "Informe a chave PIX");
+  - conta: `bank_code` ("Código do banco com 3 números"), `bank_name` (2 a 80: "Informe o banco"), `branch` (1 a 4
+    números, grava com 4: "Agência inválida: use até 4 números"), `account_number` (1 a 20 números: "Conta inválida:
+    use só números"), `account_digit` (um número ou "X": "Dígito da conta inválido") e `account_type` ("Escolha o tipo
+    de conta");
+  - titular: `holder_name` (3 a 160: "Informe o nome do titular") e `holder_document` (CPF ou CNPJ válido: "Informe o
+    CPF ou CNPJ do titular" / "CPF ou CNPJ do titular inválido"; na chave CPF ou CNPJ, a própria chave);
+  - `PayoutMethodCreate` = + `preferred` (padrão false) e `current_password`; `PayoutMethodUpdate` = + `current_password`.
+- Regras: trava o técnico (`FOR UPDATE`); a senha como a do e-mail (o mesmo contador de erros, fechada com a senha
+  provisória); a 1ª é a preferencial e, com a lista não vazia, sempre há uma; `preferred: true` ou `/preferred` movem
+  (`preferred_since` na nova, null na antiga); excluir a preferencial promove a mais nova das que ficam; repetida = o
+  mesmo tipo e a mesma chave, ou o mesmo banco, agência, conta (sem os zeros à esquerda) e dígito; até 10; o `PUT`
+  manda a forma inteira, do mesmo tipo. Mudar a chave, a conta, o tipo de conta ou o titular grava `changed_at` (o nome
+  do banco sozinho, não).
+- `PayoutMethod` (app): `{id, kind, preferred, holder_name, holder_document, created_at, changed_at}` + os campos do
+  tipo (os do outro vêm null). `PayoutMethodAdmin` (central) = + `holder_differs` (o titular não é o técnico nem a
+  empresa dele: com o documento do titular e o técnico com CPF ou CNPJ, compara os documentos; senão, o nome sem acento
+  e maiúsculas contra o nome, a razão social e o nome fantasia) e `destination_changed_at` (o mais novo entre
+  `changed_at` e `preferred_since`: o "Nova" da central, por `PAYOUT_RECENT_DAYS` = 7 dias).
+- Texto mascarado (`core/payout.describe` = `payoutMethodText` de `lib/constants.ts`, com "•" no lugar de "*"): "PIX
+  CPF ***.456.789-**", "Banco Exemplo ****5678-9" (com até 4 números na conta, os 2 últimos: "**34-4"). É o que vai no
+  histórico do cadastro, no registro do pagamento e no extrato do WhatsApp; a conta inteira (`bankAccountText`: "Banco
+  Exemplo (999) · Ag. 0001 · Conta 12345-6 · Conta corrente") só aparece na central, com Pagamentos.
+- Central: `GET /technicians/{user_id}/payout-methods` (Pagamentos V; 404 "Técnico não encontrado" para quem não é
+  técnico) e `DELETE …/{method_id}` (Pagamentos E, sem senha; a mesma regra da preferencial; histórico via "central" e
+  o aviso `profile.changed`). Quem cadastra é sempre o técnico.
+- `GET /payouts?with_payout_methods=true` → `PayoutBoard.payout_methods: {technician_id: PayoutMethodSummary
+  {preferred: PayoutMethodAdmin, total}}`, dos técnicos das linhas e do `technician_id`; sem forma, fora do mapa; sem o
+  parâmetro, `{}`.
+- `POST /payouts/pay`: o `payout_set` do pagamento grava `data.payout_method` (a preferencial daquele momento,
+  mascarada; os eventos de antes têm `data.pix`, e a web lê os dois). Sem forma de recebimento, o pagamento sai do
+  mesmo jeito.
+
+**Indisponibilidade** (`services/unavailability.py`; o técnico informa no app, em Dias e horários).
+- O `PATCH /me/profile` manda a lista inteira dos períodos que não acabaram (`[{id?, start, end}]`, "AAAA-MM-DD", os
+  dois dias inclusive, sem motivo). O servidor tira os que já acabaram, mantém o id gravado e dá id novo ao resto. Erros
+  (422): "O fim não pode ser antes do início"; "O início não pode ser antes de hoje" (com um dia de folga para o fuso do
+  aparelho; o período gravado com o mesmo id e o mesmo início, que já começou, passa); "Até 365 dias a partir de hoje";
+  "Já há um período nessas datas" (dias em comum); "Até 10 períodos"; "Confira as datas do período".
+- Leitura: os de fim ≥ hoje, pelo início (`MyProfile`, `TechnicianOut` e `AssignableUser`). Textos iguais na API e nas
+  telas: `period_text` = `periodText` ("20/12/2026 a 05/01/2027"; um dia, "20/12/2026") e `period_short` =
+  `periodShort` ("até 30/11" quando já começou, "em 10/12", "de 20/12 a 05/01/2027").
+- No período, o técnico sai das sugestões e das ofertas nos dias da visita (`days_of`; OS sem horário: hoje); a
+  atribuição manual não trava (a web avisa). A central só vê.
+
+**Situação na operação e quem recebe OS** (`services/technician_status.py`).
+- `POST /technicians/{user_id}/operational-status` `{status: "active" | "inactive" | "blocked", reason (3 a 500),
+  cut_access?}` → `Technician`. A mesma situação: 409 `OPERATIONAL_STATUS_UNCHANGED`; motivo curto: 422 "Informe o
+  motivo"; situação desconhecida: 422 "Escolha a situação" (`label` "Situação"). Para Inativo ou Bloqueado, as ofertas
+  em aberto para ele fecham antes (`offer_cancelled` com a nota "Técnico inativo na operação" ou "Técnico bloqueado na
+  operação"). Grava a situação, o motivo, quem e quando; `cut_access` (só fora de Ativo e com o acesso liberado) corta
+  também o acesso ao app, encerra as sessões e revoga os links de senha. Histórico via "central", com o motivo em
+  `note`, e `profile.changed`. Reativar não devolve o acesso (isso é o "Liberar acesso").
+- A situação é separada do acesso ao app (`is_active`, "Acesso ao app: Liberado / Sem acesso"): Inativo e Bloqueado
+  continuam entrando no app (histórico, faturamento, notas). O técnico nunca vê a situação: nada em `/me/*`, nos e-mails
+  nem nas mensagens que chegam ao app.
+- Receber OS pede o acesso **e** Ativo:
+  - sugestões (`GET /tickets/{id}/technician-suggestions`, `GET /technicians/suggest`): só quem tem acesso, está Ativo e
+    não tem indisponibilidade nos dias da visita; as áreas de atuação são as do cadastro (`users.service_areas`; vazias,
+    as da ficha aprovada);
+  - ofertas: 422 "{nome} está inativo e não recebe OS: {motivo}" (ou bloqueado) e "{nome} está indisponível
+    {period_short}"; o aceite de quem saiu de Ativo (a oferta que escapou do fechamento) dá 409 `OFFER_UNAVAILABLE`;
+  - atribuição (`POST /tickets/{id}/assign`, o responsável no `PATCH` e na abertura) e outros técnicos da visita: só
+    quem **entra** precisa estar Ativo (a mesma 422; na abertura, antes de a OS ganhar número); quem já está na OS fica,
+    e a indisponibilidade não trava;
+  - `GET /users/assignable`: só quem tem acesso, com `operational_status`, `operational_reason` (só fora de Ativo) e
+    `unavailability` (a web mostra Inativo e Bloqueado travados, com o motivo, e avisa a indisponibilidade);
+  - favoritos: o automático só põe Ativos (o fixado pela central continua); `FavoriteTechnician` e `NearbyTechnician`
+    ganham `operational_status`.
+
+**Homologação** (`services/onboarding.py`).
+- Ficha pública (`POST /public/onboarding/{token}`), campos novos, todos opcionais: `phone_secondary`, `rg_number`,
+  `rg_issuer` e `rg_state` (em grupo), `address` (o logradouro), `address_number`, `address_complement`,
+  `address_district`, `bio`, `company_name` e `company_trade_name` (pedem o CNPJ), `vehicle_model` e `vehicle_plate` (só
+  com veículo próprio); nascimento de 18 a 90. O CPF de um usuário também barra ("Já existe um cadastro com este CPF. Se
+  você já enviou a ficha, aguarde a análise."). Ao enviar, o link de validação do e-mail vai para a fila (`signup`), e a
+  resposta é `{protocol, email_verification}` (o status do `EmailQueued`).
+- `ApplicationSummary` + `email_verified_at`, `reopened_at`. `ApplicationDetail` + os campos novos, `has_password`,
+  `reviews` (a mais antiga primeiro), `reopened_by` e `purge_at` (na reprovada: a última análise +
+  `ONBOARDING_RETENTION_DAYS`, 180 dias).
+- **Aprovar num passo** (`POST …/approve`, corpo opcional `{team_id?, job_title?, note?}`; a web manda `{}`), com a
+  ficha travada: CPF da ficha já de outro usuário → 409 `CPF_TAKEN`; e-mail já de um usuário → 422 "Já existe um usuário
+  com este e-mail". O técnico nasce com tudo o que a ficha coletou: contato e telefone secundário, a senha da ficha (sem
+  ela, uma aleatória e a troca obrigatória), a foto, a cidade na grafia padrão, o endereço em partes e o CEP, CPF e CNPJ
+  (só os válidos; razão social e nome fantasia só com o CNPJ), nascimento, RG, mini biografia, veículo, as áreas
+  (`service_areas`), a validação do e-mail, Ativo e o perfil técnico da ficha (ver
+  [Perfil técnico](#perfil-técnico-2026-11-19)). `reviews` ganha `approved`; o histórico do cadastro começa com
+  `application` "Aprovado na homologação (HOM-XXXXXXXX)" via "ficha" (autor: quem aprovou); a boas-vindas vai para a
+  fila. Resposta `ApplicationApproved {technician: User, welcome: EmailQueued}`; depois do commit saem a boas-vindas, o
+  `profile.changed` e o `onboarding.updated` "approved".
+- Reprovar (`{reason}`, 3 a 2000, como antes): apaga a senha da ficha, `reviews` ganha `rejected` e sai
+  `onboarding.updated` "rejected". O candidato não vê o motivo.
+- **Reabrir** (`POST …/reopen {reason}`, 3 a 500): só a reprovada (também a expirada). 409: "Só a ficha reprovada pode
+  ser reaberta" (`APPLICATION_NOT_REJECTED`), "Já existe um usuário com este e-mail" (`EMAIL_TAKEN`), "Há outra ficha
+  desta pessoa em análise ou aprovada" (`APPLICATION_DUPLICATE`: o mesmo e-mail ou CPF) e "Este CPF já está em outro
+  cadastro" (`CPF_TAKEN`). Volta a pendente com `reopened_at`/`reopened_by`, sem a última análise (`reviewed_*` e
+  `review_note` limpos; ela fica em `reviews`, com a reabertura e o motivo), e sai `onboarding.updated` "reopened". A
+  reaberta não tem senha (a reprovação apagou): aprovada, a boas-vindas leva o link para criar a dele.
+- Retenção (`purge_expired`): a pendente expira contando de `reopened_at` (sem ela, do envio) e entra em `reviews` como
+  `expired` ("Expirada sem análise"); a reprovada é apagada 180 dias depois da última análise, com a foto, os links e os
+  e-mails dela.
+- `POST …/email-verification`: reenvia o link da ficha, só a pendente (409 `APPLICATION_NOT_PENDING`) e não validada
+  (409 `EMAIL_ALREADY_VERIFIED` "E-mail já validado"); 5 por hora por ficha (429) → 202 `EmailQueued`.
+
+**Central: técnicos** (`services/technicians.py`, `api/routes/technicians.py`).
+- `TechnicianOut`, na lista e no detalhe: `operational_status`, `operational_reason`, `operational_changed_at`,
+  `operational_changed_by` (`Ref`), `unavailability` (os períodos que não terminaram), `email_verified_at`,
+  `email_pending`, `payout_methods_count` (0: "Sem forma de recebimento") e `payout_changed_at` (o destino da
+  preferencial mudou: o "Nova"); `service_areas` passa a vir do cadastro. Só no detalhe (null na lista): `cpf`,
+  `rg_number`, `rg_issuer`, `rg_state`, `birth_date`, `phone_secondary`, `bio`, `address_number`,
+  `address_complement`, `company_document`, `company_name`, `company_trade_name`, `vehicle_model` e `vehicle_plate`.
+  Saíram `has_pix` e `pix_updated_at`.
+- `PATCH /technicians/{user_id}` aceita também `cpf` (muda e limpa, sem senha; de outro usuário: 409 `CPF_TAKEN`),
+  `rg_number`, `rg_issuer`, `rg_state`, `birth_date`, `phone_secondary`, `bio`, `address_number`, `address_complement`,
+  `company_document`, `company_name` e `company_trade_name` (RG e empresa conferidos em grupo com o que está gravado: a
+  web manda só o que mudou). O veículo e o perfil técnico continuam só com o técnico.
+- Trocar o e-mail (aqui ou no `PATCH /users/{id}` de um técnico) troca o login na hora (`account.central_email_changed`):
+  zera a validação e o pedido de troca do app, revoga os links, vence as validações na fila, passa para o endereço novo a
+  boas-vindas e a nova senha que ainda não saíram e manda a validação (`check`) para o novo, logo depois do commit.
+  Cortar o acesso, gerar a senha provisória (`reset-password`) ou definir a senha em Usuários revoga os links de senha.
+- `POST …/email-verification`: o link de validação para o e-mail pendente ou, sem ele, para o login não validado.
+  Validado e sem pendente: 409 `EMAIL_ALREADY_VERIFIED`; sem endereço que recebe mensagens: 422 "Este técnico não tem
+  e-mail válido. Corrija em Contato ou use a senha provisória"; 5 por hora por técnico (429) → 202 `EmailQueued`.
+- `POST …/password-reset-link`: o link de senha nova (2 h; a senha de hoje continua até ele usar o link) para o login.
+  Sem acesso ao app: 409 `APP_ACCESS_REQUIRED`; a mesma 422; 5 por hora (429). Com o e-mail na fila, o histórico ganha
+  `password_link` "enviado para {e-mail}" via "central" (não conta como redefinição para o `after_reset`). A senha
+  provisória continua em `POST …/reset-password`.
+- `GET …/emails?limit=` → `EmailLog[] {id, template, to_email, status, attempts, created_at, sent_at, created_by}`, os
+  do técnico, o mais novo primeiro (o pendente que passou do prazo já sai `expired`). Na web: "Na fila", "Enviado",
+  "Falhou" e "Não enviado" (`expired` e, com o envio desligado, `pending`).
+- `GET …/changes?field=` (`^[a-z_]{1,40}$`): só as linhas que mexeram nesse campo.
+
+**E-mails** (`services/mail.py`, `services/mail_templates.py`, `services/account.py`).
+- Fila no banco (`email_outbox`): quem pede chama `mail.enqueue` na transação dele e, depois do commit,
+  `mail.deliver_soon` (sai na hora, numa sessão própria); a rotina `_mail_loop` (a cada `MAIL_RETRY_SECONDS`) vence o
+  que passou do prazo e tenta de novo o resto. Várias instâncias da API não mandam o mesmo e-mail (`FOR UPDATE SKIP
+  LOCKED`). O mesmo e-mail ainda na fila (modelo, alvo e endereço) não duplica: a próxima tentativa passa a ser agora.
+- Prazo para sair (`send_by`): validação 72 h, boas-vindas 7 dias, nova senha 2 h; depois, `expired` ("Não enviado").
+  Erro temporário (conexão, tempo, 4xx, autenticação): nova tentativa em 1, 5, 15 e 60 min, e a 5ª falha dá `failed`;
+  recusa permanente do servidor (5xx no remetente, no destinatário ou nos dados): `failed` na hora.
+- Sem SMTP (`settings.mail_enabled` falso: falta `SMTP_HOST` ou `MAIL_FROM`), nada sai: a linha entra `pending`, a
+  resposta diz `not_configured` e ela vence no prazo. Endereço que não recebe mensagens (`mail.sendable` =
+  `isSendableEmail`: sem "@" e domínio com ponto, ou terminado em `.invalid`/`.local`, como os importados): nada entra
+  (`not_sendable`).
+- Os três modelos, em texto e HTML, sem Reply-To e com `Auto-Submitted: auto-generated`; remetente `MAIL_FROM` com o
+  nome `MAIL_FROM_NAME` (vazio, `COMPANY_NAME`); terminam com o nome da empresa (Configurações › Empresa) e "Mensagem
+  automática: este endereço não recebe respostas. Para falar com a central, use o WhatsApp.":
+  - `verify_email`, "Confirme seu e-mail", botão "Confirmar e-mail": a ficha (`signup`), o e-mail novo pedido no app
+    (`change`: até validar, ele continua entrando com o e-mail atual) ou o login de sempre (`check`); vale 72 h;
+  - `welcome`, "Cadastro aprovado: boas-vindas à {empresa}": como entrar (o login de agora; a senha da ficha ou, sem
+    ela, o link para criar a dele, 72 h; o link do app, `TECH_APP_URL`, ou "peça o link à central pelo WhatsApp"),
+    "Confirme também o seu e-mail" quando ele tem senha e o e-mail não está validado, os primeiros passos, o Elo sem
+    números e "Dúvidas sobre o trabalho? Fale com a central pelo WhatsApp.";
+  - `password_reset`, "Criar uma nova senha", botão "Criar nova senha": pelo "Esqueci minha senha" (`self`) ou pela
+    central (`central`); vale 2 h e avisa que o app pede para entrar de novo nos aparelhos.
+- Links `{WEB_URL}/validar-email#token=…` e `{WEB_URL}/definir-senha#token=…`: o token nasce na hora do envio e vai no
+  fragmento (não chega a servidor nem a log); o banco guarda só o SHA-256. Uso único. Um link de senha novo revoga os
+  anteriores; os de validação não (qualquer um válido serve). Falhou o envio, o link criado é desfeito junto.
+- Retenção (rotina "Fila de e-mails (retenção)"): o registro dos e-mails fica 180 dias; os links, até 30 dias depois de
+  vencer.
+
+**Links públicos** (`api/routes/auth.py`, sem login; o token vem no corpo, lido do `#token=` pela página).
+- `POST /auth/forgot-password {email}` (texto livre): 10 por hora por IP (429); envio desligado: 503 `MAIL_DISABLED`;
+  senão sempre 202 `{"detail": "Se o e-mail estiver cadastrado e validado, enviamos um link para criar uma nova senha.
+  Confira também o spam."}`, exista ou não o e-mail. O link só vai para o técnico com acesso ao app, o e-mail de login
+  validado e que recebe mensagens, até 3 por hora por e-mail (o excesso some calado). Quem ainda não validou o e-mail
+  (a base importada) valida pelo app (Contato › "Enviar link") ou recebe o link ou a senha provisória da central.
+- As três rotas de token somam 30 aberturas a cada 10 min por IP (429).
+- `POST /auth/password-reset/check {token}`: não gasta o link → `{email: "t***@exemplo.com", name: o primeiro nome,
+  kind: "create" (o link da boas-vindas) | "reset", app_url}`. Vencido, usado, revogado ou mandado a um endereço que
+  não é mais o login: 410 `LINK_GONE`; acesso cortado: 410 com o texto do acesso.
+- `POST /auth/password-reset {token, password}`: grava a senha, tira a provisória (`must_change_password` false),
+  encerra os acessos abertos (`sessions_revoked_at`), revoga os outros links de senha e valida o e-mail de login (o link
+  chegou nele). Histórico via "link" (autor: o técnico): `password` "criada pelo link do e-mail" (boas-vindas) ou
+  "redefinida pelo link do e-mail", e `email_verified` quando validou. Zera os contadores de senha errada (o login e a
+  senha atual no app) e publica `profile.changed` → `{email, app_url}`.
+- `POST /auth/verify-email {token}`: `signup` valida a ficha (e o técnico dela, se já aprovado com o mesmo e-mail) e
+  publica `onboarding.updated` "email_verified"; `change`, só se o pedido de troca ainda é aquele e-mail: ele vira o
+  login, validado, o pedido sai, os links anteriores são revogados e a fila segue o login novo; se o e-mail virou o
+  login de outro cadastro antes, 409 `EMAIL_IN_USE` (e o pedido sai); `check` valida o login, só se ainda é ele. O mesmo
+  link aberto de novo com o e-mail já validado responde igual (200). Histórico via "link" → `{email, kind}`.
+- `POST /auth/change-password` (a de sempre) também revoga os links de senha.
+- Na web, as páginas `/validar-email` e `/definir-senha` (fora do login, sem indexação) leem o `#token=`, tiram o
+  fragmento da barra (`history.replaceState`) e chamam essas rotas: "Validando o e-mail…" e "E-mail validado"; "Definir
+  nova senha" (ou "Criar senha"), "Senha definida"; "Link vencido ou já usado" no 410; "Abrir o app" só com o
+  `app_url`. Nas duas, sem conexão, "Tentar de novo".
+
+**CEP** (`services/cep.py`, `api/routes/cep.py`).
+- `GET /public/cep/{cep}` ("01001-000" ou "01001000") → `{cep: "01001-000", street, district, city, state}`; no CEP geral
+  da cidade, `street` e `district` vêm null. 422 "CEP com 8 dígitos" (sem `code`); 404 `CEP_NOT_FOUND`; 503
+  `CEP_UNAVAILABLE`; 429 com `Retry-After`.
+- O ViaCEP responde primeiro e vale; a BrasilAPI só entra quando ele falha (tempo, rede, status, JSON, ou resposta sem
+  a cidade ou com uma UF que não existe). Texto em NFC e sem espaços sobrando; o `complemento` do ViaCEP fica fora.
+  Cache (Redis ou memória): achou, 7 dias; "não achou" do ViaCEP, 1 dia; a falha dos dois e o "não achou" da BrasilAPI
+  não ficam guardados.
+- Limites por janela de 10 min: 30 por IP sem login (a ficha pública); 120 por pessoa logada (a central e o app); a
+  sessão inválida conta como sem login. Logada, a conexão do banco volta ao pool antes da busca.
+- O CEP não vai para o log (`main.RedactTokens`: o caminho da rota e as URLs do ViaCEP e da BrasilAPI que o `httpx`
+  registra).
+- As telas preenchem pela mesma regra (`cepFill` de `lib/constants.ts`) nos 6 lugares: a ficha pública, o Endereço da
+  ficha do técnico, Clientes, Locais, Configurações › Empresa e o Endereço do app. O campo livre (vazio, igual ao que
+  abriu ou preenchido pela busca anterior) recebe o valor; o digitado fica e, se difere, aparece "CEP de {resumo}." com
+  "Usar este endereço"; sem o serviço, os campos ficam livres e nada trava.
+
+**Histórico do cadastro e tempo real** (`services/user_history.py`).
+- `via`: `app` (o técnico no app), `central`, `ficha` (a aprovação na Homologação; autor: quem aprovou) e `link` (o
+  técnico pelo link do e-mail); `UserChange.note`: o motivo (a situação). Na web: "pelo técnico, no app", "por {nome} na
+  central", "por {nome}, na aprovação da ficha", "pelo técnico, pelo link do e-mail" e "Motivo: {note}".
+- Campos novos (o valor como está, salvo indicação): `cpf` "123.456.789-09", `rg` "12.345.678-9 · SSP/SP",
+  `birth_date` "25/11/1990", `phone_secondary`, `address_number`, `address_complement`, `bio`, `company_document`
+  "12.345.678/0001-95", `company_name`, `company_trade_name`, `vehicle` "Modelo Exemplo · ABC-1234", `email_pending`
+  (o e-mail novo pedido no app), `email_verified` ("validado" / "pendente"), `operational_status` ("Ativo", "Inativo",
+  "Bloqueado"), `payout_preferred` (a preferencial mascarada) e as linhas de `record`: `application` ("Aprovado na
+  homologação (HOM-…)"), `password` pelo link e `password_link` ("enviado para {e-mail}"). `is_active` passa a "Liberado"
+  / "Sem acesso". Gravam o que saiu em `from` e o que entrou em `to`: `payout_methods` ("PIX CPF ***.456.789-** · Tecnico
+  Alfa", `describe_with_holder`) e `unavailability` (`period_text`, separados por "; "). `pix` e `pix_holder` saíram do
+  snapshot; as linhas antigas continuam legíveis.
+- Sem Pagamentos (`hide_payout`, era `hide_pix`): `pix`, `pix_holder`, `payout_methods` e `payout_preferred` vêm como
+  "***" (null continua null); na web, "Formas de recebimento alteradas" e "Forma preferencial alterada".
+- `profile.changed` em toda gravação nova, com os nomes crus em `fields` e o `via`. `after_reset` (quem redefiniu a senha
+  nas últimas 72 h) vai na troca de `email`, `email_pending`, `payout_methods`, `payout_preferred` ou `company_document`
+  (e o `pix` das linhas antigas). Na web, o sino avisa a troca pelo app das formas de recebimento, do e-mail, do CNPJ,
+  do nome ou do celular; a troca do destino do pagamento sai em vermelho com "Confirme com ele no grupo antes do próximo
+  pagamento.", e "Ver" abre a ficha na seção do que mudou.
+- `onboarding.updated` `{application_id, name, data: {action: "email_verified" | "reopened" | "approved" | "rejected"}}`,
+  só para quem tem Homologação (`EVENT_ITEMS`): a web relê a Homologação.
+
+**Na central (web).**
+- Ficha do técnico (`/tecnicos/{id}`, `app/(app)/tecnicos/[id]/page.tsx` e `components/technicians/ficha/`): o menu com
+  os três grupos de `TECH_SECTION_GROUPS` e o grupo Gestão (Situação, Equipe e jornada, Favoritos, Elo e Histórico), só
+  as seções com `delivery <= CADASTRO_DELIVERY` (as das Entregas 2 e 3 ficam fora); cada seção tem o próprio Salvar, que
+  manda só o que mudou, e sair com alteração não salva pergunta antes. Só com Visualizar, tudo fica só de leitura.
+  Credenciais: o acesso ao app ("Cortar acesso" ou "Liberar acesso", que oferece manter a senha dele, mandar o link
+  por e-mail ou gerar a provisória), o e-mail de login (validado, pendente ou "Sem e-mail válido.", com "Reenviar
+  validação"), "Redefinir senha" (o link por e-mail, que vale 2 h, ou a senha provisória) e os últimos e-mails enviados.
+  Formas de recebimento só com Pagamentos ("Preferencial", "Nova", "Titular diferente", Copiar e, com Pagamentos em
+  Editar, Remover; sem nenhuma, "Pedir no WhatsApp"). Situação: Inativar, Bloquear (já com "Cortar também o acesso ao
+  app" marcado) ou Reativar, com o motivo, e o histórico da situação.
+- Lista de Técnicos: o nome e a linha são links reais para a ficha (Ctrl/⌘+clique e o botão do meio abrem outra aba),
+  os filtros ficam na URL, o `?tecnico=` antigo redireciona para a ficha, os selos "Inativo"/"Bloqueado" (o motivo no
+  título) e "Indisponível {periodShort}", o filtro "Acesso ao app" (Liberado / Sem acesso), o chip "Sem forma de
+  recebimento" (`payout_methods_count === 0`) e, no CSV, `acesso_app`, `situacao`, `situacao_motivo`, `email_validado` e
+  `forma_recebimento` (sem CPF, RG, nascimento ou dados de pagamento).
+- Homologação: e-mail validado ou pendente (com "Reenviar validação"), o chip "Reaberta", as análises, aprovar num passo
+  (o painel diz se a boas-vindas foi para a fila e traz o texto do WhatsApp; sem senha e sem e-mail, "Gerar senha
+  provisória"), "Reabrir para análise" com motivo e "Excluída automaticamente em dd/mm/aaaa." na reprovada.
+- Pagamentos: a forma preferencial de cada técnico (a chave ou a conta inteira, "Copiar PIX" ou "Copiar dados", "Nova",
+  o titular diferente em âmbar e "+N outras"), "Sem forma de recebimento" com "Pedir no WhatsApp" e a linha "Forma de
+  recebimento: …" no extrato.
+- OS: no Colaborador (Nova OS) e na Geral, Inativo e Bloqueado aparecem travados, por último, com o motivo (nos outros
+  técnicos da visita, só quem pode receber OS); o indisponível continua escolhível, com "Indisponível até 30/11" e o
+  aviso "{Nome} está indisponível …"; nas ofertas, os dois ficam travados.
+
+**Variáveis de ambiente** (`core/config.py`, `.env.example` e o serviço `api` do `docker-compose.yml`; as da homologação
+ficam em `deploy/`).
+
+| Variável | Padrão | Uso |
+|---|---|---|
+| `SMTP_HOST` | vazio | o servidor SMTP; sem ele (ou sem `MAIL_FROM`), o envio fica desligado e `mail_enabled` é falso |
+| `SMTP_PORT` | 587 | |
+| `SMTP_USERNAME`, `SMTP_PASSWORD` | vazio | as credenciais: só no `.env` (o repositório é público) |
+| `SMTP_SECURITY` | `starttls` | `starttls` (587), `ssl` (465) ou `none` (texto puro, só no desenvolvimento: a API não sobe em produção com ele) |
+| `SMTP_TIMEOUT_SECONDS` | 20 | |
+| `MAIL_FROM` | vazio | só o endereço do remetente, um que não recebe resposta (conferido ao subir) |
+| `MAIL_FROM_NAME` | vazio | o nome do remetente; vazio, `COMPANY_NAME` |
+| `MAIL_RETRY_SECONDS` | 60 | o intervalo da rotina da fila |
+| `TECH_APP_URL` | vazio | o link do app na boas-vindas e o `app_url` das páginas dos links; vazio, a boas-vindas manda pedir o link à central |
+
+Os links dos e-mails usam o `WEB_URL` de sempre. Configure SPF e DKIM do domínio no provedor.
+
+**Publicação.**
+1. A migração `b7e2d4f6a8c1` roda antes de a API nova atender (`alembic upgrade head`; a API aplica ao subir).
+2. A web e a API sobem juntas, a web segundos antes (o `PRIVACY_VERSION`). A web nova com a API velha: os campos novos
+   vêm vazios, as rotas novas dão 404 (a tela mostra o erro com "Tentar de novo"), a busca de CEP fica "indisponível"
+   (campos livres), e o `PATCH` da central e a ficha pública mandam campos que a API velha ignora calada: depois de
+   publicar, confira a gravação campo a campo.
+3. O app sobe depois da API (`MyProfileUpdate` recusa campo desconhecido). O app novo com a API velha (sem os campos
+   novos no `MyProfile`): as telas do cadastro, menos Foto e Senha, mostram "Indisponível no momento" e não gravam nada,
+   e o "Esqueci minha senha" cai no texto de pedir à central (404). O app de antes com a API nova: lê `pix` (a
+   preferencial PIX); gravar `pix` recebe "Atualize o app…"; trocar o e-mail fica pendente até o link; `address_line`
+   grava o logradouro e limpa número e complemento.
+4. `PRIVACY_VERSION` = a data do dia da publicação, igual em `backend/app/schemas/onboarding.py` e nas duas cópias de
+   `constants.ts` (hoje "2026-11-25").
+5. Sem SMTP tudo funciona: `mail_enabled` falso, os e-mails ficam "Não enviado", o "Esqueci minha senha" manda falar com
+   a central, e a central segue com o WhatsApp e a senha provisória. O provedor, o remetente, SPF e DKIM são do dono.
+6. As fichas enviadas antes da publicação têm o endereço numa linha só: aprovadas depois, a linha inteira vai para o
+   logradouro (a migração separou só os endereços dos técnicos).
+
+**Privacidade (LGPD).** CPF, RG, nascimento, empresa e veículo: só o próprio técnico (`/me/profile`) e a gestão com
+Técnicos (no detalhe; a lista não traz). Formas de recebimento: só o técnico e quem tem Pagamentos (o histórico vem
+mascarado e, sem Pagamentos, "***"). A situação e o motivo: só a central. A indisponibilidade não tem motivo. O registro
+dos e-mails fica 180 dias e os links, até 30 dias depois de vencer; a ficha reprovada, 180 dias depois da última
+análise. O aviso de privacidade "2026-11-25" cita tudo isso: ver "Aviso de privacidade" em
+[Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
+
 ## Acesso: perfis por tela e visibilidade de filas
 
 O papel (`users.role`) continua decidindo o canal (web ou app), a hierarquia de cadastro (quem cria e altera
