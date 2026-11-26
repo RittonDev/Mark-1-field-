@@ -776,36 +776,51 @@ tarde." com **Tentar de novo**
   (12 h), aparecem as iniciais.
 - O `expo-image-manipulator` é nativo e já vem no Expo Go; um development build feito antes dele precisa ser refeito.
 
-### Perfil técnico: disponibilidade, transporte, aptidões, formação e ferramental
+### Perfil profissional: dias e horários, transporte, formação, aptidões e ferramental
 
-O que a central vê na aba **Perfil técnico** da ficha do técnico e usa para escolher quem convidar (a disponibilidade é
-um sinal pequeno na sugestão de técnicos). Não pede senha. Cada parte vai inteira em `PATCH /me/profile`, e o servidor
-devolve a parte como gravou: turnos e meios na ordem, o "desde" de cada aptidão, o id de cada formação e as listas na
-ordem dele. A ficha aprovada na homologação já entra com a disponibilidade, o veículo, a CNH e as aptidões. As telas
-não têm texto de explicação no topo: só os vazios, os limites e os avisos de rede. Código: `src/app/configuracoes/`,
-[src/lib/technicalProfile.ts](src/lib/technicalProfile.ts) (o estado das telas e os catálogos),
-[src/lib/autoSave.ts](src/lib/autoSave.ts) e as regras puras de
-[src/lib/techProfileForm.ts](src/lib/techProfileForm.ts).
+O que a central vê no grupo **Perfil profissional** da ficha do técnico e usa para escolher quem convidar (a
+disponibilidade é um sinal pequeno na sugestão de técnicos). Não pede senha. Cada parte vai inteira em
+`PATCH /me/profile`, e o servidor devolve a parte como gravou: turnos e meios na ordem, o "desde" de cada aptidão, o id
+de cada formação e de cada período e as listas na ordem dele. A ficha aprovada na homologação já entra com a
+disponibilidade, o veículo, a CNH e as aptidões. As telas não têm texto de explicação no topo: só os vazios, os limites
+e os avisos de rede. Código: `src/app/configuracoes/`, [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts) (o
+estado das telas e os catálogos), [src/lib/autoSave.ts](src/lib/autoSave.ts) e as regras puras de
+[src/lib/techProfileForm.ts](src/lib/techProfileForm.ts) e [src/lib/unavailability.ts](src/lib/unavailability.ts).
 
-- **Disponibilidade**: os 7 dias, cada um num cartão que abre os 4 turnos (Manhã 06h–12h, Tarde 12h–18h, Noite 18h–24h
-  e Madrugada 00h–06h) em fichas de duas colunas (uma por linha com a fonte do aparelho acima de 1,2×, para
-  "Madrugada" não quebrar); todos começam fechados e mais de um pode ficar aberto. Não é a jornada. Num dia útil com
-  turno, quando outro dia útil está diferente, aparece **Copiar para os dias úteis** (pergunta antes só quando muda um
-  dia útil que já tinha turnos).
+- **Dias e horários** (`/configuracoes/disponibilidade`), em duas seções:
+  - **Turnos**: os 7 dias, cada um num cartão que abre os 4 turnos (Manhã 06h–12h, Tarde 12h–18h, Noite 18h–24h e
+    Madrugada 00h–06h) em fichas de duas colunas (uma por linha com a fonte do aparelho acima de 1,2×, para "Madrugada"
+    não quebrar); todos começam fechados e mais de um pode ficar aberto. Não é a jornada. Num dia útil com turno, quando
+    outro dia útil está diferente, aparece **Copiar para os dias úteis** (pergunta antes só quando muda um dia útil que
+    já tinha turnos).
+  - **Indisponibilidade**: os períodos em que o técnico não atende (de/até, os dois dias inclusive, sem motivo), até 10
+    e até 365 dias à frente. Cada cartão mostra o período ("20/12/2026 a 05/01/2027"; um dia só, "20/12/2026"), a
+    ficha "Agora" no de hoje, o lápis e a lixeira (com a pergunta "Excluir o período?"); vazio, "Nenhum período.".
+    **Adicionar período** e o lápis abrem a folha com **De** e **Até** ([PeriodSheet](src/components/settings/PeriodSheet.tsx)):
+    "O início não pode ser antes de hoje.", "O fim não pode ser antes do início.", "Até 365 dias a partir de hoje." e
+    "Já há um período nessas datas."; no limite, "Limite de 10 períodos. Exclua um para incluir outro.". O período que
+    acabou sai da lista (o servidor tira). A central vê os períodos na ficha, e o técnico fica fora das sugestões e das
+    ofertas de OS nesses dias. Com a API de antes do cadastro V2, a seção mostra só o aviso de indisponível, e os turnos
+    seguem.
 - **Transporte**: os meios (Carro, Moto, Bicicleta, Transporte público, Carro de aplicativo, A pé), **Nenhum** no fim
   dos meios e **Tenho CNH**, que vão juntos. "Nenhum" fica marcado quando o transporte foi informado sem meio; tocar
   nele grava sem meio e mantém a CNH ("Nenhum · sem CNH" ou "Nenhum · com CNH"), tocar num meio o desmarca, e tocar
   nele já marcado não faz nada. Nunca informado (`TRANSPORT_UNSET`), a tela começa sem nada marcado, nada é enviado
   antes do primeiro toque, e qualquer toque grava, mesmo voltando a tudo desmarcado antes do envio.
+  - **Veículo**: com Carro ou Moto marcados (ou o veículo já informado), a linha Veículo ("Modelo Exemplo · ABC1D23" ou
+    "Não informado") abre a folha com o modelo e a placa
+    ([VehicleSheet](src/components/settings/VehicleSheet.tsx)), opcionais e gravados juntos; vazio limpa. Placa antiga
+    ou Mercosul ("Placa inválida: confira as letras e os números."). São campos próprios, à parte dos meios: gravar os
+    meios não apaga o veículo. Só com a API do cadastro V2.
 - **Ferramental**: o catálogo que a central mantém (Configurações › Técnicos, na central), em ordem alfabética, com
   caixa de marcar; com mais de 15 ferramentas, aparece a busca. Ferramenta desativada pela central some da lista e do
   cadastro (fica guardada no servidor e volta se for reativada).
-- **Salvar ao tocar** (essas três): sem botão. O toque muda a tela na hora, e os toques de perto vão juntos num envio
-  só, 0,6 s depois do último (uma linha no histórico da central), com "Salvando…" e "Salvo" no cabeçalho (o TalkBack
-  fala; o VoiceOver não). Um envio por vez: o que mudar durante o envio vai logo depois, com o valor final. Sem rede,
-  vibra, avisa "Sem internet" e não muda nada; se o envio falhar, a tela volta ao que está gravado e mostra o erro. Sair
-  da tela com o envio agendado manda na hora (o pedido continua com a tela fechada); o Sair ou outro técnico descarta o
-  pendente em silêncio.
+- **Salvar ao tocar** (os turnos, os meios e a CNH e o Ferramental): sem botão. O toque muda a tela na hora, e os
+  toques de perto vão juntos num envio só, 0,6 s depois do último (uma linha no histórico da central), com "Salvando…"
+  e "Salvo" no cabeçalho (o TalkBack fala; o VoiceOver não). Um envio por vez: o que mudar durante o envio vai logo
+  depois, com o valor final. Sem rede, vibra, avisa "Sem internet" e não muda nada; se o envio falhar, a tela volta ao
+  que está gravado e mostra o erro. Sair da tela com o envio agendado manda na hora (o pedido continua com a tela
+  fechada); o Sair ou outro técnico descarta o pendente em silêncio.
 - **Aptidões**: até 30, a mais nova primeiro, com o nível e o "desde" ("Avançado · desde 11/2026", o mês em que entrou
   no perfil; quem guarda é o servidor). **Adicionar aptidão** abre a folha com o nome (texto livre ou uma das sugestões
   da ficha da homologação: até 12, sem as que ele já tem) e o nível (Básico, Intermediário ou Avançado). Tocar numa
@@ -816,14 +831,15 @@ não têm texto de explicação no topo: só os vazios, os limites e os avisos d
   (em andamento)"). **Adicionar formação** e o lápis abrem a folha; o início e o fim saem de uma folha de meses (de
   01/1950 ao mês atual; o fim não vem antes do início), e **Em andamento** limpa o fim. A lixeira exclui, com
   confirmação.
-- **Aptidões e Formação**: uma gravação por vez; enquanto uma está no ar, incluir, editar e excluir ficam desligados (o
-  item que sai mostra o indicador), também depois de sair e voltar à tela: o estado fica no módulo
-  (`trackListWrite`/`useListWrite` em `technicalProfile.ts`) e zera na troca de sessão. A lista enviada é montada na
-  hora em que a gravação sai da fila (`saveProfileWith` em `profile.ts`), com a que a gravação anterior devolveu: duas
-  exclusões seguidas não devolvem o item apagado. Mudar um item que a anterior já tirou mostra "Esta aptidão foi
-  excluída." (ou "Esta formação foi excluída.") na folha, sem enviar nada. A folha mostra o erro do servidor no fim, não
-  fecha enquanto salva e pergunta antes de descartar o que foi digitado; sem rede, avisa e fica preenchida. No limite,
-  "Limite de 30 aptidões. Exclua uma para incluir outra." (e o mesmo com 20 formações).
+- **Aptidões, Formação e Indisponibilidade**: uma gravação por vez; enquanto uma está no ar, incluir, editar e excluir
+  ficam desligados (o item que sai mostra o indicador), também depois de sair e voltar à tela: o estado fica no módulo
+  (`trackListWrite`/`useListWrite` em `technicalProfile.ts`, que trava também as Formas de recebimento) e zera na troca
+  de sessão. A lista enviada é montada na hora em que a gravação sai da fila (`saveProfileWith` em `profile.ts`), com a
+  que a gravação anterior devolveu: duas exclusões seguidas não devolvem o item apagado. Mudar um item que a anterior
+  já tirou mostra "Esta aptidão foi excluída." (ou "Esta formação foi excluída.", "Este período não existe mais. Puxe a
+  tela para atualizar.") na folha, sem enviar nada. A folha mostra o erro do servidor no fim, não fecha enquanto salva
+  e pergunta antes de descartar o que foi digitado; sem rede, avisa e fica preenchida. No limite, "Limite de 30
+  aptidões. Exclua uma para incluir outra." (e o mesmo com 20 formações).
 - **Textos** (nome da aptidão, curso e instituição): conferidos como o servidor grava (`cleanText` e `foldName`): saem
   os caracteres de controle e os invisíveis (espaço de largura zero, BOM, marcas de direção), tab, LF, VT, FF e CR
   viram espaço, e os espaços se juntam. Nome só de invisíveis conta como vazio, e "Lin<U+200B>ux" repete "Linux".
@@ -837,21 +853,24 @@ não têm texto de explicação no topo: só os vazios, os limites e os avisos d
 
 ### Sem internet e o que fica no aparelho
 
-- **Tudo pede internet**: ler o cadastro do servidor, salvar, marcar e trocar a foto. Nada entra na fila offline: a
-  senha não fica guardada e o aviso à central tem de sair na hora. Sem rede e sem o cadastro na memória, as telas dizem
-  "Sem internet" / "Conecte o aparelho para abrir e salvar seu cadastro."; com ele na memória, mostram os dados com "Sem
-  internet: conecte o aparelho para salvar.". Se a releitura falhar por erro do servidor: "Não foi possível atualizar
-  agora. Os dados podem estar desatualizados.".
-- **No aparelho**: nome, e-mail e celular no usuário da sessão (`mc_user`, SecureStore). Endereço, chave PIX, o perfil
-  técnico e os catálogos ficam só na memória ([src/lib/profile.ts](src/lib/profile.ts) e
-  [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts)), nunca no SQLite, no kv ou no SecureStore, e somem ao
-  sair da conta. O cadastro é lido ao entrar (sem aviso se falhar), ao abrir cada tela de Configurações, ao puxar o
-  Faturamento e, na tela inicial e no Faturamento, quando falta ou passou de 6 h (o link da foto vale 12 h).
-- **Gravações em fila** ([src/lib/profile.ts](src/lib/profile.ts)): salvar, enviar a foto e removê-la saem uma por vez
-  (a seguinte espera a anterior responder, e não sai se a sessão mudou na espera), e uma leitura durante a qual uma
-  gravação saiu, voltou ou ficou no ar não desfaz a tela (fica o que a gravação devolveu). O servidor também grava uma
-  por vez por técnico: a gravação seguinte que a fila solta quando a anterior passou dos 20 s sem resposta (ou a de
-  outro aparelho) espera a anterior terminar no servidor e não apaga o que ela gravou.
+- **Tudo pede internet**: ler o cadastro do servidor, salvar, marcar, trocar a foto, mexer nas formas de recebimento,
+  pedir o link do e-mail e buscar o CEP. Nada entra na fila offline: a senha não fica guardada e o aviso à central tem
+  de sair na hora. Sem rede e sem o cadastro na memória, as telas dizem "Sem internet" / "Conecte o aparelho para abrir
+  e salvar seu cadastro."; com ele na memória, mostram os dados com "Sem internet: conecte o aparelho para salvar.". Se
+  a releitura falhar por erro do servidor: "Não foi possível atualizar agora. Os dados podem estar desatualizados.".
+- **No aparelho**: nome, e-mail e celular no usuário da sessão (`mc_user`, SecureStore). CPF, RG, nascimento, endereço,
+  dados da empresa, veículo, chaves PIX, contas e o documento do titular, o perfil técnico (com a indisponibilidade), os
+  CEPs buscados e os catálogos ficam só na memória ([src/lib/profile.ts](src/lib/profile.ts),
+  [src/lib/cep.ts](src/lib/cep.ts) e [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts)), nunca no SQLite, no
+  kv ou no SecureStore, e somem ao sair da conta. O cadastro é lido ao entrar (sem aviso se falhar), ao abrir cada tela
+  de Configurações, ao puxar o Faturamento e, na tela inicial e no Faturamento, quando falta ou passou de 6 h (o link da
+  foto vale 12 h).
+- **Gravações em fila** ([src/lib/profile.ts](src/lib/profile.ts), `writeProfile`): salvar, enviar a foto e removê-la,
+  as formas de recebimento e o link do e-mail (enviar e cancelar a troca) saem uma por vez, e cada uma guarda o
+  `MyProfile` que voltou (a seguinte espera a anterior responder, e não sai se a sessão mudou na espera). Uma leitura
+  durante a qual uma gravação saiu, voltou ou ficou no ar não desfaz a tela (fica o que a gravação devolveu). O servidor
+  também grava uma por vez por técnico: a gravação seguinte que a fila solta quando a anterior passou dos 20 s sem
+  resposta (ou a de outro aparelho) espera a anterior terminar no servidor e não apaga o que ela gravou.
 
 ## Histórico de atendimentos
 

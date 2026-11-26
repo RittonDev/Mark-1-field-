@@ -959,14 +959,17 @@ equipe: `{source, id, created_at, territories: [nome]}`). `created_at` é a data
 
 **Técnico** (`TechnicianOut`):
 - `address_line`, `address_district`, `address_zip` (o endereço padrão do escritório, usado por mais de 20
-  colaboradores, não entra).
+  colaboradores, não entra). Desde 25/11/2026, `address_line` é só o logradouro, com `address_number` e
+  `address_complement` no detalhe (a migração separou as linhas "rua, número - complemento"): ver
+  [Cadastro V2](#cadastro-v2-2026-11-25).
 - `work_schedule: {start, end, break_start, break_end} | null`, com horários em `"HH:MM:SS"`.
 - `services: [{id, name}]`: os tipos de serviço que ele faz (as skills do Field Control).
 - `legacy: {source, id, territories: [nome]} | null`.
 - `avatar_url`: a foto enviada aqui (link assinado) ou, sem ela, a foto que veio do Field Control.
 
 `PATCH /technicians/{id}` aceita também:
-- `address_line`, `address_district` e `address_zip` (o CEP é gravado como `00000-000`);
+- `address_line`, `address_number`, `address_complement`, `address_district` e `address_zip` (o CEP é gravado como
+  `00000-000`);
 - `work_schedule`: horários em `HH:MM` ou `HH:MM:SS`. Horário inválido → 422 ("Horário inválido: use HH:MM"). Jornada
   toda em branco ou `null` limpa;
 - `service_type_ids: [uuid]`: ids repetidos contam uma vez; id que não existe → 422 ("Tipo de serviço não encontrado");
@@ -1049,12 +1052,15 @@ computador" no portal: vira app com ícone na área de trabalho e no menu Inicia
   padrão nem herda o valor de quem saiu (o valor não pago do técnico é retirado, com histórico); o "Definir valor"
   continua valendo para qualquer um na OS.
 - `TicketDetail.payouts` (só a gestão) e `TicketDetail.my_payout` (só o técnico, o dele).
-- `GET /payouts?technician_id=&status=pending|paid&concluded=&date_from=&date_to=&with_pix=` (gestão) → `{items, summary, pix}`
-  com `summary = {to_pay (OS concluídas), expected (OS abertas), paid}`; o período vale pela conclusão da OS. Com
-  `with_pix=true`, `pix` traz a chave PIX dos técnicos (ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18));
-  sem ele, `{}`.
+- `GET /payouts?technician_id=&status=pending|paid&concluded=&date_from=&date_to=&with_payout_methods=` (gestão) →
+  `{items, summary, total_count, payout_methods}` com `summary = {to_pay (OS concluídas), expected (OS abertas), paid}`;
+  o período vale pela conclusão da OS. Com `with_payout_methods=true`, `payout_methods` traz, por técnico, a forma de
+  recebimento preferencial (inteira, para quem paga copiar) e quantas formas ele tem (ver
+  [Cadastro V2](#cadastro-v2-2026-11-25)); sem ele, `{}`. Até 24/11/2026 eram `with_pix` e `pix` (a chave PIX única).
 - `POST /payouts/pay` e `POST /payouts/unpay` `{ids}` → `{changed}`. Pagar o último valor pendente de uma OS tira dela as
-  etiquetas `remove_on_payout_paid` (ex.: "Pendente Envio PGTO"); desfazer o pagamento não traz de volta.
+  etiquetas `remove_on_payout_paid` (ex.: "Pendente Envio PGTO"); desfazer o pagamento não traz de volta. O pagamento
+  grava no histórico da OS a forma de recebimento preferencial daquele momento, mascarada (`data.payout_method`; antes
+  de 25/11/2026, `data.pix`); sem forma, o pagamento sai do mesmo jeito.
 - `GET /me/earnings?month=AAAA-MM` (técnico; os outros papéis: 403 "Só para técnicos") → os chamados dele (até 1.000,
   com `total_count` = quantos batem com o filtro), o resumo e os reembolsos (custos extras aprovados a receber e
   pagos no mês). É o mês do Faturamento do app (`/faturamento/AAAA-MM`). Mês fora de AAAA-MM ou de 2000–2100: 422
@@ -1194,8 +1200,9 @@ ganchos na OS em `services/tickets.py` (`close_pending_offers`, `close_technicia
 
 **Regras.**
 - A central (gestão com Pagamentos em Editar, que pode atribuir técnico) oferta uma OS **sem técnico** e **em
-  aberto** (não resolvida, fechada nem cancelada) para 1 a 10 técnicos de campo ativos que ainda não estão na OS,
-  com o valor do técnico (R$, ≥ 0, 2 casas), o prazo para responder (opcional, no futuro) e um recado (até 500).
+  aberto** (não resolvida, fechada nem cancelada) para 1 a 10 técnicos de campo com acesso ao app (desde 25/11/2026,
+  também **Ativos** na operação e sem indisponibilidade nos dias da visita; sem agenda, hoje) que ainda não estão na
+  OS, com o valor do técnico (R$, ≥ 0, 2 casas), o prazo para responder (opcional, no futuro) e um recado (até 500).
 - O técnico responde "Aceitar por R$ X" ou "Recusar" (motivo opcional, até 300). Não há contraproposta nem chat (a
   conversa é pelo WhatsApp).
 - Para aceitar, ele precisa ter aberto a oferta: `GET /me/offers/{id}` grava `viewed_at` (sem ele, 422
@@ -1227,8 +1234,10 @@ ganchos na OS em `services/tickets.py` (`close_pending_offers`, `close_technicia
   (`/transition` e o cancelamento pelo portal) fecha como `ticket_closed`. Desativar o técnico
   (`PATCH /technicians/{id}` ou `PATCH /users/{id}` com `is_active: false`) ou tirar dele o papel `technician` fecha
   as pendentes dele em todas as OS como `central` (nota "Técnico sem acesso ao app", autor = quem alterou); reativar
-  não as traz de volta. Cada fechamento grava um `offer_cancelled` por OS e avisa a gestão e os técnicos afetados (o
-  tempo real sai no commit da rota, inclusive nas de Técnicos e Usuários).
+  não as traz de volta. Desde 25/11/2026, tirar o técnico de Ativo na operação (`POST /technicians/{id}/operational-status`)
+  também fecha, com a nota "Técnico inativo na operação" ou "Técnico bloqueado na operação". Cada fechamento grava um
+  `offer_cancelled` por OS e avisa a gestão e os técnicos afetados (o tempo real sai no commit da rota, inclusive nas
+  de Técnicos e Usuários).
 - Reenviar para quem já tem oferta pendente (ou vencida) da mesma OS **substitui** a anterior: a antiga vira
   cancelada com `cancel_reason: "replaced"`, sem evento próprio (o `offer_sent` traz `data.replaced`).
 - Prazo vencido não tem rotina: a oferta continua gravada como pendente e o estado efetivo é `expired` quando
@@ -1254,7 +1263,9 @@ mesma OS).
   sem técnico", "Só dá para ofertar uma OS em aberto (não resolvida, fechada nem cancelada)", "O prazo para responder
   precisa ser no futuro", "Técnico não encontrado", "<nome> não é técnico de campo", "<nome> está sem acesso ao app:
   libere o acesso em Técnicos antes de ofertar", "<nome> já está na OS", "<nome> já tem valor pago nesta OS e não
-  pode receber oferta dela"; validação com `label` "Técnicos", "Valor", "Prazo para responder" e "Recado". O envio
+  pode receber oferta dela" e, desde 25/11/2026, "<nome> está inativo e não recebe OS: <motivo>" (ou "bloqueado") e
+  "<nome> está indisponível <período>" ("até 30/11", "de 20/12 a 05/01/2027"); validação com `label` "Técnicos",
+  "Valor", "Prazo para responder" e "Recado". O envio
   trava a OS: dois envios juntos para o mesmo técnico viram uma troca (`replaced`); o índice único parcial é a rede de
   segurança (409 "Este técnico já tem uma oferta em aberto nesta OS").
 - `POST /tickets/{id}/offers/{offer_id}/cancel` (Pagamentos em Editar, sem corpo) → `TicketOfferOut` (pendente ou
@@ -1314,7 +1325,7 @@ caracteres, "Atendimento técnico". O cadastro do tipo de serviço e o texto do 
 | 409 | `OFFER_TAKEN` | Outro técnico já aceitou esta OS. | cancelada como `taken` |
 | 409 | `OFFER_EXPIRED` | O prazo para responder esta oferta acabou. | pendente com `expires_at` vencido |
 | 409 | `OFFER_CANCELLED` | A central cancelou esta oferta. | cancelada como `central` ou `replaced` (o app busca as ofertas de novo e acha a nova) |
-| 409 | `OFFER_UNAVAILABLE` | Esta OS não está mais disponível. | cancelada como `assigned`/`ticket_closed`; a OS já tem técnico ou foi encerrada; o técnico tem valor pago nesta OS; aceite de uma oferta aceita cuja OS não é mais dele |
+| 409 | `OFFER_UNAVAILABLE` | Esta OS não está mais disponível. | cancelada como `assigned`/`ticket_closed`; a OS já tem técnico ou foi encerrada; o técnico tem valor pago nesta OS; aceite de uma oferta aceita cuja OS não é mais dele; o técnico saiu de Ativo na operação (desde 25/11/2026; ele nunca vê a situação) |
 | 409 | `OFFER_ANSWERED` | Você já respondeu esta oferta. | aceitar a recusada ou recusar a aceita (acréscimo ao contrato inicial) |
 | 422 | `OFFER_NOT_VIEWED` | Abra a oferta e leia o escopo antes de aceitar. | aceite sem `viewed_at` |
 
@@ -1368,8 +1379,9 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
   não aparece. Precisa do `accepted_offer` porque, com técnico, a Geral troca o bloco "Ofertas" pelo valor do técnico.
 - Diálogo "Ofertar a OS com preço" (também no resumo da OS recém-criada): de 1 a 10 técnicos (`GET
   /technicians/suggest` com `exclude_ticket_id` e `limit=10`, mais a busca: `GET /technicians` com a tela Técnicos,
-  senão os técnicos de `GET /users/assignable`; sem acesso ao app e já na OS aparecem travados; o sugerido fora da
-  disponibilidade informada ganha o chip âmbar "Fora da disponibilidade (sáb · tarde)"), o valor (começa no
+  senão os técnicos de `GET /users/assignable`; sem acesso ao app e já na OS aparecem travados, e desde 25/11/2026
+  também Inativo e Bloqueado, com os chips e o motivo no título, e o indisponível no dia da visita, com "Indisponível
+  até 30/11"; o sugerido fora da disponibilidade informada ganha o chip âmbar "Fora da disponibilidade (sáb · tarde)"), o valor (começa no
   `technician_fee` do tipo de serviço), o prazo (sem prazo, 30 min, 1 h, 2 h, 4 h ou até o fim do dia; o `expires_at` é
   calculado no clique) e o recado. Depois do envio, o aviso "Oferta enviada" com "Copiar texto para o grupo". Sem
   texto de exemplo nem explicação fixa nos campos. Escopo ou recado que cita o cliente ou a loja (os nomes que a API
