@@ -484,35 +484,66 @@ async def test_reopen_rules(client: AsyncClient, world: World, engine: AsyncEngi
     }
 
 
-async def test_reopened_approval_without_password_sends_create_link(
-    client: AsyncClient, world: World, engine: AsyncEngine, mail_box: MailBox
-) -> None:
-    """Reprovar apaga a senha da ficha: reaberta e aprovada, o técnico nasce com a troca
-    obrigatória e a boas-vindas leva o link para criar a senha (72 h)."""
+async def _approve_reopened_without_password(
+    client: AsyncClient, world: World, engine: AsyncEngine, email: str, *, verified: bool
+) -> Response:
+    """Reprovar apaga a senha da ficha: reaberta (com o e-mail validado ou não) e aprovada."""
     an = world.analyst.headers
     token = await new_invite(client, world)
-    await submit(client, token, ficha(email="sem.senha@exemplo.com", photo=None))
-    app_id = await application_id(client, world, "sem.senha@exemplo.com")
+    await submit(client, token, ficha(email=email, photo=None))
+    app_id = await application_id(client, world, email)
     await reject(client, world, app_id, "Faltou o RG")
     r = await client.post(f"{APPS}/{app_id}/reopen", json={"reason": "RG enviado"}, headers=an)
     assert r.status_code == 200 and r.json()["has_password"] is False, r.text
+    if verified:
+        async with engine.begin() as conn:
+            await conn.execute(
+                update(TechnicianApplication)
+                .where(TechnicianApplication.id == app_id)
+                .values(email_verified_at=datetime.now(UTC))
+            )
     r = await client.post(f"{APPS}/{app_id}/approve", json={}, headers=an)
     assert r.status_code == 200, r.text
     assert r.json()["technician"]["must_change_password"] is True
     assert r.json()["welcome"]["status"] == "queued"
-    await deliver(engine)
-    welcome = mail_box.texts()[-1]
-    assert "/definir-senha#token=" in welcome and "/validar-email" not in welcome
     # A senha da ficha não vale mais.
     login = await client.post(
         f"{API}/auth/login",
-        json={
-            "email": "sem.senha@exemplo.com",
-            "password": "minha-senha-forte",
-            "channel": "mobile",
-        },
+        json={"email": email, "password": "minha-senha-forte", "channel": "mobile"},
     )
     assert login.status_code == 401
+    return r
+
+
+async def test_reopened_approval_without_password_and_unverified_email_has_no_link(
+    client: AsyncClient, world: World, engine: AsyncEngine, mail_box: MailBox
+) -> None:
+    """Sem senha e com o e-mail nunca validado (pode ter sido digitado errado), a boas-vindas não
+    leva o link de criar senha (quem abrisse ficaria com a conta): ela diz que a central manda a
+    senha provisória pelo WhatsApp, e a resposta avisa a central (`password_link` falso)."""
+    r = await _approve_reopened_without_password(
+        client, world, engine, "sem.validar@exemplo.com", verified=False
+    )
+    assert r.json()["password_link"] is False
+    await deliver(engine)
+    welcome = mail_box.texts()[-1]
+    assert "/definir-senha" not in welcome
+    assert "Senha: a central manda uma senha provisória pelo WhatsApp." in welcome
+
+
+async def test_reopened_approval_without_password_and_verified_email_sends_create_link(
+    client: AsyncClient, world: World, engine: AsyncEngine, mail_box: MailBox
+) -> None:
+    """Sem senha e com o e-mail validado: a boas-vindas leva o link para criar a senha (72 h) e a
+    resposta diz isso (`password_link`)."""
+    r = await _approve_reopened_without_password(
+        client, world, engine, "validado@exemplo.com", verified=True
+    )
+    assert r.json()["password_link"] is True
+    await deliver(engine)
+    welcome = mail_box.texts()[-1]
+    assert "/definir-senha#token=" in welcome and "/validar-email" not in welcome
+    assert "senha provisória" not in welcome
 
 
 async def test_retention_counts_from_last_rejection_and_reopen(

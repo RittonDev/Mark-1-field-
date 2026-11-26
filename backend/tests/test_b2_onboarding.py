@@ -154,7 +154,7 @@ async def test_lgpd_retention_and_deletion_on_request(
     assert (tmp_path / keys[approved]).exists()
 
 
-async def test_form_validations_and_approval_keeps_the_address(
+async def test_form_validations_and_approval_splits_the_address(
     client: AsyncClient, world: World
 ) -> None:
     an = world.analyst.headers
@@ -187,9 +187,17 @@ async def test_form_validations_and_approval_keeps_the_address(
     found = (
         await client.get(f"{API}/technicians", params={"q": "endereco@exemplo.com"}, headers=an)
     ).json()
+    # A linha inteira, sem o número à parte (a ficha de antes): a aprovação separa o logradouro e
+    # o número, como a migração fez com os cadastros.
     assert [(t["address_line"], t["address_zip"]) for t in found] == [
-        ("Rua das Flores, 10", "07010-000")
+        ("Rua das Flores", "07010-000")
     ]
+    one = (await client.get(f"{API}/technicians/{found[0]['id']}", headers=an)).json()
+    assert (one["address_line"], one["address_number"], one["address_complement"]) == (
+        "Rua das Flores",
+        "10",
+        None,
+    )
 
 
 async def test_active_link_can_be_copied_again(client: AsyncClient, world: World) -> None:

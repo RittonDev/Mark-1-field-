@@ -380,9 +380,10 @@ async def test_central_patch_rereads_every_column(
         "rg_state": "mg",
         "birth_date": "1985-03-10",
         "phone_secondary": "11 3333-4444",
-        "bio": "  Técnico de   CFTV. ",
+        "bio": "  Técnico de CFTV.  \r\n\r\n\r\nAtendo a Cidade Exemplo. ",
         "address_line": "Rua Exemplo",
-        "address_number": "S/N",
+        # O número em maiúsculas, como o app e a ficha gravam ("s/n" vira "S/N").
+        "address_number": "s/n",
         "address_complement": "Fundos",
         "address_district": "Centro",
         "address_zip": "01001000",
@@ -400,7 +401,8 @@ async def test_central_patch_rereads_every_column(
         "rg_state": "MG",
         "birth_date": date(1985, 3, 10),
         "phone_secondary": "(11) 3333-4444",
-        "bio": "Técnico de CFTV.",
+        # Com os parágrafos (= normalizeBio da web e do app).
+        "bio": "Técnico de CFTV.\n\nAtendo a Cidade Exemplo.",
         "address_line": "Rua Exemplo",
         "address_number": "S/N",
         "address_complement": "Fundos",
@@ -433,6 +435,20 @@ async def test_central_patch_rereads_every_column(
     assert fields["rg"] == "MG-12.345.678 · PC/MG"
     assert fields["birth_date"] == "10/03/1985"
     assert fields["company_document"] == "12.345.678/0001-95"
+    assert fields["address_number"] == "S/N"
+
+    # Órgão emissor com a UF no fim ("SSP/SP", "Detran-RJ"): grava separado; a UF vazia recebe a
+    # do fim, e com a UF no campo (a enviada ou a gravada) vale a do campo e o fim sai.
+    r = await client.patch(url, json={"rg_issuer": "ssp/sp", "rg_state": None}, headers=an)
+    assert r.status_code == 200, r.text
+    assert (r.json()["rg_issuer"], r.json()["rg_state"]) == ("SSP", "SP")
+    r = await client.patch(url, json={"rg_issuer": "Detran-RJ"}, headers=an)
+    assert r.status_code == 200, r.text
+    assert (r.json()["rg_issuer"], r.json()["rg_state"]) == ("DETRAN", "SP")
+    r = await client.patch(url, json={"rg_issuer": "SSP-SP", "rg_state": "MG"}, headers=an)
+    assert (r.json()["rg_issuer"], r.json()["rg_state"]) == ("SSP", "MG")
+    stored_rg = await stored()
+    assert (stored_rg["rg_issuer"], stored_rg["rg_state"]) == ("SSP", "MG")
 
     # Grupos: o enviado com o gravado.
     r = await client.patch(url, json={"rg_issuer": ""}, headers=an)
@@ -476,6 +492,9 @@ async def test_central_patch_rereads_every_column(
             personal.BIRTH_UNDERAGE,
         ),
         ({"birth_date": "2000-02-30"}, "Data de nascimento", personal.BIRTH_INVALID),
+        # Número não é data (viraria segundos desde 1970, sem passar pelos 18 a 90 anos).
+        ({"birth_date": 1577836800}, "Data de nascimento", personal.BIRTH_INVALID),
+        ({"birth_date": 1577836800.0}, "Data de nascimento", personal.BIRTH_INVALID),
         ({"phone_secondary": "1234"}, "Telefone secundário", "Informe o telefone com DDD"),
         ({"bio": "x" * 501}, "Mini biografia", "No máximo 500 caracteres"),
         ({"address_number": "12345678901"}, "Número", "No máximo 10 caracteres"),
@@ -588,3 +607,18 @@ async def test_cutting_access_or_setting_a_password_revokes_password_links(
     r = await client.patch(f"{API}/users/{other_id}", json={"is_active": False}, headers=admin)
     assert r.status_code == 200, r.text
     assert await revoked(engine, link)
+
+
+async def test_situation_label_only_on_its_route(client: AsyncClient, world: World) -> None:
+    """O 422 de mudar a situação mostra "Situação" (também quando ela não vem ou vem vazia); nas
+    telas da OS, o mesmo nome técnico ("status") continua "Status"."""
+    an = world.analyst.headers
+    url = f"{API}/technicians/{world.tech.user.id}/operational-status"
+    for body in ({"reason": "Férias"}, {"status": None, "reason": "Férias"}, {"status": "pausado"}):
+        r = await client.post(url, json={"reason": "Férias", **body}, headers=an)
+        assert r.status_code == 422, (body, r.text)
+        issues = {issue["label"]: issue["msg"] for issue in r.json()["detail"]}
+        assert issues == {"Situação": "Escolha a situação"}, body
+    r = await client.get(f"{API}/tickets", params={"status": "pausado"}, headers=an)
+    assert r.status_code == 422, r.text
+    assert [issue["label"] for issue in r.json()["detail"]] == ["Status"]
