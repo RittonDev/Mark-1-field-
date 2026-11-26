@@ -66,8 +66,8 @@ export type CepFieldProps = CepFieldCommon &
          *  num campo, em `street` (Clientes, Locais). */
         mode: CepMode;
         address: AddressSlots;
-        /** O endereço gravado, ou o que a pessoa não digitou (campo igual a ele é livre para o CEP). Sem ele, vale o da
-         *  abertura do formulário. */
+        /** O endereço gravado, ou o que a pessoa não digitou (campo igual a ele é livre para o CEP; no "line", a linha
+         *  não, porque leva o número e o complemento). Sem ele, vale o da abertura do formulário. */
         opened?: AddressSlots;
         /** O que a busca anterior pôs, quando a tela guarda (a ficha pública: o campo monta de novo ao voltar à etapa e
          *  esquece o que aplicou). Junto do que o próprio campo aplicou, decide o `stale`: o campo que ainda tem esse

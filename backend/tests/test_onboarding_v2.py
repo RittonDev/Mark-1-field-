@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from app.core.config import settings
 from app.models import TechnicianApplication, User
 from app.schemas import personal
+from app.schemas.onboarding import ApplicationIn
 from app.services import mail, realtime
 from app.services import onboarding as onboarding_svc
 from tests.conftest import MailBox, World, requires_db
@@ -182,6 +183,13 @@ async def test_ficha_validations(client: AsyncClient, world: World, engine: Asyn
         ({"bio": "x" * 501}, ("bio", "No máximo 500 caracteres")),
         ({"birth_date": "1930-01-01"}, ("birth_date", "Confira a data de nascimento")),
         ({"birth_date": "2026-02-30"}, ("birth_date", "Confira a data de nascimento")),
+        # Número não é data (viraria segundos desde 1970, sem passar pela idade).
+        ({"birth_date": 1577836800}, ("birth_date", "Confira a data de nascimento")),
+        ({"birth_date": -1262304000.0}, ("birth_date", "Confira a data de nascimento")),
+        # O nome entra na saudação do e-mail de validação: só letras, como no app.
+        ({"full_name": "https://golpe.exemplo/entrar Silva"}, ("full_name", personal.NAME_LETTERS)),
+        ({"full_name": "Tecnico www.golpe.exemplo"}, ("full_name", personal.NAME_LETTERS)),
+        ({"full_name": "Tecnico Alfa 11988887777"}, ("full_name", personal.NAME_LETTERS)),
         ({"phone_secondary": "123"}, ("phone_secondary", "Informe o telefone com DDD")),
         ({"address_number": "12345678901"}, ("address_number", "No máximo 10 caracteres")),
         ({"address_complement": "x" * 61}, ("address_complement", "No máximo 60 caracteres")),
@@ -225,6 +233,7 @@ async def test_approval_copies_everything(
     assert r.status_code == 200, r.text
     tech_id = r.json()["technician"]["id"]
     assert r.json()["technician"]["must_change_password"] is False
+    assert r.json()["password_link"] is False  # com a senha da ficha, nenhum link de senha
 
     copied = {
         "cpf": "12345678909",
@@ -273,6 +282,76 @@ async def test_approval_copies_everything(
     assert detail["purge_at"] is None and detail["has_password"] is False
 
 
+async def test_ficha_uses_the_rules_of_the_app_and_the_central(
+    client: AsyncClient, world: World
+) -> None:
+    """As regras de schemas/personal.py, iguais no app e na central: o número em maiúsculas ("s / n"
+    vira "S/N"), o órgão emissor com a UF no fim gravado separado (a UF vazia recebe a do fim; com
+    outra UF, vale a do campo) e a mini biografia com os parágrafos. Na ficha e no técnico que a
+    aprovação cria."""
+    an = world.analyst.headers
+    token = await new_invite(client, world)
+    bio = "Técnico de redes.  \r\n\r\n\r\nAtendo a Cidade Exemplo.  "
+    body = full_ficha(address_number="s / n", rg_issuer="ssp/sp", rg_state="", bio=bio)
+    await submit(client, token, body)
+    app_id = await application_id(client, world, "tecnico.alfa@exemplo.com")
+    expected = {
+        "address_number": "S/N",
+        "rg_issuer": "SSP",
+        "rg_state": "SP",
+        "bio": "Técnico de redes.\n\nAtendo a Cidade Exemplo.",
+    }
+    detail = (await client.get(f"{APPS}/{app_id}", headers=an)).json()
+    assert {key: detail[key] for key in expected} == expected
+    r = await client.post(f"{APPS}/{app_id}/approve", json={}, headers=an)
+    assert r.status_code == 200, r.text
+    tech_id = r.json()["technician"]["id"]
+    one = (await client.get(f"{API}/technicians/{tech_id}", headers=an)).json()
+    assert {key: one[key] for key in expected} == expected
+
+    other = ApplicationIn.model_validate(full_ficha(rg_issuer="SSP-SP", rg_state="rj"))
+    assert (other.rg_issuer, other.rg_state) == ("SSP", "RJ")
+    odd = ApplicationIn.model_validate(full_ficha(rg_issuer="SSP/XX", rg_state="SP"))
+    assert (odd.rg_issuer, odd.rg_state) == ("SSP XX", "SP")
+
+
+def test_address_of_the_ficha_from_before_is_split() -> None:
+    """Ficha com o endereço numa linha e sem o número (a de antes da publicação, ou o número
+    digitado no logradouro): a aprovação separa como a migração (personal.split_address_line), com
+    o complemento da ficha depois do da linha; o que não separa com segurança fica como está."""
+
+    def approved(**fields: object) -> tuple[str | None, str | None, str | None]:
+        return onboarding_svc.ficha_address(TechnicianApplication(**fields))
+
+    assert approved(address="Rua Exemplo, 123 - Apto 4") == ("Rua Exemplo", "123", "Apto 4")
+    assert approved(address="Rua Exemplo, s/n", address_complement="Fundos") == (
+        "Rua Exemplo",
+        "S/N",
+        "Fundos",
+    )
+    assert approved(address="Rua Exemplo, 10 - Casa 2", address_complement="Fundos") == (
+        "Rua Exemplo",
+        "10",
+        "Casa 2 - Fundos",
+    )
+    assert approved(address="Rua Exemplo, 10 - Casa 2", address_complement="Casa 2") == (
+        "Rua Exemplo",
+        "10",
+        "Casa 2",
+    )
+    # Com o número, ou sem dar para separar, como veio.
+    assert approved(address="Rua Exemplo, 10", address_number="12") == ("Rua Exemplo, 10", "12", None)
+    assert approved(address="Rodovia SP-55, km 12") == ("Rodovia SP-55, km 12", None, None)
+    assert approved(address=None, address_complement="Fundos") == (None, None, "Fundos")
+    # Os dois complementos juntos passariam de 60: a linha fica inteira.
+    long = "x" * 50
+    assert approved(address=f"Rua Exemplo, 10 - {long}", address_complement="Bloco B Fundos") == (
+        f"Rua Exemplo, 10 - {long}",
+        None,
+        "Bloco B Fundos",
+    )
+
+
 async def test_approval_refuses_a_cpf_of_another_user(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
@@ -307,6 +386,7 @@ async def test_approval_in_one_step_queues_welcome(
     r = await client.post(f"{APPS}/{app_id}/approve", json={}, headers=an)
     assert r.status_code == 200, r.text
     assert r.json()["welcome"] == {"status": "queued", "to": "bem.vindo@exemplo.com"}
+    assert r.json()["password_link"] is False
     assert len(mail_box.soon) == 2
     assert await deliver(engine) == 2
     subjects = [message["Subject"] for message in mail_box.messages]
