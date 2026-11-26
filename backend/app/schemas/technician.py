@@ -2,8 +2,11 @@ import datetime as dt
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic_core import PydanticCustomError
 
+from app.core.enums import OperationalStatus
+from app.schemas import personal
 from app.schemas.common import Ref
 from app.schemas.records import WorkSchedule, WorkScheduleOut
 from app.schemas.tech_profile import (
@@ -13,6 +16,11 @@ from app.schemas.tech_profile import (
     TransportOut,
 )
 from app.schemas.technician_level import LevelSummary
+from app.schemas.user import UnavailabilityPeriodOut
+
+# Motivo da mudança de situação (POST /technicians/{id}/operational-status).
+REASON_MIN, REASON_MAX = 3, 500
+REASON_REQUIRED = "Informe o motivo"
 
 
 class TechnicianOut(BaseModel):
@@ -58,19 +66,48 @@ class TechnicianOut(BaseModel):
     base_source: Literal["history", "home"] | None = None
     base_visits: int = 0
     last_visit_at: dt.datetime | None = None
-    # Ficha completa: endereço, jornada, serviços que faz e origem (Field Control).
+    # Ficha completa: endereço (address_line é o logradouro), jornada, serviços que faz e origem
+    # (Field Control).
     address_line: str | None = None
     address_district: str | None = None
     address_zip: str | None = None
     work_schedule: WorkScheduleOut | None = None
     services: list[Ref] = []
     legacy: dict[str, Any] | None = None
-    # Tem chave PIX cadastrada (ele cadastra no app) e quando ela mudou. A chave em si fica em
-    # Pagamentos (GET /payouts?with_pix=true), não na base técnica.
-    has_pix: bool = False
-    pix_updated_at: dt.datetime | None = None
     # Elo (o selo da lista): a conta guardada, de até 6 h atrás; sem conta ainda, Bronze.
     level: LevelSummary = Field(default_factory=LevelSummary)
+    # Situação na operação (só a central vê; services/technician_status.py), com o motivo, quando e
+    # quem mudou. Receber OS pede "active" e o acesso ao app liberado (is_active).
+    operational_status: OperationalStatus = OperationalStatus.ACTIVE
+    operational_reason: str | None = None
+    operational_changed_at: dt.datetime | None = None
+    operational_changed_by: Ref | None = None
+    # Indisponibilidade: os períodos que não terminaram, pelo início (o técnico informa no app).
+    unavailability: list[UnavailabilityPeriodOut] = []
+    # E-mail de login validado pelo link (null: nunca) e o e-mail novo pedido no app, esperando o
+    # link (o login continua `email` até lá).
+    email_verified_at: dt.datetime | None = None
+    email_pending: str | None = None
+    # Formas de recebimento: quantas (0: "Sem forma de recebimento") e a última troca do destino do
+    # pagamento ("Nova"); a lista fica com Pagamentos (GET /technicians/{id}/payout-methods).
+    payout_methods_count: int = 0
+    payout_changed_at: dt.datetime | None = None
+    # Só no detalhe (GET /technicians/{id} e as respostas de um técnico); null na lista: dados
+    # pessoais, endereço em partes, empresa e veículo.
+    cpf: str | None = None
+    rg_number: str | None = None
+    rg_issuer: str | None = None
+    rg_state: str | None = None
+    birth_date: dt.date | None = None
+    phone_secondary: str | None = None
+    bio: str | None = None
+    address_number: str | None = None
+    address_complement: str | None = None
+    company_document: str | None = None
+    company_name: str | None = None
+    company_trade_name: str | None = None
+    vehicle_model: str | None = None
+    vehicle_plate: str | None = None
 
 
 class TechnicianCreate(BaseModel):
@@ -90,6 +127,11 @@ class TechnicianCreate(BaseModel):
 
 
 class TechnicianUpdate(BaseModel):
+    """PATCH /technicians/{id}: só os campos enviados mudam (a web manda só o que mudou; null ou
+    vazio limpa). Os dados pessoais e da empresa a central muda sem senha; o CPF ela muda e limpa
+    (único entre os usuários). RG e empresa são conferidos em grupo com o que está gravado
+    (services/technicians.update). Veículo e perfil profissional: só o técnico, no app."""
+
     name: str | None = Field(default=None, min_length=3, max_length=160)
     email: EmailStr | None = None
     phone: str | None = Field(default=None, max_length=40)
@@ -100,15 +142,112 @@ class TechnicianUpdate(BaseModel):
     coverage_area: str | None = Field(default=None, max_length=1000)
     is_active: bool | None = None
     address_line: str | None = Field(default=None, max_length=255)
+    address_number: str | None = None
+    address_complement: str | None = None
     address_district: str | None = Field(default=None, max_length=120)
     address_zip: str | None = Field(default=None, max_length=10)
     work_schedule: WorkSchedule | None = None
     service_type_ids: list[uuid.UUID] | None = Field(default=None, max_length=300)
+    cpf: str | None = None
+    rg_number: str | None = None
+    rg_issuer: str | None = None
+    rg_state: str | None = None
+    birth_date: dt.date | None = None
+    phone_secondary: str | None = None
+    bio: str | None = None
+    company_document: str | None = None
+    company_name: str | None = None
+    company_trade_name: str | None = None
 
     @field_validator("email")
     @classmethod
     def _lower(cls, v: str | None) -> str | None:
         return v.strip().lower() if v else v
+
+    @field_validator("cpf")
+    @classmethod
+    def _cpf(cls, v: str | None) -> str | None:
+        return personal.cpf(v)
+
+    @field_validator("rg_number")
+    @classmethod
+    def _rg_number(cls, v: str | None) -> str | None:
+        return personal.rg_number(v)
+
+    @field_validator("rg_issuer")
+    @classmethod
+    def _rg_issuer(cls, v: str | None) -> str | None:
+        return personal.rg_issuer(v)
+
+    @field_validator("rg_state")
+    @classmethod
+    def _rg_state(cls, v: str | None) -> str | None:
+        return personal.uf(v)
+
+    @field_validator("birth_date", mode="before")
+    @classmethod
+    def _birth_date(cls, v: object) -> object:
+        # Antes do tipo: a data que não existe ("2026-02-30") dá a mensagem da tela.
+        if v is None or isinstance(v, str | dt.date):
+            return personal.birth_date(v)
+        return v
+
+    @field_validator("phone_secondary")
+    @classmethod
+    def _phone_secondary(cls, v: str | None) -> str | None:
+        return personal.phone(v)
+
+    @field_validator("bio")
+    @classmethod
+    def _bio(cls, v: str | None) -> str | None:
+        return personal.bio(v)
+
+    @field_validator("address_number")
+    @classmethod
+    def _address_number(cls, v: str | None) -> str | None:
+        return personal.clean_text(v, personal.ADDRESS_NUMBER_MAX)
+
+    @field_validator("address_complement")
+    @classmethod
+    def _address_complement(cls, v: str | None) -> str | None:
+        return personal.clean_text(v, personal.ADDRESS_COMPLEMENT_MAX)
+
+    @field_validator("company_document")
+    @classmethod
+    def _company_document(cls, v: str | None) -> str | None:
+        return personal.cnpj(v)
+
+    @field_validator("company_name", "company_trade_name")
+    @classmethod
+    def _company_names(cls, v: str | None) -> str | None:
+        return personal.clean_text(v, personal.COMPANY_NAME_MAX)
+
+
+class OperationalStatusIn(BaseModel):
+    """POST /technicians/{id}/operational-status. Motivo de 3 a 500 caracteres; `cut_access` só
+    vale fora de "active" e com o acesso ao app liberado (Bloquear sugere cortar)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: OperationalStatus
+    reason: str
+    cut_access: bool = False
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _status(cls, v: object) -> object:
+        # O rótulo da tela ("Situação"): o nome técnico "status" é "Status" nas telas da OS.
+        if not isinstance(v, str) or v not in {s.value for s in OperationalStatus}:
+            raise PydanticCustomError("value_error", "Escolha a situação", {"label": "Situação"})
+        return v
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, v: str) -> str:
+        text = personal.clean_text(v, REASON_MAX) or ""
+        if len(text) < REASON_MIN:
+            raise ValueError(REASON_REQUIRED)
+        return text
 
 
 class TemporaryPassword(BaseModel):
@@ -204,6 +343,8 @@ class NearbyTechnician(BaseModel):
     email: str
     phone: str | None
     is_active: bool
+    # Situação na operação: Inativo e Bloqueado aparecem (com o selo) e não recebem OS.
+    operational_status: OperationalStatus = OperationalStatus.ACTIVE
     avatar_url: str | None
     base_city: str | None
     base_state: str | None
