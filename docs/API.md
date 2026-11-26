@@ -6,6 +6,10 @@ OpenAPI interativo: `http://localhost:8000/docs`.
 Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail": "mensagem"}`
 (422 de validação do FastAPI traz `detail` como lista). Códigos: 401 sem token/expirado,
 403 sem permissão, 404 não encontrado, 409 conflito de versão, 422 regra de negócio/validação.
+Os erros em que a tela reage por um código trazem também `code` (`{"detail", "code"}`): os do acesso
+(`MODULE_FORBIDDEN`...), das ofertas (`OFFER_*`), do conflito de agenda e, desde 25/11/2026, os de `CodedError`
+(`services/errors.py`, com o status dele: `LINK_GONE`, `MAIL_DISABLED`, `CEP_NOT_FOUND`, `PAYOUT_METHOD_DUPLICATE`...;
+ver [Cadastro V2](#cadastro-v2-2026-11-25)).
 
 Valor que o banco recusa (SQLSTATE da classe 22, "data exception": texto maior que a coluna, U+0000 num texto que vai
 ao banco como está) responde 422 em qualquer rota, com um aviso no log (o SQLSTATE, sem traceback):
@@ -78,21 +82,31 @@ Origem: `web`, `mobile`, `email`, `phone`, `whatsapp`, `monitoring`.
   papel do usuário mudou e não é mais aceito no canal, responde **401** e o cliente faz logout.
 - `GET /auth/me` → `UserOut`
 - `POST /auth/change-password` `{current_password, new_password (min 8)}` → `TokenResponse` (200). Encerra as outras sessões do usuário (`sessions_revoked_at`) e devolve tokens novos para este aparelho. 422 com "Senha atual incorreta" ou "A nova senha precisa ser diferente da atual". `UserOut.must_change_password = true` (senha provisória): o app obriga a trocar antes de seguir.
-  - Limite: a tentativa conta antes de conferir a senha, então pedidos em paralelo não furam o limite. São 5 em 15 min, somando as do Meu cadastro do técnico (e-mail e chave PIX); a partir da 6ª sai 429 com `Retry-After`, sem conferir a senha. A senha certa zera a conta.
+  - Limite: a tentativa conta antes de conferir a senha, então pedidos em paralelo não furam o limite. São 5 em 15 min, somando as do Meu cadastro do técnico (e-mail, dados da empresa e formas de recebimento); a partir da 6ª sai 429 com `Retry-After`, sem conferir a senha. A senha certa zera a conta.
   - Técnico: grava no histórico do cadastro (via app, autor o técnico) `password` "criada no app" (era a provisória) ou "trocada no app", e sai `profile.changed` com `fields: ["password"]` via app (só atualiza as listas da central). Ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
+  - Desde 25/11/2026, a troca também invalida os links de nova senha mandados por e-mail e ainda não usados.
+- **Esqueci minha senha e os links do e-mail** (sem login, desde 25/11/2026): `POST /auth/forgot-password` `{email}` →
+  202; `POST /auth/password-reset/check` `{token}` → `PasswordResetCheck`; `POST /auth/password-reset`
+  `{token, password}` → `PasswordResetDone`; `POST /auth/verify-email` `{token}` → `VerifyEmailResult`. O token chega
+  no corpo (a página o lê do `#token=` do link). Ver [Cadastro V2](#cadastro-v2-2026-11-25).
 - **Sessões encerradas:** tokens emitidos antes de `sessions_revoked_at` (troca/redefinição de senha, desativação) recebem **401** "Sessão encerrada" na API, no refresh e no WebSocket (fecha com 4401). Trate como logout.
 - `GET /auth/providers` → `{microsoft, password_for_staff, microsoft_domains}` (tela de login).
 - **Login Microsoft (Entra ID), só gestão:** o navegador abre `GET /auth/microsoft/start` (302 para a Microsoft, com PKCE). A volta `GET /auth/microsoft/callback` redireciona para `WEB_URL/login/microsoft#code=<código de uso único, 60 s>` ou `WEB_URL/login?sso_error=<not_registered|domain_not_allowed|wrong_tenant|role_not_allowed|inactive|account_mismatch|cancelled|invalid_state|invalid_token|provider_error>`. O site troca o código em `POST /auth/microsoft/exchange` `{code}` → `TokenResponse`. Com `ENTRA_ENFORCE_FOR_STAFF`, analistas e gestores do domínio recebem 403 no login com senha.
 
 ### Meta
-- `GET /meta` → `{statuses:[{value,label,group,color,sla_paused,final,requires_assignee,description}], transitions:{status:[status]}, priorities:[{value,label,code,color}], priority_matrix:[{impact,urgency,priority}], ticket_types, sources, asset_types, roles, impacts, urgencies, access_channels:{web:[role], mobile:[role]}}` (`ticket_types`…`urgencies` como `[{value,label}]`)
+- `GET /meta` → `{statuses:[{value,label,group,color,sla_paused,final,requires_assignee,description}], transitions:{status:[status]}, priorities:[{value,label,code,color}], priority_matrix:[{impact,urgency,priority}], ticket_types, sources, asset_types, roles, impacts, urgencies, access_channels:{web:[role], mobile:[role]}, mail_enabled}` (`ticket_types`…`urgencies` como `[{value,label}]`; `mail_enabled`, desde 25/11/2026: o envio de e-mail está ligado, com `SMTP_HOST` e `MAIL_FROM`; a central usa para mostrar "Não enviado" e oferecer o WhatsApp e a senha provisória)
 
 ### Usuários e grupos
 - `GET /users?role=&team_id=&q=&active=` → `UserOut[]`
-- `GET /users/assignable?team_id=` → `[{id,name,role,team_id,team_name,open_tickets}]` (analistas, técnicos e supervisores ativos, com carga)
+- `GET /users/assignable?team_id=` → `[{id,name,role,team_id,team_name,open_tickets,operational_status,operational_reason,unavailability}]`
+  (analistas, técnicos e supervisores ativos, com carga; o técnico, só com o acesso ao app liberado; desde 25/11/2026, ele vem com a situação na
+  operação, o motivo só fora de Ativo, e os períodos de indisponibilidade que não terminaram: a web trava Inativo e
+  Bloqueado e avisa a indisponibilidade; ver [Cadastro V2](#cadastro-v2-2026-11-25))
 - `POST /users` (admin) `UserCreate` → `UserOut`
 - `GET /users/{id}` · `PATCH /users/{id}` (admin) `UserUpdate` (desativar o técnico ou tirar dele o papel
-  `technician` fecha as ofertas de OS em aberto dele: ver [Ofertas de OS](#ofertas-de-os-2026-11-18))
+  `technician` fecha as ofertas de OS em aberto dele: ver [Ofertas de OS](#ofertas-de-os-2026-11-18); desativar ou
+  definir a senha invalida os links de nova senha mandados por e-mail; trocar o e-mail de um técnico troca o login na
+  hora e manda a validação para o novo, como em Técnicos)
 - `GET /teams` → `TeamOut[]` · `POST /teams` · `PATCH /teams/{id}` (admin/supervisor)
 
 `UserOut = {id,name,email,phone,role,job_title,team_id,team:{id,name}|null,is_active,last_login_at,location_consent_at,must_change_password,created_at}`
@@ -291,17 +305,25 @@ não duplica (reenvio seguro do lote). Histórico apagado após `TRACKING_RETENT
 Público (sem login, pelo link): `GET /public/onboarding/catalog` (áreas, disponibilidade, níveis, sugestões de skill,
 versão do aviso de privacidade; o app usa as `skill_suggestions` nas sugestões das Aptidões) ·
 `GET /public/onboarding/{token}` → `{valid, expires_at}` ·
-`POST /public/onboarding/{token}` (ficha + `password` + `privacy_consent: true` + `photo` em data URL) → `{protocol}`;
-410 se o link expirou, foi cancelado ou já usado; 422 com CPF/UF/e-mail inválido ou e-mail já cadastrado. E-mail de
+`POST /public/onboarding/{token}` (ficha + `password` + `privacy_consent: true` + `photo` em data URL) →
+`{protocol, email_verification}` (desde 25/11/2026, a ficha traz também telefone secundário, RG, o endereço em partes,
+mini biografia, empresa e veículo, e o link de validação do e-mail vai para a fila: ver
+[Cadastro V2](#cadastro-v2-2026-11-25));
+410 se o link expirou, foi cancelado ou já usado; 422 com CPF/UF/e-mail inválido ou e-mail ou CPF já cadastrado. E-mail de
 domínio da empresa (`ENTRA_ALLOWED_DOMAINS`, o domínio exato): 422 "Use um e-mail que não seja da empresa", antes da
 checagem de e-mail já usado, e o link não é gasto. Cada código de `service_areas` e de `availability` tem até 32
 caracteres (os de hoje têm até 16): maior, 422 "No máximo 32 caracteres", sem o valor na resposta, e o link não é gasto;
 o código desconhecido dentro do limite continua na mensagem ("Área desconhecida: …", "Disponibilidade desconhecida: …").
 Gestão: `GET|POST /onboarding/invites` (`{label?, reusable, days_valid}`; o `token` só aparece na criação) ·
 `DELETE /onboarding/invites/{id}` · `GET /onboarding/applications?status=` · `GET /onboarding/applications/pending-count` ·
-`GET /onboarding/applications/{id}` (com `photo_url` assinado) · `POST .../{id}/approve {team_id?, job_title?}` → `UserOut`
-(o técnico entra com o e-mail e a senha da ficha, e o perfil técnico já vem com a disponibilidade, o transporte e as
-aptidões da ficha, sem histórico: ver [Perfil técnico](#perfil-técnico-2026-11-19)) · `POST .../{id}/reject {reason}`.
+`GET /onboarding/applications/{id}` (com `photo_url` assinado; desde 25/11/2026, também `has_password`, `reviews`,
+`reopened_by` e `purge_at`) · `POST .../{id}/approve` (num passo, corpo opcional `{team_id?, job_title?, note?}`; a web
+manda `{}`) → `ApplicationApproved {technician: UserOut, welcome: EmailQueued}` (o técnico entra com o e-mail e a senha
+da ficha e com tudo o que ela coletou, o perfil técnico já vem com a disponibilidade, o transporte e as aptidões da
+ficha, ver [Perfil técnico](#perfil-técnico-2026-11-19), e a boas-vindas vai para a fila) ·
+`POST .../{id}/reject {reason}` · `POST .../{id}/reopen {reason}` (a reprovada volta para análise) ·
+`POST .../{id}/email-verification` (reenvia a validação do e-mail da ficha). As regras de 25/11/2026 estão em
+[Cadastro V2](#cadastro-v2-2026-11-25).
 
 ### Técnicos (gestão do acesso)
 Analistas e gestores, e só sobre usuários técnicos: `GET /technicians?q=&team_id=&active=&state=&city=&tool_id=&day=&period=`
@@ -311,16 +333,24 @@ aberta não fica "em jornada"; `tool_id`, `day` e `period` filtram pelo perfil t
 [Perfil técnico](#perfil-técnico-2026-11-19); paginada por `limit`, 1 a 5000, padrão 2000, e `offset`, com o total
 do filtro no cabeçalho `X-Total-Count`) · `POST /technicians` →
 `{technician, temporary_password}` · `PATCH /technicians/{id}` (nome, e-mail, telefone, grupo, cargo, `is_active`;
-desativar encerra as sessões e fecha as ofertas de OS em aberto dele; e a ficha completa: endereço, jornada e
-serviços, ver "Fichas completas") ·
-`POST /technicians/{id}/reset-password` → `{technician, temporary_password}` (encerra as sessões) ·
+desativar encerra as sessões, fecha as ofertas de OS em aberto dele e invalida os links de nova senha; e a ficha
+completa: endereço, jornada e serviços, ver "Fichas completas"; desde 25/11/2026, também CPF, RG, nascimento, telefone
+secundário, mini biografia, número, complemento e empresa, e trocar o e-mail troca o login na hora e manda a
+validação, ver [Cadastro V2](#cadastro-v2-2026-11-25)) ·
+`POST /technicians/{id}/reset-password` → `{technician, temporary_password}` (encerra as sessões e invalida os links
+de nova senha) ·
 `POST|DELETE /technicians/{id}/photo` (JPG/PNG/WebP até 2 MB, tipo conferido pelo conteúdo; a anterior sai do disco
 quando ninguém mais usa; o DELETE tira também a foto do Field Control) ·
 `POST /technicians/import?dry_run=true|false` (CSV/XLSX: nome, email, telefone, grupo, cargo) →
 `{rows:[{line, action: create|update|error, errors}], created, updated, errors, credentials}` (senhas provisórias só na gravação).
-Um técnico, o histórico do cadastro (em páginas, pelo `before`) e a chave PIX (`GET /technicians/{id}`,
-`GET /technicians/{id}/changes`, `DELETE /technicians/{id}/pix`): ver
-[Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
+Um técnico e o histórico do cadastro (em páginas, pelo `before`; desde 25/11/2026, `field` filtra um campo)
+(`GET /technicians/{id}`, `GET /technicians/{id}/changes`): ver
+[Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18). A remoção da chave PIX (`DELETE /technicians/{id}/pix`)
+saiu em 25/11/2026: as formas de recebimento ficam em `GET`/`DELETE /technicians/{id}/payout-methods` (Pagamentos).
+Também desde 25/11/2026: a situação na operação (`POST /technicians/{id}/operational-status`), os e-mails da central
+(`POST /technicians/{id}/email-verification` e `/password-reset-link`, `GET /technicians/{id}/emails`) e os campos novos
+de `TechnicianOut` (situação, indisponibilidade, e-mail validado ou pendente, formas de recebimento e, só no detalhe, os
+dados pessoais, a empresa e o veículo; saíram `has_pix` e `pix_updated_at`): ver [Cadastro V2](#cadastro-v2-2026-11-25).
 `TechnicianOut.skills` passou a vir do perfil técnico (`users.skills`, com o "desde"; as da ficha aprovada foram
 copiadas na migração), e a lista traz o resumo do perfil técnico; `GET /technicians/{id}` e as outras respostas de
 um técnico trazem também o detalhe (ferramentas, formação e a data de cada parte): ver
@@ -368,9 +398,11 @@ acabou de sair dele, e o `ticket.offer` das ofertas dele); notas internas não c
 Só para a gestão (analistas, supervisores, admin): `technician.location` `{user_id, name, latitude, longitude, recorded_at,
 accuracy_m, speed_mps, heading, battery_pct, is_mock}` (o ponto mais novo do lote, inteiro: o que não veio do app vai null),
 `technician.shift` `{user_id, name, on_shift}` (esses dois só com o Mapa ao vivo), `onboarding.submitted` `{application_id, name}`
-(ficha nova na homologação) e `profile.changed` `{user_id, name, actor_id, actor_name, occurred_at, data: {fields, via,
-after_reset?}}` (cadastro do técnico alterado no app ou pela central, inclusive o perfil técnico; só com Técnicos ou
-Pagamentos: ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
+(ficha nova na homologação), `onboarding.updated` `{application_id, name, data: {action}}` (desde 25/11/2026: a ficha
+teve o e-mail validado, foi reaberta, aprovada ou reprovada; só com Homologação) e `profile.changed` `{user_id, name,
+actor_id, actor_name, occurred_at, data: {fields, via, after_reset?}}` (cadastro do técnico alterado no app, pela
+central, pela aprovação da ficha ou pelo link do e-mail, inclusive o perfil técnico; só com Técnicos ou Pagamentos: ver
+[Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18) e [Cadastro V2](#cadastro-v2-2026-11-25)).
 O cliente pode mandar `{"type":"ping"}` e recebe `{"type":"pong"}`.
 Ao receber um evento, recarregue a OS/lista (o evento não carrega o objeto inteiro).
 
@@ -805,9 +837,10 @@ colaboradores.
     vivo (em jornada, sinal dos últimos 30 min). Calculada no banco (haversine), sem uma consulta por
     técnico.
   - Resposta: `{point: {latitude, longitude, label}, technicians: [{id, name, email, phone, is_active,
-    avatar_url, base_city, base_state, base_source, distance_km, nearest_kind (store_history | home |
+    operational_status, avatar_url, base_city, base_state, base_source, distance_km, nearest_kind (store_history | home |
     live), visits_at_location, last_visit_at_location, visits_in_city, total_visits, last_visit_at,
     open_tickets, on_shift, reasons[]}]}`, do mais perto para o mais longe (empate: mais visitas à loja).
+    `operational_status` (desde 25/11/2026): Inativo e Bloqueado aparecem, com o selo na web, e não recebem OS.
   - `reasons`, por exemplo: "Atendeu esta loja 5x (última em 03/10/2026)", "Em jornada agora a 4 km",
     "Já atendeu a 1,2 km daqui", "Mora a 3 km", "Base em Fortaleza-CE (128 OS)", "3 OS abertas agora",
     "Inativo no app".
@@ -816,7 +849,10 @@ colaboradores.
     inexistente: 404.
 - **Sugestões da OS** (`GET /tickets/{id}/technician-suggestions` e `GET /technicians/suggest`): usam o
   mesmo cálculo (distância pelo histórico/endereço/ao vivo, visitas a esta mesma loja e a base na
-  cidade), somado a agenda livre, skill, equipe do projeto e carga. Só técnicos **ativos**.
+  cidade), somado a agenda livre, skill, equipe do projeto e carga. Só técnicos com acesso ao app e, desde 25/11/2026,
+  **Ativos** na operação e sem período de indisponibilidade nos dias da visita (OS sem horário: hoje); as áreas de
+  atuação são as do cadastro (`users.service_areas`; vazias, as da ficha aprovada): ver
+  [Cadastro V2](#cadastro-v2-2026-11-25).
   `home_city`/`home_state` trazem a região efetiva (a base, senão o endereço). Os favoritos da cidade da loja
   ganham pontos e vaga garantida (ver "Técnicos favoritos por cidade"). Com horário na OS, a disponibilidade que o
   técnico informou no app soma ou tira poucos pontos (`availability`, `availability_gaps` e o motivo "Fora da
@@ -846,7 +882,9 @@ Até 3 técnicos por cidade pela regra automática, mais os que a central fixar.
   chegada ou foi concluída, ou quem apontou trabalho. Conta 1 por técnico e OS.
 - Janela de 365 dias, mínimo de 2 OS, até 3 por cidade.
 - Ordem: mais OS; no empate, quem tem acesso ao app (`is_active`), depois a visita mais recente, depois o nome.
-- Os inativos (sem acesso ao app) entram na regra e aparecem na lista, mas nunca nas sugestões da OS.
+- Os sem acesso ao app entram na regra e aparecem na lista (com o "Liberar acesso"), mas nunca nas sugestões da OS.
+- Situação na operação (desde 25/11/2026): Inativo e Bloqueado ficam no ranking, mas fora dos automáticos (o
+  próximo Ativo sobe); o fixado pela central continua, com o selo. `FavoriteTechnician` ganha `operational_status`.
 
 **Decisões da central** (analista, supervisor e admin):
 - Fixado: favorito mesmo sem OS ou fora do top 3. Até 10 por cidade, com nota opcional (até 300 caracteres; espaços

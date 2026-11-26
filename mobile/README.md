@@ -665,33 +665,105 @@ Perfil). Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do técnico",
 - Grupo, cargo, acesso ao app, situação na operação, serviços e jornada ficam com a central; o CPF, depois de
   informado, só a central corrige.
 
-### Cadastro: foto, dados pessoais, contato, endereço e chave PIX
+### Cadastro: foto, dados pessoais, endereço, contato, mini biografia, empresa e formas de recebimento
 
-Dados pessoais, Contato, Endereço e Chave PIX ([src/lib/useProfileForm.ts](src/lib/useProfileForm.ts), a moldura
-`ProfileFormScreen` e as regras puras de [src/lib/profileForm.ts](src/lib/profileForm.ts)): cada tela salva só a sua
-parte em `PATCH /me/profile`, pelo **Salvar** do rodapé fixo. O app confere antes, com as regras e as mensagens do
-servidor (que confere de novo); os erros aparecem depois do primeiro "Salvar", e o primeiro vai também para o rodapé.
-Sair com alteração não salva pergunta "Descartar as alterações?". Salvou: avisa e volta.
+Dados pessoais, Endereço, Contato, Mini biografia e Dados empresariais
+([src/lib/useProfileForm.ts](src/lib/useProfileForm.ts), a moldura `ProfileFormScreen` e as regras puras de
+[src/lib/profileForm.ts](src/lib/profileForm.ts)): cada tela salva só a sua parte em `PATCH /me/profile`, pelo
+**Salvar** do rodapé fixo. O app confere antes, com as regras e as mensagens do servidor (que confere de novo; aqui,
+com ponto final); só o que mudou é conferido, e um dado antigo fora da regra não trava outra mudança. Os erros aparecem
+depois do primeiro "Salvar", e o primeiro vai também para o rodapé. Sair com alteração não salva pergunta "Descartar as
+alterações?". Salvou: avisa e volta. Com a API de antes do cadastro V2 (`hasCadastroV2`), essas cinco telas e Formas de
+recebimento mostram "Indisponível no momento" / "O servidor ainda não tem esta parte do cadastro. Tente de novo mais
+tarde." com **Tentar de novo**
+([src/components/settings/CadastroUnavailable.tsx](src/components/settings/CadastroUnavailable.tsx)) e não gravam nada.
 
-- **Dados pessoais**: o nome completo. Quando muda, segue a regra do servidor: só letras (com acento), espaço,
-  apóstrofo, hífen e ponto, sem "www", "http" nem endereço colado ("site.com"); a mensagem é "Use só letras no nome.".
-  Os nomes antigos ficam como estão.
-- **Contato**: o celular (WhatsApp), sempre com DDD, e o e-mail de login, conferido só quando muda. Trocar o e-mail
-  pede a senha e não tira ninguém do app (a senha é a mesma): o login passa a ser o novo, já preenchido na tela de login
-  (`session.updateUser` grava também o `mc_last_email`), e o aviso diz "Use o novo e-mail para entrar no app.". E-mail
-  da empresa é recusado ("Use um e-mail que não seja da empresa"), e a troca de e-mail tem limite de 10 por hora (429
-  "Muitas tentativas. Tente mais tarde.").
-- **Endereço**: CEP (8 números), endereço, bairro, cidade e UF (obrigatórias só aqui) e a região que atende.
-- **Chave PIX**: fichas CPF, CNPJ, E-mail, Celular e Chave aleatória; a chave tem o teclado e a máscara do tipo
-  ("Colar" na chave aleatória) e, embaixo, a data da última troca; trocar o tipo limpa a chave; o titular começa com o
-  nome. "Remover chave PIX" só vale ao salvar (dá para desfazer). Celular do PIX: DDD sem zero e o número com o 9, como
-  no servidor. No fim, o link **Aviso de privacidade**.
-- **Senha atual** (folha "Confirme com sua senha"): mudar o e-mail e cadastrar, trocar ou remover a chave PIX (conta
-  invadida não desvia o pagamento). A senha não fica guardada. Senha errada e o bloqueio depois de 5 erros em 15 min (o
-  mesmo contador de "Trocar senha") aparecem na folha. Com a senha provisória, o app só abre "Trocar senha" (o servidor
-  também recusa e-mail e PIX: "Crie sua senha no app antes de mudar o e-mail ou a chave PIX").
-- **A central** é avisada na hora quando mudam PIX, e-mail, nome ou celular; toda mudança, também a do perfil técnico,
-  fica no histórico do cadastro, que a central vê na ficha do técnico.
+- **Dados pessoais**: o nome completo, o CPF, o RG e a data de nascimento; não pede senha. No fim, o link **Aviso de
+  privacidade**.
+  - **Nome**: quando muda, segue a regra do servidor: só letras (com acento), espaço, apóstrofo, hífen e ponto, sem
+    "www", "http" nem endereço colado ("site.com"); a mensagem é "Use só letras no nome.". Os nomes antigos ficam como
+    estão.
+  - **CPF**: o técnico informa uma vez. Antes de gravar, a tela pede para conferir ("Confira o CPF" / "123.456.789-09.
+    Depois de salvo, só a central muda.", com **Salvar** e **Voltar**); gravado, fica só leitura, com "Para corrigir,
+    fale com a central.". Inválido: "CPF inválido."; em outro cadastro, o servidor responde "Este CPF já está em outro
+    cadastro".
+  - **RG**: número, órgão emissor e UF vão juntos, e os três vazios limpam: "Informe o número do RG.", "Confira o número
+    do RG.", "Informe o órgão emissor.", "Informe a UF do RG." e "UF inválida.". O órgão aceita só letras (a UF tem
+    campo próprio).
+  - **Data de nascimento**: o seletor vai de 90 a 18 anos atrás, sem o atalho "Hoje" (vazio, abre 30 anos atrás), com a
+    dica "É preciso ter 18 anos ou mais."; fora disso, "O cadastro é para maiores de 18 anos: confira a data de
+    nascimento." ou "Confira a data de nascimento.".
+- **Endereço**: CEP, logradouro, número (até 10, "S/N" vale) e complemento (até 60), bairro, cidade e UF (obrigatórias
+  só aqui) e a região que atende. Logradouro, número e complemento vão juntos quando um muda. Não pede senha.
+  - **CEP** ([src/lib/cep.ts](src/lib/cep.ts)): com os 8 números, a tela busca o endereço (`GET /public/cep/{cep}`,
+    logado), com "Buscando o CEP…" e o indicador no campo. Achou: preenche o que está livre (vazio, igual ao gravado ou
+    posto pela busca anterior: `cepFill` de `lib/constants.ts`, a mesma regra da central e da ficha da homologação) e o
+    foco vai para o Número (no CEP geral, sem logradouro, para o Logradouro); trocou de rua, número e complemento que o
+    técnico não mexeu ficam vazios. O que ele digitou fica e, se difere, aparece "CEP de Rua Exemplo, Centro - Cidade
+    Exemplo-SP." com **Usar este endereço**. Não achou: "CEP não encontrado."; sem rede, fora do ar, pedidos demais ou a
+    API de antes: "Busca de CEP indisponível. Preencha o endereço.". Nada trava o Salvar, e a resposta de um CEP já
+    trocado é ignorada. Ao salvar, o CEP incompleto dá "CEP inválido: use os 8 números.".
+- **Contato**: o celular (WhatsApp), sempre com DDD; o **Telefone secundário**, opcional (10 ou 11 números: "Informe o
+  telefone com DDD." e "Igual ao celular."); e o e-mail de login, conferido só quando muda.
+  - **Trocar o e-mail** pede a senha e não troca o login na hora: o novo fica pendente até o técnico abrir o link que
+    chega nele ("Confirme o novo e-mail" / "Abra o link enviado para {novo}. Até lá, entre com {atual}."). Enquanto
+    isso, o campo diz "Seu login até validar o novo.", a caixa da troca
+    ([src/components/settings/EmailPendingBox.tsx](src/components/settings/EmailPendingBox.tsx)) mostra o e-mail novo,
+    "Pendente de validação" e quando o link saiu ("Link enviado às 14:30"), com **Reenviar link** e **Cancelar troca**
+    (pergunta antes; o login continua o de hoje), e a linha Contato do menu diz "E-mail pendente", em âmbar. Aberto o
+    link (página web "Validar e-mail"), o login passa a ser o novo, sem tirar ninguém do app; a leitura seguinte do
+    cadastro leva o novo para a sessão e para a tela de login (`session.updateUser` grava também o `mc_last_email`).
+    E-mail que não recebe mensagens: "Este e-mail não recebe mensagens."; e-mail da empresa é recusado ("Use um e-mail
+    que não seja da empresa"); a troca tem limite de 10 por hora (429 "Muitas tentativas. Tente mais tarde.").
+  - **O login de hoje**: a dica do campo diz "Validado" ou "Pendente de validação" (com "· link enviado às 14:30"), com
+    **Enviar link** (ou **Reenviar link**): o link chega no próprio e-mail e o valida, e é o e-mail validado que
+    libera o "Esqueci minha senha". Até 3 links por hora (429 "Aguarde N minutos para pedir outro link").
+  - **Envio de e-mail desligado** no servidor (`mail_enabled` falso): o e-mail fica só leitura, com "Para trocar, fale
+    com a central pelo WhatsApp.", e sem o estado da validação; uma troca já pedida mostra só **Cancelar troca**.
+- **Mini biografia** (`/configuracoes/biografia`): um texto curto e opcional sobre a experiência e a atuação, que a
+  central vê na ficha; até 500 caracteres, com o contador ("120/500"); espaços e quebras de linha se juntam, como o
+  servidor grava; vazio apaga. Não pede senha.
+- **Dados empresariais** (`/configuracoes/empresa`): CNPJ (aceita o alfanumérico), razão social e nome fantasia, os três
+  opcionais e gravados juntos; razão social ou nome fantasia pedem o CNPJ ("Informe o CNPJ."; inválido, "CNPJ
+  inválido."). Mudar pede a senha atual ("Mudar os dados da empresa pede a senha atual."): conta invadida não troca a
+  empresa que recebe.
+- **Formas de recebimento** (`/configuracoes/recebimento`; [src/lib/payoutMethods.ts](src/lib/payoutMethods.ts) e as
+  regras puras de [src/lib/payoutForm.ts](src/lib/payoutForm.ts)): as chaves PIX e as contas bancárias em que o técnico
+  recebe pelos chamados, até 10, uma delas a **Preferencial**, onde a central paga (a primeira cadastrada já é). Cada
+  ação sai pela rota própria, com a senha ([docs/MOBILE_SYNC.md](../docs/MOBILE_SYNC.md) §1).
+  - **Lista**: a preferencial primeiro, depois as mais novas; cada cartão com o ícone de chave ou de banco, "Chave PIX ·
+    CPF" e a chave mascarada ("•••.456.789-••") ou o banco e "Conta corrente · Ag. 0001 · ••••5678-9", o titular e a
+    ficha neutra "Preferencial". Tocar abre **Editar**, **Tornar preferencial** e **Excluir**. Vazio: "Nenhuma forma de
+    recebimento" / "Adicione uma chave PIX ou uma conta bancária.". No rodapé, **Adicionar chave ou conta** (no limite,
+    "Limite de 10 formas de recebimento. Exclua uma para incluir outra."); no fim, o link **Aviso de privacidade**.
+  - **A folha** (adicionar e editar; editar não muda o tipo): Chave PIX ou Conta bancária. Na chave, o tipo (CPF, CNPJ,
+    E-mail, Celular ou Chave aleatória, com o teclado e a máscara do tipo e **Colar** na aleatória) e a chave, que começa
+    com o dado do cadastro (o CPF, o CNPJ da empresa, o e-mail que recebe mensagens ou o celular); celular do PIX com
+    DDD sem zero e o número com o 9, como no servidor. Na conta, o banco, com sugestões ao digitar (os 29 de
+    [src/lib/banks.ts](src/lib/banks.ts), pelo nome, apelido ou código; fora da lista, o **Código do banco**), a agência
+    (até 4 números), a conta e o dígito (colar "12345-6" separa o dígito) e o tipo (Conta corrente, Conta poupança ou
+    Conta de pagamento). Depois, o titular (começa com o nome; na chave CNPJ, a razão social) e, na conta e nas chaves
+    e-mail, celular e aleatória, o **CPF ou CNPJ do titular** (nas chaves CPF e CNPJ, é a própria chave). Ao adicionar,
+    já havendo outra, **Usar como preferencial**. Editando, a chave ou a conta mostra "Alterada em 18/11/2026 às 14:30.".
+    A **Senha atual** vai na própria folha: recusada, volta limpa e com o foco, e o erro do servidor aparece no fim.
+  - **Tornar preferencial** e **Excluir** pedem a senha numa folha que diz para onde os pagamentos passam a ir ("Os
+    pagamentos passam a ir para PIX CPF •••.456.789-••."); excluir a preferencial passa a preferência para a mais nova
+    das que ficam (a folha diz qual antes) ou avisa "Você fica sem forma de recebimento.".
+  - Uma gravação por vez, como na Formação (a trava vale também depois de sair e voltar à tela). A forma que a central
+    excluiu com a tela aberta some na releitura ("Esta forma de recebimento não existe mais. Atualize a lista").
+  - O técnico não vê nada interno da central: nem o "Nova" nem o "Titular diferente".
+- **Senha atual** (folha "Confirme com sua senha"): mudar o e-mail e os dados da empresa; as formas de recebimento pedem
+  a senha na própria folha (conta invadida não desvia o pagamento). A senha não fica guardada. Senha errada e o
+  bloqueio depois de 5 erros em 15 min (o mesmo contador de "Trocar senha") aparecem na folha. Com a senha provisória, o
+  app só abre "Trocar senha" (o servidor também recusa: "Crie sua senha no app antes de mudar o e-mail, os dados da
+  empresa ou as formas de recebimento").
+- **Trocar senha** (Configurações › Senha): sem lembrar a atual, **Esqueci a senha atual** (só com o envio de e-mail
+  ligado e o e-mail de login validado e que recebe mensagens) pergunta "Enviar link para criar uma senha nova?" / "Vamos
+  enviar para {e-mail}. Ao criar a senha nova, todos os aparelhos saem da conta." e pede o mesmo link do "Esqueci minha
+  senha".
+- **A central** é avisada na hora quando mudam as formas de recebimento, o e-mail (o pedido de troca), o CNPJ, o nome ou
+  o celular; toda mudança, também a do perfil técnico, fica no histórico do cadastro, que a central vê na ficha do
+  técnico.
 - **Foto do perfil** (`/configuracoes/foto`, [src/lib/avatarFlow.ts](src/lib/avatarFlow.ts)): **Tirar foto** (câmera
   frontal), **Escolher da galeria** ou **Remover foto** (com confirmação), um toque cada. O `photoCapture` (alvo
   `avatar`) recorta quadrado na hora; o app reduz para 512 px em JPEG (compressão 0,85) com o `expo-image-manipulator` e
