@@ -11,7 +11,7 @@ import { FieldRulesCard } from "@/components/FieldRulesCard";
 import { NoAccess } from "@/components/NoAccess";
 import { ActiveState, FieldError, fold, RowEditButton, useLeaveGuard } from "@/components/settings/shared";
 import { TagRulesCard } from "@/components/settings/TagRulesCard";
-import { ToolCatalogCard } from "@/components/settings/ToolCatalogCard";
+import { TechCatalogCard } from "@/components/settings/TechCatalogCard";
 import { useToast } from "@/components/Toaster";
 import { UnproductiveReasonsCard } from "@/components/UnproductiveReasonsCard";
 import { ViolationReasonsCard } from "@/components/ViolationReasonsCard";
@@ -688,7 +688,7 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Configurações"
-        description="Dados da empresa, regras de campo, ferramental dos técnicos, SLA, categorias, etiquetas automáticas, motivos e fluxo de status."
+        description="Dados da empresa, regras de campo, catálogos dos técnicos, SLA, categorias, etiquetas automáticas, motivos e fluxo de status."
       />
       {!canEdit ? (
         <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink-muted shadow-elev-1">
@@ -709,8 +709,10 @@ export default function SettingsPage() {
           <FieldRulesCard readOnly={!canEdit} />
           <KmRateNote />
         </section>
-        <section id="tecnicos" className="scroll-mt-28">
-          <ToolCatalogCard readOnly={!canEdit} />
+        <section id="tecnicos" className="flex scroll-mt-28 flex-col gap-4">
+          <TechCatalogCard kind="areas" readOnly={!canEdit} />
+          <TechCatalogCard kind="skills" readOnly={!canEdit} />
+          <TechCatalogCard kind="tools" readOnly={!canEdit} />
         </section>
         <section id="sla" className="scroll-mt-28">
           <SlaCard editable={isAdmin} />

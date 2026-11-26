@@ -89,6 +89,11 @@ export function groupOfParam(value: unknown): DocumentGroup | null {
   return null;
 }
 
+/** O bloco de um documento gravado (editar não troca o tipo). */
+export function documentGroupOf(doc: Pick<MyDocument, "kind">): DocumentGroup {
+  return doc.kind === "certification" ? "certification" : "personal";
+}
+
 /** O limite do servidor (certificações e documentos pessoais juntos; o currículo não conta). */
 export const DOCUMENTS_LIMIT_TEXT = `Limite de ${DOCUMENT_LIMITS.perTechnician} documentos e certificações. Exclua um para incluir outro.`;
 

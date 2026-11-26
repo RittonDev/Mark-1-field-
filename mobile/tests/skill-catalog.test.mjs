@@ -1,6 +1,7 @@
 // Sonda das aptidões do catálogo e do que o app faz com a gestão (Entrega 2): a busca e o que a folha "Adicionar
 // aptidão" oferece, os corpos do PATCH pelo id (servidor com o catálogo) e pelo nome (servidor de antes), o carimbo da
-// central, hasCadastroE2 (as duas ordens da publicação) e a releitura do cadastro quando a central muda algo
+// central, o menu e as telas (pelas fontes: carimbo nas 6 telas, Áreas de atuação, tempo real e o cartão do aviso),
+// hasCadastroE2 (as duas ordens da publicação) e a releitura do cadastro quando a central muda algo
 // (profileChangedElsewhere, com lib/profile.ts de verdade sobre os stubs de tests/stubs). Dados fictícios.
 // Na pasta mobile: node --experimental-strip-types --import ./tests/resolve-ts.mjs --test "tests/*.test.mjs"
 import assert from "node:assert/strict";
@@ -20,7 +21,7 @@ import {
   skillsWith,
   skillsWithout,
 } from "../src/lib/techProfileForm.ts";
-import { server } from "./stubs/api.mjs";
+import { api as stubApi, server } from "./stubs/api.mjs";
 
 const ID = {
   printers: "00000000-0000-4000-8000-000000000001",
@@ -220,17 +221,84 @@ describe("o menu das Configurações (CADASTRO_DELIVERY 2)", () => {
 
   it("nada de Skills nem Ex.: nas telas mexidas", () => {
     const files = [
+      "../src/app/configuracoes/index.tsx",
       "../src/app/configuracoes/areas.tsx",
       "../src/app/configuracoes/aptidoes.tsx",
+      "../src/app/configuracoes/disponibilidade.tsx",
+      "../src/app/configuracoes/transporte.tsx",
+      "../src/app/configuracoes/formacao.tsx",
+      "../src/app/configuracoes/ferramental.tsx",
       "../src/components/settings/SkillCatalogSheet.tsx",
       "../src/components/settings/SkillSheet.tsx",
       "../src/components/settings/CentralStamp.tsx",
+      "../src/components/PrivacyUpdateCard.tsx",
     ];
     for (const file of files) {
       const source = readFileSync(new URL(file, import.meta.url), "utf8");
       assert.ok(!/["“>][^"”<]*\bSkills?\b/.test(source), file);
       assert.ok(!source.includes("Ex.:"), file);
     }
+  });
+});
+
+describe("as telas da gestão no app (pelas fontes)", () => {
+  const read = (file) => readFileSync(new URL(file, import.meta.url), "utf8");
+
+  it("o carimbo da central nas 6 telas do perfil profissional, cada uma com a sua parte", () => {
+    const parts = {
+      disponibilidade: "availability",
+      transporte: "transport",
+      formacao: "education",
+      areas: "areas",
+      aptidoes: "skills",
+      ferramental: "tools",
+    };
+    for (const [screen, part] of Object.entries(parts)) {
+      const source = read(`../src/app/configuracoes/${screen}.tsx`);
+      assert.match(source, new RegExp(`<CentralStamp stamp=\\{[\\w.]*tech_profile_updated\\.${part}\\} />`), screen);
+    }
+  });
+
+  it("Áreas de atuação: só com a gestão no servidor; o catálogo da central e o PATCH com area_ids", () => {
+    const source = read("../src/app/configuracoes/areas.tsx");
+    assert.ok(source.includes("useTechProfileScreen(hasCadastroE2)"));
+    assert.ok(source.includes("useAreaCatalog()"));
+    assert.ok(source.includes("body: (ids) => ({ area_ids: ids })"));
+    assert.ok(!source.includes("service_area"));
+  });
+
+  it("o menu: Documentos, Currículo e Áreas de atuação \"Indisponível\" com o servidor de antes (fromE2)", () => {
+    const menu = read("../src/app/configuracoes/index.tsx");
+    for (const key of ["documentos", "areas-de-atuacao"]) {
+      assert.match(menu, new RegExp(`case "${key}":(?:\\s*//[^\\n]*)*\\s*return fromE2\\(`), key);
+    }
+    assert.ok(menu.includes("summary={fromE2(resumeRow)}"));
+    assert.ok(menu.includes('documentos: { icon: "idCard"'));
+    assert.ok(menu.includes('curriculo: { icon: "fileText"'));
+    assert.ok(menu.includes('"areas-de-atuacao": { icon: "grid"'));
+  });
+
+  it("Aptidões: a folha do catálogo; o texto livre e as sugestões da ficha saíram", () => {
+    const screen = read("../src/app/configuracoes/aptidoes.tsx");
+    const sheet = read("../src/components/settings/SkillSheet.tsx");
+    const lib = read("../src/lib/technicalProfile.ts");
+    assert.ok(screen.includes("<SkillCatalogSheet"));
+    assert.ok(screen.includes("useSkillCatalog()"));
+    assert.ok(!sheet.includes("suggestion") && !sheet.includes("<Input"));
+    assert.ok(lib.includes('"/technician-skills"') && lib.includes('"/technician-areas"'));
+    assert.ok(!lib.includes("/public/onboarding/catalog"));
+  });
+
+  it("tempo real: o app repassa me.profile_changed e o sync só relê o cadastro, antes da regra das OS", () => {
+    const realtime = read("../src/lib/realtime.ts");
+    const sync = read("../src/lib/sync.ts");
+    assert.ok(realtime.includes("event.type === ME_PROFILE_EVENT"));
+    assert.match(sync, /if \(event\.type === ME_PROFILE_EVENT\) \{\s*profileChangedElsewhere\(\);\s*return;\s*\}/);
+    assert.ok(sync.indexOf("profileChangedElsewhere();") < sync.indexOf("wsDebounce = setTimeout"));
+  });
+
+  it("o cartão do aviso de privacidade no Hoje (contrato §9)", () => {
+    assert.ok(read("../src/components/PrivacyUpdateCard.tsx").includes("Agora ele inclui documentos, currículo e avaliações."));
   });
 });
 
@@ -364,5 +432,34 @@ describe("profileChangedElsewhere (tempo real me.profile_changed)", () => {
     await sleep(500);
     assert.equal(counter.reads, 0);
     assert.equal(getProfile(), null);
+  });
+
+  it("uma leitura que já estava no ar quando o aviso chegou pode ser de antes da mudança: espera ela e lê de novo", async () => {
+    await session.signIn(tokensOf(3, userOf("u1")));
+    server.profile = PROFILE_E2;
+    await loadProfile();
+    const plainGet = stubApi.get;
+    let reads = 0;
+    // O servidor responde com o que tinha quando o pedido chegou, 0,6 s depois.
+    stubApi.get = async (path) => {
+      if (path !== "/me/profile") return plainGet(path);
+      reads += 1;
+      const answer = structuredClone(server.profile);
+      await sleep(600);
+      return answer;
+    };
+    try {
+      const early = loadProfile();
+      server.profile = { ...PROFILE_E2, area_ids: [ID.fiber] };
+      profileChangedElsewhere();
+      await early;
+      assert.deepEqual(getProfile().area_ids, []);
+      await sleep(900);
+      assert.equal(reads, 2);
+      assert.deepEqual(getProfile().area_ids, [ID.fiber]);
+    } finally {
+      stubApi.get = plainGet;
+      await session.signOut();
+    }
   });
 });

@@ -18,17 +18,22 @@ import {
   XCircle,
 } from "lucide-react";
 import { useParams } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { CepField } from "@/components/CepField";
 import { useConfirm } from "@/components/Confirm";
-import { PublicPanel, PublicShell } from "@/components/PublicPage";
+import { apiText, isOffline, PublicPanel, PublicShell } from "@/components/PublicPage";
 import { Button, buttonClassName, Card, Checkbox, ErrorBox, Field, Input, LoadingBlock, Select, Textarea } from "@/components/ui";
 import { type AddressSlots, NO_ADDRESS, normalizeAddressNumber } from "@/lib/address";
-import { ApiError, errorMessage, request } from "@/lib/api";
+import { ApiError, apiErrorCode, errorMessage, request } from "@/lib/api";
+import { useIsClient } from "@/lib/auth";
 import {
   ageAt,
   BIRTH_AGE,
   CEP_TEXT,
+  DOCUMENT_ACCEPT,
+  DOCUMENT_KIND,
+  DOCUMENT_LIMITS,
+  DOCUMENT_TITLE_SUGGESTIONS,
   formatPlate,
   isValidPlate,
   isValidRg,
@@ -38,8 +43,18 @@ import {
   normalizeRg,
   PROFILE_LIMITS,
   splitIssuer,
+  TECH_PROFILE_LIMITS,
 } from "@/lib/constants";
-import { formatDate, todayISO } from "@/lib/format";
+import {
+  cleanDocumentTitle,
+  documentExpiryProblem,
+  documentFileProblem,
+  documentTitleProblem,
+  EXPIRY_FIRST_DAY,
+  expiryLastDay,
+  newUploadId,
+} from "@/lib/documents";
+import { formatBytes, formatDate, formatDateTime, todayISO } from "@/lib/format";
 import {
   isValidCnpj,
   isValidCpf,
@@ -52,7 +67,7 @@ import {
   UFS,
   useOnboardingCatalog,
 } from "@/lib/onboarding";
-import type { CatalogItem, EmailQueued } from "@/lib/types";
+import type { CatalogItem, EmailQueued, FichaDocument, OnboardingCatalog } from "@/lib/types";
 
 const STEPS = ["Seus dados", "Endereço", "Atuação", "Disponibilidade e transporte", "Acesso e privacidade"];
 
@@ -228,17 +243,21 @@ function apiProblem(error: unknown): Problem {
   return { field: null, message: errorMessage(error) };
 }
 
+/** Uma aptidão escolhida: a chave dela no catálogo da ficha (o id; na API de antes, o nome da sugestão) e o nível. */
 interface Skill {
-  name: string;
+  key: string;
   level: string;
 }
 
-/** Até 30 aptidões (a API recusa mais). */
-const MAX_SKILLS = 30;
+/** Até 30 aptidões e 20 áreas de atuação (a API recusa mais). */
+const MAX_SKILLS = TECH_PROFILE_LIMITS.skills;
+const MAX_AREAS = TECH_PROFILE_LIMITS.areas;
 const SKILL_LEVELS = ["basico", "intermediario", "avancado"];
 const DEFAULT_SKILL_LEVEL = "intermediario";
+/** Quantas aptidões a busca mostra de uma vez. */
+const SKILL_MATCHES = 20;
 
-/** Nome sem acento, maiúsculas e espaços extras: "Câmeras  hikvision" e "CAMERAS HIKVISION" são a mesma aptidão. */
+/** Sem acento, maiúsculas e espaços extras: "câmeras  ip" acha "Câmeras IP". */
 function foldName(text: string): string {
   return text
     .normalize("NFD")
@@ -248,18 +267,28 @@ function foldName(text: string): string {
     .toUpperCase();
 }
 
-/** Aptidão de 1 letra ou repetida; o cartão em branco não conta (sai sem aviso). */
-function skillProblem(skills: Skill[]): { index: number; message: string } | null {
-  const seen = new Set<string>();
-  for (let index = 0; index < skills.length; index++) {
-    const name = skills[index].name.trim();
-    if (!name) continue;
-    if (name.length < 2) return { index, message: "Use 2 letras ou mais." };
-    const key = foldName(name);
-    if (seen.has(key)) return { index, message: "Esta aptidão já está na lista." };
-    seen.add(key);
-  }
-  return null;
+/**
+ * As áreas de atuação e as aptidões que a ficha oferece. API da Entrega 2: os catálogos de Configurações › Técnicos (as
+ * ativas; `key` = id, e a aptidão vai pelo id). API de antes: as áreas fixas (`key` = código) e as sugestões de aptidão
+ * (a aptidão vai pelo nome).
+ */
+interface Choices {
+  areas: CatalogItem[];
+  skills: CatalogItem[];
+  skillsById: boolean;
+}
+
+function choicesOf(cat: OnboardingCatalog | undefined): Choices {
+  const skillsById = Array.isArray(cat?.skills);
+  const suggestions = cat?.skill_suggestions;
+  const skills = skillsById
+    ? (cat?.skills ?? [])
+    : (Array.isArray(suggestions) ? suggestions : []).map((name) => ({ key: name, label: name }));
+  return {
+    areas: cat?.service_areas ?? [],
+    skills: [...skills].sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { sensitivity: "base" })),
+    skillsById,
+  };
 }
 
 interface FormState {
@@ -360,8 +389,11 @@ function rgOf(form: Pick<FormState, "rg_number" | "rg_issuer" | "rg_state">) {
  */
 const DRAFT_KEY = "mf-cadastro-tecnico";
 const DRAFT_TTL_MS = 24 * 3_600_000;
-/** Versão 2: as 5 etapas (Endereço numa etapa própria) e os campos novos. */
-const DRAFT_VERSION = 2;
+/**
+ * Versão 2: as 5 etapas (Endereço numa etapa própria) e os campos novos. Versão 3: áreas e aptidões do catálogo (pela
+ * chave); o rascunho de antes perde as duas (a pessoa escolhe de novo).
+ */
+const DRAFT_VERSION = 3;
 /** Etapa do rascunho sem versão (4 etapas: dados, atuação, região e disponibilidade, acesso) nas 5 de hoje. */
 const OLD_DRAFT_STEP = [0, 2, 3, 4];
 const DRAFT_FIELDS = [
@@ -429,28 +461,33 @@ function loadDraft(token: string): Draft | null {
     }
     const form: FormState = { ...EMPTY };
     const target = form as unknown as Record<string, unknown>;
+    // Antes da versão 3, as áreas eram os códigos fixos e as aptidões, texto livre: ficam de fora.
+    const current = saved.v === DRAFT_VERSION;
     for (const key of DRAFT_FIELDS) {
       const value = saved.form[key];
       const base = EMPTY[key];
       if (key === "skills") {
-        if (Array.isArray(value)) {
-          // O cartão em branco (a ficha antiga já abria com um) não volta.
+        if (current && Array.isArray(value)) {
+          const seen = new Set<string>();
           form.skills = value
-            .filter((s): s is { name?: unknown; level?: unknown } => !!s && typeof s === "object")
-            .slice(0, MAX_SKILLS)
-            .map((s) => ({
-              name: typeof s.name === "string" ? s.name : "",
-              level: typeof s.level === "string" && SKILL_LEVELS.includes(s.level) ? s.level : DEFAULT_SKILL_LEVEL,
-            }))
-            .filter((s) => s.name.trim());
+            .filter((s): s is { key?: unknown; level?: unknown } => !!s && typeof s === "object")
+            .flatMap((s) => {
+              if (typeof s.key !== "string" || !s.key || seen.has(s.key)) return [];
+              seen.add(s.key);
+              return [{ key: s.key, level: typeof s.level === "string" && SKILL_LEVELS.includes(s.level) ? s.level : DEFAULT_SKILL_LEVEL }];
+            })
+            .slice(0, MAX_SKILLS);
         }
+      } else if (key === "service_areas" && !current) {
+        continue;
       } else if (Array.isArray(base) ? Array.isArray(value) && value.every((v) => typeof v === "string") : typeof value === typeof base) {
         target[key] = value;
       }
     }
-    // Rascunho de antes das 5 etapas: a etapa dele na ficha de hoje ("address" continua o mesmo campo, agora o logradouro).
+    // Rascunho de antes das 5 etapas (sem versão): a etapa dele na ficha de hoje ("address" continua o mesmo campo, agora
+    // o logradouro).
     const savedStep = Math.trunc(Number(saved.step) || 0);
-    const step = saved.v === DRAFT_VERSION ? savedStep : (OLD_DRAFT_STEP[savedStep] ?? 0);
+    const step = typeof saved.v === "number" && saved.v >= 2 ? savedStep : (OLD_DRAFT_STEP[savedStep] ?? 0);
     return {
       form,
       step: Math.min(Math.max(step, 0), STEPS.length - 1),

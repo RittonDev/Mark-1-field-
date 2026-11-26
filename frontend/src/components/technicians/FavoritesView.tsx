@@ -53,7 +53,7 @@ import { TechnicianLink } from "./TechnicianLink";
 /** Cartões por vez (o resto vem no "Mostrar mais"). */
 const PAGE = 30;
 /** Tamanho máximo da nota (o mesmo da API). */
-const NOTE_MAX = 300;
+export const NOTE_MAX = 300;
 
 // Etiqueta neutra (Fixado, Sem acesso ao app, Em jornada).
 const CHIP =
@@ -75,7 +75,7 @@ export function favoritesHref(state: string, city: string): string {
 type Chip = "inactive" | "none";
 
 /** Cidade de uma ação: a UF e o nome (a API acha a chave sem acento). */
-interface Place {
+export interface Place {
   state: string;
   city: string;
 }
@@ -83,8 +83,9 @@ interface Place {
 /** Fixar ou tirar da lista (PUT, com a nota) ou voltar a valer só a regra automática (null = DELETE). */
 // hide: só no Desfazer de um tirado (grava tirado mesmo que ele já não esteja no top 3).
 type Change = { favorite: boolean; note: string | null; hide?: boolean } | null;
+export type { Change as FavoriteChange };
 
-interface FavoriteAction {
+export interface FavoriteAction {
   tech: { id: UUID; name: string };
   place: Place;
   change: Change;
@@ -92,12 +93,12 @@ interface FavoriteAction {
   notice?: { title: string; undo: Change };
 }
 
-const placeOf = (c: FavoriteCity): Place => ({ state: c.state, city: c.city });
-const placeLabel = (p: Place) => `${p.city}-${p.state}`;
+export const placeOf = (c: FavoriteCity): Place => ({ state: c.state, city: c.city });
+export const placeLabel = (p: Place) => `${p.city}-${p.state}`;
 const firstName = (name: string) => name.trim().split(/\s+/)[0];
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString("pt-BR")} ${n === 1 ? one : many}`;
 const pendingKey = (techId: UUID, place: Place) => `${techId}|${place.state}|${fold(place.city)}`;
-const detailKey = (state: string, key: string) => ["technician-favorites", "city", state, key] as const;
+export const detailKey = (state: string, key: string) => ["technician-favorites", "city", state, key] as const;
 
 /** A janela da regra em texto: 365 dias são "12 meses". */
 function windowText(days: number): string {
@@ -116,7 +117,7 @@ function ruleText(out: FavoritesOut): string {
 }
 
 /** Como voltar ao estado de antes: fixado (com a nota), tirado (com o motivo) ou só a regra (DELETE). */
-function undoOf(before: FavoriteTechnician | null | undefined): Change {
+export function undoOf(before: Pick<FavoriteTechnician, "pinned" | "hidden" | "note"> | null | undefined): Change {
   if (before?.pinned) return { favorite: true, note: before.note };
   if (before?.hidden) return { favorite: false, note: before.note, hide: true };
   return null;
@@ -145,7 +146,8 @@ function decisionTitle(verb: string, t: FavoriteTechnician): string {
   return [verb, t.set_by ? `por ${t.set_by.name}` : null, t.set_at ? `em ${formatDate(t.set_at)}` : null].filter(Boolean).join(" ");
 }
 
-function sendFavorite(techId: UUID, place: Place, change: Change) {
+/** PUT (fixar, tirar da lista, nota) ou DELETE (voltar à regra) de um técnico numa cidade; a API grava no histórico dele. */
+export function sendFavorite(techId: UUID, place: Place, change: Change) {
   return change
     ? api.put<FavoriteCityDetail>(`/technicians/favorites/${techId}`, {
         state: place.state,
@@ -158,23 +160,37 @@ function sendFavorite(techId: UUID, place: Place, change: Change) {
 }
 
 /**
- * Depois de gravar: o cartão muda na hora com a cidade que a API devolveu; a lista, a OS (estrela e
- * ordem do Colaborador) e as sugestões releem.
+ * Depois de gravar: o cartão (e a seção Favoritos da ficha) muda na hora com a cidade que a API devolveu; a lista de um
+ * técnico (a ficha) ganha ou perde a cidade conforme ele ficou favorito, tirado ou nada nela. A lista, a OS (estrela e
+ * ordem do Colaborador), as sugestões, a estrela da lista de Técnicos e o histórico do cadastro releem.
  */
 function applyDetail(queryClient: QueryClient, detail: FavoriteCityDetail) {
   queryClient.setQueryData(detailKey(detail.state, detail.key), detail);
-  queryClient.setQueryData<FavoritesOut>(["technician-favorites", "list", {}], (out) =>
-    out ? { ...out, cities: out.cities.map((c) => (c.state === detail.state && c.key === detail.key ? detail : c)) } : out,
-  );
+  const same = (c: FavoriteCity) => c.state === detail.state && c.key === detail.key;
+  for (const [key, out] of queryClient.getQueriesData<FavoritesOut>({ queryKey: ["technician-favorites", "list"] })) {
+    if (!out) continue;
+    const params = (key[2] ?? {}) as { state?: string; technicianId?: UUID };
+    let cities = out.cities.map((c) => (same(c) ? detail : c));
+    if (params.technicianId) {
+      const id = params.technicianId;
+      const listed = detail.favorites.some((f) => f.id === id) || detail.hidden.some((f) => f.id === id);
+      if (!listed) cities = cities.filter((c) => !same(c));
+      else if (!cities.some(same)) cities = [...cities, detail];
+    }
+    queryClient.setQueryData<FavoritesOut>(key, { ...out, cities });
+  }
   void queryClient.invalidateQueries({ queryKey: ["technician-favorites"] });
   void queryClient.invalidateQueries({ queryKey: ["technician-suggest"] });
+  void queryClient.invalidateQueries({ queryKey: ["technicians", "list"] });
+  void queryClient.invalidateQueries({ queryKey: ["technicians", "changes"] });
 }
 
 /**
  * Estrela, Fixar e Voltar para a lista: gravam sem confirmação, com o botão da linha desabilitado
- * enquanto salva, e avisam com o "Desfazer". Cada linha mostra o próprio carregamento.
+ * enquanto salva, e avisam com o "Desfazer". Cada linha mostra o próprio carregamento. Também na seção Favoritos da
+ * ficha do técnico.
  */
-function useFavoriteActions() {
+export function useFavoriteActions() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
@@ -229,10 +245,10 @@ function useFavoriteActions() {
   };
 }
 
-type FavoriteActions = ReturnType<typeof useFavoriteActions>;
+export type FavoriteActions = ReturnType<typeof useFavoriteActions>;
 
 /** A cidade com os tirados da lista e os outros que atenderam (rodapé do cartão e "Incluir técnico"). */
-function useCityDetail(city: FavoriteCity, enabled: boolean) {
+export function useCityDetail(city: Pick<FavoriteCity, "state" | "city" | "key">, enabled: boolean) {
   return useQuery({
     queryKey: detailKey(city.state, city.key),
     queryFn: ({ signal }) =>
@@ -832,7 +848,7 @@ function Avatar({ name, src }: { name: string; src: string | null }) {
 }
 
 /** Contador da nota ("12/300"). */
-function NoteCounter({ value }: { value: string }) {
+export function NoteCounter({ value }: { value: string }) {
   return (
     <span className="self-end text-[11px] text-ink-subtle tabular-nums">
       {value.length}/{NOTE_MAX}
@@ -841,7 +857,7 @@ function NoteCounter({ value }: { value: string }) {
 }
 
 /** Nota de um fixado (ou o motivo de um tirado da lista); no fixado, também o "Desafixar". */
-function NoteDialog({
+export function NoteDialog({
   tech,
   city,
   onClose,

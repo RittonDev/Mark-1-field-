@@ -1,11 +1,17 @@
 // O arquivo de um documento ou do currículo (Configurações › Documentos e Currículo). Sem arquivo, as três origens
 // (FileChoices): "Escolher arquivo" (o seletor do sistema, PDF ou foto) e, numa linha, "Tirar foto" e "Da galeria". Com
-// arquivo, o cartão dele (ícone, nome numa linha e a linha do tipo e do tamanho) com "Abrir" (só o arquivo já gravado:
-// o link é pedido na hora) e "Trocar", que abre a folha com as três origens (FileSourceSheet). Quem usa escolhe e
-// guarda o arquivo (lib/documentFile.ts); aqui é só o desenho.
+// arquivo, o cartão dele (FileCard: ícone, nome numa linha e a linha do tipo e do tamanho) com "Abrir" (só o arquivo já
+// gravado: o link é pedido na hora) e "Trocar", que abre a folha com as três origens (FileSourceSheet). Quem usa escolhe
+// e guarda o arquivo (lib/documentFile.ts); aqui é o desenho e o que ele mostra de cada arquivo (shownPicked,
+// shownStored).
 
 import { useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
+import { documentFileKind } from "../../lib/constants";
+import type { PickedDocumentFile } from "../../lib/documentFile";
+import { documentSentText } from "../../lib/documentRules";
+import { formatBytes } from "../../lib/format";
+import type { MyDocument } from "../../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
 import { ActionSheet, type SheetAction } from "../ActionSheet";
 import { Icon } from "../Icon";
@@ -20,8 +26,21 @@ export interface ShownFile {
   name: string;
   /** Foto (ícone da câmera) ou PDF (ícone do documento). */
   photo: boolean;
-  /** "PDF · 1,2 MB" ou, do gravado, "PDF · 1,2 MB · enviado em 20/11/2026". */
+  /** "PDF · 1.2 MB" ou, do gravado, "PDF · 1.2 MB · enviado em 20/11/2026". */
   line: string;
+}
+
+/** O arquivo escolhido agora: "PDF · 1.2 MB" (sem o tamanho, quando o sistema não informa). */
+export function shownPicked(file: PickedDocumentFile): ShownFile {
+  const kind = file.kind === "pdf" ? "PDF" : "Foto";
+  return { name: file.name, photo: file.kind === "image", line: file.size ? `${kind} · ${formatBytes(file.size)}` : kind };
+}
+
+/** O arquivo gravado: "PDF · 1.2 MB · enviado em 20/11/2026" (ou "enviado pela central em …"). */
+export function shownStored(doc: Pick<MyDocument, "file_name" | "content_type" | "size" | "uploaded_at" | "via">): ShownFile {
+  const kind = documentFileKind(doc.content_type);
+  const size = doc.size > 0 ? ` · ${formatBytes(doc.size)}` : "";
+  return { name: doc.file_name, photo: kind === "Foto", line: `${kind}${size} · ${documentSentText(doc)}` };
 }
 
 /** A folha "Trocar" / "Substituir": as três origens. A escolha roda depois que a folha sai (o seletor abre no iPhone). */

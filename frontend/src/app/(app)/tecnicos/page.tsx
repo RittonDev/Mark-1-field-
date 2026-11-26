@@ -564,9 +564,11 @@ function TechniciansView() {
                 Atualizando…
               </span>
             ) : null}
-            <span className="tabular-nums">
-              {rows.length.toLocaleString("pt-BR")} {rows.length === 1 ? "técnico" : "técnicos"}
-            </span>
+            {waitingFavorites ? null : (
+              <span className="tabular-nums">
+                {rows.length.toLocaleString("pt-BR")} {rows.length === 1 ? "técnico" : "técnicos"}
+              </span>
+            )}
             {filtered ? (
               <Button size="sm" variant="ghost" onClick={clearFilters}>
                 Limpar filtros
@@ -847,7 +849,7 @@ function TechniciansView() {
                 técnico e nada muda antes da prévia.
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="ghost" onClick={exportCsv} disabled={tools.isPending}>
+                <Button size="sm" variant="ghost" onClick={exportCsv} disabled={csvPending || waitingFavorites}>
                   <Download className="size-3.5" />
                   Exportar
                 </Button>
@@ -938,6 +940,10 @@ function TechniciansView() {
                     {rows.slice(0, shownCount).map((t) => {
                       const status = t.operational_status ?? "active";
                       const away = unavailableOn(t.unavailability, today);
+                      const favoriteIn = favoriteMap?.get(t.id) ?? [];
+                      const due = t.certification_due;
+                      const dueState = certificationDueState(due, today);
+                      const dueText = certificationDueRowText(due, today);
                       return (
                         <tr
                           key={t.id}
@@ -960,14 +966,22 @@ function TechniciansView() {
                             <span className="flex items-center gap-2.5">
                               <TechAvatar tech={t} />
                               <span className="min-w-0">
-                                <TechnicianLink
-                                  id={t.id}
-                                  className="block truncate rounded font-semibold text-ink underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-                                >
-                                  {t.name}
-                                </TechnicianLink>
+                                <span className="flex min-w-0 items-center gap-1">
+                                  <TechnicianLink
+                                    id={t.id}
+                                    className="block truncate rounded font-semibold text-ink underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                                  >
+                                    {t.name}
+                                  </TechnicianLink>
+                                  {favoriteIn.length ? (
+                                    <span className="inline-flex shrink-0" title={`Favorito em ${favoriteIn.join(", ")}`}>
+                                      <Star aria-hidden className="size-3.5 fill-current text-brand" />
+                                      <span className="sr-only">Favorito em {favoriteIn.join(", ")}</span>
+                                    </span>
+                                  ) : null}
+                                </span>
                                 <span className="block truncate text-xs text-ink-muted">{t.email}</span>
-                                {status !== "active" || away ? (
+                                {status !== "active" || away || (due && dueState && dueText) ? (
                                   <span className="mt-1 flex flex-wrap gap-1">
                                     {status !== "active" ? (
                                       <span title={t.operational_reason ?? undefined} className="inline-flex">
@@ -977,6 +991,11 @@ function TechniciansView() {
                                     {away ? (
                                       <span title={periodText(away)} className="inline-flex">
                                         <Pill color={UNAVAILABLE_COLOR}>Indisponível {periodShort(away, today)}</Pill>
+                                      </span>
+                                    ) : null}
+                                    {due && dueState && dueText ? (
+                                      <span title={`Certificação · validade ${formatDate(due.expires_on)}`} className="inline-flex">
+                                        <Pill color={CERTIFICATION_COLOR[dueState]}>{dueText}</Pill>
                                       </span>
                                     ) : null}
                                   </span>

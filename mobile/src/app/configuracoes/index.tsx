@@ -26,7 +26,7 @@ import { openSync } from "../../lib/navigation";
 import { payoutRowSummary } from "../../lib/payoutForm";
 import { hasCadastroE2, hasCadastroV2, hasTechnicalProfile } from "../../lib/profile";
 import { addressSummary, bioSummary, companySummary, contactRowSummary, countLabel, todayIso } from "../../lib/profileForm";
-import { useResumeTask } from "../../lib/resumeFlow";
+import { useResumeRecovery, useResumeTask } from "../../lib/resumeFlow";
 import { useSession } from "../../lib/session";
 import { useSyncStatus } from "../../lib/sync";
 import { useSyncSummary } from "../../lib/syncSummary";
@@ -112,7 +112,9 @@ export default function SettingsScreen() {
   const [themeSheet, setThemeSheet] = useState(false);
   // Puxar para atualizar relê também o resumo das notificações (a linha monta de novo).
   const [round, setRound] = useState(0);
+  // Android: a foto do perfil ou do currículo tirada antes de o sistema fechar o app com a câmera aberta.
   useAvatarRecovery();
+  useResumeRecovery();
 
   const loading = !profile && load.status === "loading";
   const placeholder: RowSummary = loading ? { trailing: <Skeleton width={64} height={12} /> } : {};

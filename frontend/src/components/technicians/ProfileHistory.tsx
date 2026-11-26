@@ -52,16 +52,28 @@ const EMPTY: Partial<Record<UserChangeField, string>> = {
 };
 
 /**
- * Listas em que a API grava o que entrou (`to`) e o que saiu (`from`), não o de → para: o perfil técnico, os períodos
- * de indisponibilidade e as formas de recebimento (itens separados por "; ").
+ * Listas em que a API grava o que entrou (`to`) e o que saiu (`from`), não o de → para: o perfil técnico (com as áreas
+ * de atuação), os períodos de indisponibilidade e as formas de recebimento (itens separados por "; ").
  */
 const DELTA_FIELDS: ReadonlySet<UserChangeField> = new Set<UserChangeField>([
   "tools",
   "availability",
   "skills",
   "education",
+  "areas",
   "unavailability",
   "payout_methods",
+]);
+
+/**
+ * A API manda a frase pronta em `to` (`from` null): documentos ("incluiu Certificação NR10 (vence 25/11/2027)"), anexos
+ * internos, favoritos ("fixado em Cidade Exemplo-SP") e avaliações ("registrou OS-000123: 4 de 5").
+ */
+const PHRASE_FIELDS: ReadonlySet<UserChangeField> = new Set<UserChangeField>([
+  "documents",
+  "internal_attachments",
+  "favorites",
+  "ratings",
 ]);
 
 /** A senha, pelo `to` da API: redefinida em Técnicos, definida em Usuários, trocada no app ou criada pelo link do e-mail. */
@@ -75,8 +87,9 @@ const PASSWORD_LINE: Record<string, string> = {
 };
 
 /**
- * O dado de recebimento para quem não tem Pagamentos: a API manda "***" no lugar da chave (ou da forma) mascarada e não
- * manda o titular (null continua null).
+ * O dado escondido de quem não pode ver: a API manda "***" no lugar da chave (ou da forma) de recebimento mascarada para
+ * quem não tem Pagamentos (e não manda o titular; null continua null) e no lugar das frases dos anexos internos para
+ * quem não tem Técnicos em Editar.
  */
 const PAYOUT_HIDDEN = "***";
 
@@ -94,14 +107,22 @@ interface ChangeLine {
 /**
  * Uma mudança como a central lê: "Cidade: Santos → Guarujá". Foto, senha, link de senha, aprovação e chave PIX têm
  * frase própria; o titular entra na chave cadastrada e sai junto com a chave removida. Sem Pagamentos, o recebimento vem
- * sem valor ("Formas de recebimento alteradas") e sem titular. As listas dizem o que entrou e o que saiu, uma linha cada:
- * "Ferramental: incluiu Escada, Multímetro" e "Indisponibilidade: tirou 20/12/2026 a 05/01/2027".
+ * sem valor ("Formas de recebimento alteradas") e sem titular; sem Técnicos em Editar, os anexos internos também
+ * ("Anexos internos alterados", uma linha por registro). As listas dizem o que entrou e o que saiu, uma linha cada:
+ * "Ferramental: incluiu Escada, Multímetro" e "Indisponibilidade: tirou 20/12/2026 a 05/01/2027". Documentos, anexos,
+ * favoritos e avaliações vêm com a frase pronta: "Documentos: incluiu Certificação NR10 (vence 25/11/2027)".
  */
 function linesOf(item: UserChangeItem, all: UserChangeItem[]): ChangeLine[] {
   // Campo que esta tela ainda não conhece (API mais nova): fica como "Cadastro".
   const label = USER_CHANGE_LABEL[item.field] ?? "Cadastro";
   if (item.field === "payout_methods" && payoutHidden(item)) return [{ label: "Formas de recebimento alteradas" }];
   if (item.field === "payout_preferred" && payoutHidden(item)) return [{ label: "Forma preferencial alterada" }];
+  if (item.field === "internal_attachments" && payoutHidden(item)) {
+    // Vários anexos escondidos no mesmo registro: uma linha só.
+    const first = all.find((c) => c.field === "internal_attachments" && payoutHidden(c));
+    return first === item ? [{ label: "Anexos internos alterados" }] : [];
+  }
+  if (PHRASE_FIELDS.has(item.field)) return [item.to ? { label, text: item.to } : { label }];
   if (DELTA_FIELDS.has(item.field)) {
     const lines: ChangeLine[] = [];
     if (item.to) lines.push({ label, text: `incluiu ${item.to}` });
@@ -227,7 +248,12 @@ export function ProfileHistory({ technicianId, bare = false }: { technicianId: U
                     </li>
                   ))}
                 </ul>
-                {row.note ? <p className="mt-0.5 text-xs break-words text-ink-muted">Motivo: {row.note}</p> : null}
+                {row.note ? (
+                  <p className="mt-0.5 text-xs break-words text-ink-muted">
+                    {/* Nos favoritos, a nota do pedido (fixar, tirar); nos outros, o motivo (a situação na operação). */}
+                    {row.changes.some((c) => c.field === "favorites") ? "Nota" : "Motivo"}: {row.note}
+                  </p>
+                ) : null}
               </li>
             );
           })}
