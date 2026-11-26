@@ -2799,11 +2799,17 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   `birth_date` "25/11/1990", `phone_secondary`, `address_number`, `address_complement`, `bio`, `company_document`
   "12.345.678/0001-95", `company_name`, `company_trade_name`, `vehicle` "Modelo Exemplo · ABC-1234", `email_pending`
   (o e-mail novo pedido no app), `email_verified` ("validado" / "pendente"), `operational_status` ("Ativo", "Inativo",
-  "Bloqueado"), `payout_preferred` (a preferencial mascarada) e as linhas de `record`: `application` ("Aprovado na
-  homologação (HOM-…)"), `password` pelo link e `password_link` ("enviado para {e-mail}"). `is_active` passa a "Liberado"
-  / "Sem acesso". Gravam o que saiu em `from` e o que entrou em `to`: `payout_methods` ("PIX CPF ***.456.789-** · Tecnico
-  Alfa", `describe_with_holder`) e `unavailability` (`period_text`, separados por "; "). `pix` e `pix_holder` saíram do
-  snapshot; as linhas antigas continuam legíveis.
+  "Bloqueado"), `payout_preferred` (a preferencial mascarada; com a mesma máscara dos dois lados, também o titular e o
+  documento dele mascarado e, se ainda sair igual, " (outra forma)" no `to`) e as linhas de `record`: `application`
+  ("Aprovado na homologação (HOM-…)"), `password` pelo link e `password_link` ("enviado para {e-mail}"). `is_active`
+  passa a "Liberado" / "Sem acesso". Gravam o que saiu em `from` e o que entrou em `to`: `payout_methods` ("PIX CPF
+  ***.456.789-** · Tecnico Alfa", `describe_with_holder`) e `unavailability` (`period_text`, separados por "; "). Quando
+  o destino muda sem mudar a máscara (os mesmos 4 finais da conta, a chave e-mail com a mesma inicial e o mesmo
+  domínio), a linha diz o que mudou sem abrir o dado (`_methods_delta`): o documento do titular mascarado; ainda igual,
+  o código do banco, a agência e o tipo de conta dos dois lados ("banco 999" → "banco 998", "Ag. 0001" → "Ag. 0002",
+  "Conta corrente" → "Conta poupança") e "outra conta", "outra chave" ou "outro documento" só no `to`; sem nada que se
+  possa mostrar, "dados alterados" no `to`. `pix` e `pix_holder` saíram do snapshot; as linhas antigas continuam
+  legíveis.
 - Sem Pagamentos (`hide_payout`, era `hide_pix`): `pix`, `pix_holder`, `payout_methods` e `payout_preferred` vêm como
   "***" (null continua null); na web, "Formas de recebimento alteradas" e "Forma preferencial alterada".
 - `profile.changed` em toda gravação nova, com os nomes crus em `fields` e o `via`. `after_reset` (quem redefiniu a senha
@@ -2824,21 +2830,42 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   validação"), "Redefinir senha" (o link por e-mail, que vale 2 h, ou a senha provisória) e os últimos e-mails enviados.
   Formas de recebimento só com Pagamentos ("Preferencial", "Nova", "Titular diferente", Copiar e, com Pagamentos em
   Editar, Remover; sem nenhuma, "Pedir no WhatsApp"). Situação: Inativar, Bloquear (já com "Cortar também o acesso ao
-  app" marcado) ou Reativar, com o motivo, e o histórico da situação.
+  app" marcado) ou Reativar, com o motivo, e o histórico da situação. O Número vai em maiúsculas enquanto se digita e
+  segue a regra do servidor ("s/n" é o "S/N" gravado, não uma mudança); o órgão emissor aceita "SSP/SP", e ao salvar
+  a UF do fim vai para a UF do RG quando ela está vazia; a mini biografia guarda os parágrafos (`normalizeBio`). Com a
+  API de antes do cadastro V2 (o detalhe sem a chave `address_number`, `isLegacyDetail`), Endereço, Mini biografia e
+  Dados empresariais ficam só de leitura com "Indisponível no momento.", e também CPF, RG e nascimento ("CPF, RG e
+  nascimento: indisponível no momento."; o nome segue editável) e o telefone secundário: a API de antes descartaria
+  esses campos calada (e o endereço dela, numa linha só, perderia o número e o complemento).
 - Lista de Técnicos: o nome e a linha são links reais para a ficha (Ctrl/⌘+clique e o botão do meio abrem outra aba),
   os filtros ficam na URL, o `?tecnico=` antigo redireciona para a ficha, os selos "Inativo"/"Bloqueado" (o motivo no
   título) e "Indisponível {periodShort}", o filtro "Acesso ao app" (Liberado / Sem acesso), o chip "Sem forma de
   recebimento" (`payout_methods_count === 0`) e, no CSV, `acesso_app`, `situacao`, `situacao_motivo`, `email_validado` e
   `forma_recebimento` (sem CPF, RG, nascimento ou dados de pagamento).
-- Homologação: e-mail validado ou pendente (com "Reenviar validação"), o chip "Reaberta", as análises, aprovar num passo
-  (o painel diz se a boas-vindas foi para a fila e traz o texto do WhatsApp; sem senha e sem o link enviado, "Gerar
-  senha provisória"), "Reabrir para análise" com motivo e "Excluída automaticamente em dd/mm/aaaa." na reprovada.
+- Homologação: e-mail validado ou pendente (com "Reenviar validação"; só na ficha que não foi aprovada: depois da
+  aprovação, o estado certo é o da ficha do técnico), o chip "Reaberta", as análises, aprovar num passo (com o e-mail
+  não validado, a confirmação diz "E-mail ainda não validado: confira o endereço com o candidato pelo WhatsApp antes de
+  aprovar."; sem senha e sem a validação ou sem o envio, ela não promete o link: "A ficha está sem senha: depois de
+  aprovar, gere uma senha provisória."; o painel diz se a boas-vindas foi para a fila e traz o texto do WhatsApp; sem
+  senha e sem o link, pelo `password_link`, "Gerar senha provisória" e, com a boas-vindas na fila, "Sem o link de
+  senha: o e-mail ainda não foi validado."), "Reabrir para análise" com motivo e "Excluída automaticamente em
+  dd/mm/aaaa." na reprovada.
 - Pagamentos: a forma preferencial de cada técnico (a chave ou a conta inteira, "Copiar PIX" ou "Copiar dados", "Nova",
   o titular diferente em âmbar e "+N outras"), "Sem forma de recebimento" com "Pedir no WhatsApp" e a linha "Forma de
   recebimento: …" no extrato.
 - OS: no Colaborador (Nova OS) e na Geral, Inativo e Bloqueado aparecem travados, por último, com o motivo (nos outros
   técnicos da visita, só quem pode receber OS); o indisponível continua escolhível, com "Indisponível até 30/11" e o
-  aviso "{Nome} está indisponível …"; nas ofertas, os dois ficam travados.
+  aviso "{Nome} está indisponível …"; nas ofertas, os dois ficam travados. A indisponibilidade vale nos dias da visita
+  (`unavailableBetween`): na oferta, do dia de `scheduled_start` ao de `scheduled_end`; na Nova OS, do início ao início
+  mais a duração estimada; na Geral, o início e o fim gravados ou, com a agenda mudada, o início mais a duração que o
+  salvar manda. O responsável ou o auxiliar que já está na OS e ficou sem acesso ao app aparece com "· sem acesso ao
+  app" (e continua na visita).
+- Mapa, Favoritos por cidade e Mais próximos: o selo Inativo/Bloqueado com o motivo no título (sem motivo, "Não recebe
+  OS"); no Mapa, quem não está Ativo vai para o fim na ordem por loja e, em jornada sem OS em campo, fica "Em jornada"
+  em cinza, fora do "Disponível".
+- Mesmo vocabulário nas outras telas: em Usuários, o técnico sem acesso tem o chip "Sem acesso ao app" (os outros
+  papéis seguem com "Inativo"); a busca Ctrl+K, Pagamentos ("Sem acesso ao app: o telefone dele não aparece aqui") e
+  as Atividades do dia ("Sem técnico ou com técnico sem acesso ao app") falam em acesso, não em "inativo".
 
 **Variáveis de ambiente** (`core/config.py`, `.env.example` e o serviço `api` do `docker-compose.yml`; as da homologação
 ficam em `deploy/`).
