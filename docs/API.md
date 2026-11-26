@@ -2586,9 +2586,10 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
   cut_access?}` → `Technician`. A mesma situação: 409 `OPERATIONAL_STATUS_UNCHANGED`; motivo curto: 422 "Informe o
   motivo"; situação ausente, nula ou desconhecida: 422 "Escolha a situação" (`label` "Situação"; o "Status" das OS
   continua). Para Inativo ou Bloqueado, as ofertas em aberto para ele fecham antes (`offer_cancelled` com a nota
-  "Técnico inativo na operação" ou "Técnico bloqueado na operação"). Grava a situação, o motivo, quem e quando; `cut_access` (só fora de Ativo e com o acesso liberado) corta
-  também o acesso ao app, encerra as sessões e revoga os links de senha. Histórico via "central", com o motivo em
-  `note`, e `profile.changed`. Reativar não devolve o acesso (isso é o "Liberar acesso").
+  "Técnico inativo na operação" ou "Técnico bloqueado na operação"). Grava a situação, o motivo, quem e quando;
+  `cut_access` (só fora de Ativo e com o acesso liberado) corta também o acesso ao app, encerra as sessões e revoga os
+  links de senha. Histórico via "central", com o motivo em `note`, e `profile.changed`. Reativar não devolve o acesso
+  (isso é o "Liberar acesso").
 - A situação é separada do acesso ao app (`is_active`, "Acesso ao app: Liberado / Sem acesso"): Inativo e Bloqueado
   continuam entrando no app (histórico, faturamento, notas). O técnico nunca vê a situação: nada em `/me/*`, nos e-mails
   nem nas mensagens que chegam ao app.
