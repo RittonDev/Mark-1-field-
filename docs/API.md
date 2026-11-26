@@ -1538,29 +1538,43 @@ Faturamento ("Nota em conferência", "A pagar", "Nota recusada" com o motivo).
 
 **Por quê.** O técnico mantém o próprio cadastro no app (Perfil › Configurações; até 2026-11-19, Conta › Meu
 cadastro, e `/meu-cadastro` continua abrindo as Configurações): foto, nome, celular (WhatsApp), e-mail de login,
-endereço, cidade/UF, região que atende, a chave PIX para receber por chamado e o perfil técnico
-([Perfil técnico](#perfil-técnico-2026-11-19)). A central é avisada na hora quando mudam PIX, e-mail, nome ou celular, e
-toda mudança, do app ou da central, fica no histórico do cadastro. Motivo da senha e do histórico: uma conta invadida
-não pode desviar o pagamento. Código: `services/my_profile.py`, `services/user_history.py`, `core/pix.py`,
+endereço, cidade/UF, região que atende, onde recebe por chamado e o perfil técnico
+([Perfil técnico](#perfil-técnico-2026-11-19)). Desde 25/11/2026 ([Cadastro V2](#cadastro-v2-2026-11-25)), também o
+CPF, o RG, o nascimento, o telefone secundário, o endereço em partes, a mini biografia, os dados da empresa, o veículo,
+a indisponibilidade e as **formas de recebimento** (chaves PIX e contas, uma preferencial, no lugar da chave PIX única),
+nos mesmos grupos da ficha da central. A central é avisada na hora quando mudam as formas de recebimento, o e-mail, o
+CNPJ, o nome ou o celular, e toda mudança, do app, da central, da aprovação da ficha ou do link do e-mail, fica no
+histórico do cadastro. Motivo da senha e do histórico: uma conta invadida não pode desviar o pagamento. Código:
+`services/my_profile.py`, `services/user_history.py`, `services/payout_methods.py`, `core/pix.py`, `core/payout.py`,
 `api/routes/my_profile.py` e `models/user_change.py`.
 
 **Quem muda o quê.**
-- O técnico, pelo app: nome, celular, cidade/UF, região, endereço, bairro e CEP sem senha; e-mail e chave PIX
-  (cadastrar, trocar tipo, chave ou titular, remover) com a senha atual; a foto; e o perfil técnico (ferramental,
-  disponibilidade, transporte e CNH, aptidões e formação), sem senha e sem a trava da senha provisória.
-- Só a central (Técnicos ou Usuários): grupo, cargo, acesso ao app, papel, serviços que faz, jornada, senha provisória
-  e as áreas da homologação. A central só vê o perfil técnico (`PATCH /technicians/{id}` ignora esses campos). CPF,
-  nascimento e CNPJ/MEI continuam só na ficha da homologação, sem edição, como os textos livres de ferramentas e de
-  certificações da ficha (não viram lista).
-- Chave PIX: só o técnico cadastra e troca. A central vê (Pagamentos em Visualizar) e só remove (Pagamentos em
-  Editar); `PATCH /technicians/{id}` ignora campos de PIX.
+- O técnico, pelo app: nome, celular, telefone secundário, RG, nascimento, mini biografia, veículo, indisponibilidade,
+  cidade/UF, região, endereço (logradouro, número, complemento, bairro) e CEP sem senha; o CPF uma vez (enquanto está
+  vazio); e-mail, dados da empresa e formas de recebimento (incluir, editar, tornar preferencial, excluir) com a senha
+  atual; a foto; e o perfil técnico (ferramental, disponibilidade, transporte e CNH, aptidões e formação), sem senha e
+  sem a trava da senha provisória.
+- Só a central (Técnicos ou Usuários): grupo, cargo, acesso ao app, situação na operação, papel, serviços que faz,
+  jornada, senha provisória e a correção do CPF. A central também muda os dados pessoais, o endereço e a empresa (sem
+  senha), mas só vê o perfil técnico e o veículo (`PATCH /technicians/{id}` ignora esses campos). Os textos livres de
+  ferramentas e de certificações continuam só na ficha da homologação (não viram lista).
+- Formas de recebimento: só o técnico cadastra e muda. A central vê (Pagamentos em Visualizar) e só remove (Pagamentos
+  em Editar); `PATCH /technicians/{id}` ignora esses campos.
 
 **Rotas do técnico** (papel `technician`; gestão e cliente recebem 403). Nada entra na fila offline: tudo pede internet
 (a senha não fica guardada e o aviso tem de sair na hora). `GET /auth/me` e `UserOut` não mudam.
 - `GET /me/profile` → `MyProfile {id, name, email, phone, job_title, team: Ref|null, home_city, home_state,
   coverage_area, address_line, address_district, address_zip, avatar_url, pix: PixInfo|null, tool_ids, availability,
   transport, skills, education, tech_profile_updated}`, com `PixInfo = {key_type, key, holder_name, updated_at}` (os
-  campos do perfil técnico: ver [Perfil técnico](#perfil-técnico-2026-11-19)).
+  campos do perfil técnico: ver [Perfil técnico](#perfil-técnico-2026-11-19)). Desde 25/11/2026, `MyProfile` traz
+  também `email_pending`, `email_verified_at`, `email_link_sent_at`, `mail_enabled`, `phone_secondary`, `cpf`,
+  `rg_number`, `rg_issuer`, `rg_state`, `birth_date`, `address_number`, `address_complement`, `bio`,
+  `company_document`, `company_name`, `company_trade_name`, `vehicle_model`, `vehicle_plate`, `payout_methods` e
+  `unavailability`; `pix` fica só para o app de antes (a forma preferencial quando ela é PIX). Ver
+  [Cadastro V2](#cadastro-v2-2026-11-25).
+- As rotas do e-mail (`POST /me/profile/email/verification`, `DELETE /me/profile/email/pending`) e das formas de
+  recebimento (`POST /me/profile/payout-methods`, `PUT …/{method_id}`, `POST …/{method_id}/preferred` e
+  `POST …/{method_id}/remove`), todas respondendo o `MyProfile`: ver [Cadastro V2](#cadastro-v2-2026-11-25).
 - `PATCH /me/profile` `MyProfileUpdate` (campo fora da lista: 422 "Campo não aceito"). Só o que vier no corpo muda:
   - `name`: 3 a 160 caracteres, espaços colapsados e NFC (null: "Informe seu nome completo"). Só letras (com acento),
     espaço, apóstrofo (' ’ ‘ ´ ʼ e o acento grave solto), hífen e ponto; recusa "www", "http" e endereço colado (duas
@@ -1570,38 +1584,51 @@ não pode desviar o pagamento. Código: `services/my_profile.py`, `services/user
   - `phone`: 10 a 13 dígitos (aceita +55), volta "(11) 98888-7777" (null ou inválido: "Informe o celular com DDD");
   - `email`: em minúsculas, validado só quando vem (há logins de teste sem "@"; null: "Informe um e-mail válido");
   - `home_city`: 2 a 120, na grafia padrão da base (null: "Informe a cidade"); `home_state`: uma UF ("UF inválida");
-  - `coverage_area` (até 1000), `address_line` (255) e `address_district` (120): vazio vira null;
+  - `coverage_area` (até 1000), `address_line` (255, o logradouro) e `address_district` (120): vazio vira null;
   - `address_zip`: 8 dígitos, volta "00000-000" ("CEP com 8 dígitos"); vazio ou null tira o CEP;
-  - `pix`: `{key_type: "cpf"|"cnpj"|"email"|"phone"|"random", key (até 120), holder_name (3 a 160)}`; null tira a chave;
+  - desde 25/11/2026: `cpf`, `rg_number`, `rg_issuer`, `rg_state`, `birth_date`, `phone_secondary`, `address_number`,
+    `address_complement`, `bio`, `company_document`, `company_name`, `company_trade_name`, `vehicle_model`,
+    `vehicle_plate` e `unavailability` (regras e mensagens em [Cadastro V2](#cadastro-v2-2026-11-25));
+  - `pix`: desde 25/11/2026, 422 "Atualize o app: a chave PIX agora fica em Configurações › Formas de recebimento" (a
+    chave virou forma de recebimento, com rotas próprias; até 24/11/2026 era `{key_type, key, holder_name}`, e null
+    tirava a chave);
   - `tool_ids`, `availability`, `transport`, `skills` e `education`: o perfil técnico, cada parte inteira e sem senha
     (ver [Perfil técnico](#perfil-técnico-2026-11-19));
   - `current_password` (até 256).
 - Ordem do `PATCH`:
   1. Conta só o que muda de verdade (o mesmo celular ou a mesma cidade escritos de outro jeito não contam). Sem nada
-     novo: 200, sem histórico e sem aviso.
-  2. E-mail ou PIX mudando com `must_change_password` (a senha provisória da central: "Redefinir senha" em Técnicos,
-     senha definida em Usuários ou ficha antiga sem senha): 422 "Crie sua senha no app antes de mudar o e-mail ou a
-     chave PIX". O app nem abre as Configurações nesse estado (pede a troca da senha antes). O perfil técnico não
-     passa por esta trava nem pelas duas seguintes.
-  3. E-mail novo de domínio da empresa (`ENTRA_ALLOWED_DOMAINS`, o domínio exato): 422 "Use um e-mail que não seja da
+     novo: 200, sem histórico e sem aviso. O CPF já gravado e diferente: 422 "O CPF já foi informado. Para corrigir,
+     fale com a central pelo WhatsApp"; RG e empresa incompletos: 422 com a mensagem do grupo.
+  2. E-mail novo (diferente do login e do pendente), desde 25/11/2026: envio de e-mail desligado, 422 "O envio de
+     e-mail está desligado: para trocar o e-mail, fale com a central pelo WhatsApp"; endereço que não recebe
+     mensagens, 422 "Este e-mail não recebe mensagens".
+  3. E-mail ou dados da empresa mudando com `must_change_password` (a senha provisória da central: "Redefinir senha"
+     em Técnicos, senha definida em Usuários ou ficha sem senha): 422 "Crie sua senha no app antes de mudar o e-mail,
+     os dados da empresa ou as formas de recebimento". O app nem abre as Configurações nesse estado (pede a troca da
+     senha antes). O resto do cadastro e o perfil técnico não passam por esta trava nem pelas duas seguintes.
+  4. E-mail novo de domínio da empresa (`ENTRA_ALLOWED_DOMAINS`, o domínio exato): 422 "Use um e-mail que não seja da
      empresa". Não pede senha, porque é regra fixa. Quem já tem e-mail da empresa continua com ele, e a central pode
      definir esse e-mail em Técnicos.
-  4. Senha atual (e-mail ou PIX mudando): sem `current_password`, 422 "Confirme com a sua senha atual para mudar o
-     e-mail ou a chave PIX"; errada, 422 "Senha atual incorreta". A tentativa conta antes de conferir, no contador da
-     troca de senha (5 em 15 min, somando as duas telas): passou disso, 429 "Muitas tentativas de confirmar a senha.
-     Tente de novo em N minutos." com `Retry-After`, e o `POST /auth/change-password` também fica bloqueado.
-  5. E-mail mudando, já com a senha certa: no máximo 10 conferências por hora por técnico (a 11ª: 429 "Muitas
+  5. Senha atual (e-mail ou empresa mudando): sem `current_password`, 422 "Confirme com a sua senha atual para mudar o
+     e-mail, os dados da empresa ou as formas de recebimento"; errada, 422 "Senha atual incorreta". A tentativa conta
+     antes de conferir, no contador da troca de senha (5 em 15 min, somando as telas): passou disso, 429 "Muitas
+     tentativas de confirmar a senha. Tente de novo em N minutos." com `Retry-After`, e o `POST /auth/change-password`
+     também fica bloqueado.
+  6. E-mail mudando, já com a senha certa: no máximo 10 conferências por hora por técnico (a 11ª: 429 "Muitas
      tentativas. Tente mais tarde." com `Retry-After`); e-mail de outro usuário ou de ficha pendente: 422 "E-mail já
-     cadastrado". Sem a senha certa, ninguém descobre se um e-mail existe.
-  6. Grava com o histórico. PIX mudou: `pix_updated_at` = agora. Mudou a cidade ou a UF (não só a grafia): as
-     coordenadas antigas de casa saem (vale também para o `PATCH /technicians/{id}` da central). Parte do perfil
-     técnico que mudou: as colunas e o carimbo `{at, via: "app"}` dela.
-  7. Depois do commit, o aviso `profile.changed`.
+     cadastrado". Sem a senha certa, ninguém descobre se um e-mail existe. CPF novo: no máximo 10 conferências por
+     hora (429); de outro usuário, 409 `CPF_TAKEN` "Este CPF já está em outro cadastro".
+  7. Grava com o histórico. Mudou a cidade ou a UF (não só a grafia): as coordenadas antigas de casa saem (vale também
+     para o `PATCH /technicians/{id}` da central). Parte do perfil técnico que mudou: as colunas e o carimbo `{at, via:
+     "app"}` dela. E-mail novo: fica em `email_pending` e o link de validação sai depois do commit.
+  8. Depois do commit, o aviso `profile.changed`.
 - Uma gravação por vez por técnico: antes do passo 1, o `PATCH` trava a linha do técnico (`SELECT … FOR UPDATE`, até o
   fim da transação) e relê o cadastro do banco. Outro `PATCH` do mesmo técnico que chega junto (a gravação seguinte do
   app quando a anterior passou dos 20 s, o técnico em dois aparelhos) espera e compara, carimba e monta o histórico
   sobre o que o primeiro gravou: um não apaga o carimbo nem o histórico do outro.
-- Trocar o e-mail não encerra as sessões (a senha é a mesma): o login passa a ser o e-mail novo.
+- Trocar o e-mail não encerra as sessões (a senha é a mesma). Desde 25/11/2026, o login só passa a ser o e-mail novo
+  quando o técnico abre o link de validação (até lá, ele entra com o de antes); o e-mail do login com um pedido aberto
+  cancela o pedido, sem senha.
 - `POST /me/profile/photo` (multipart `file`; JPG, PNG ou WebP pelo conteúdo, até 2 MB) → `MyProfile`. O app manda a
   foto já recortada (quadrada) e reduzida (512 px). A anterior sai do disco quando nenhum outro usuário nem ficha de
   homologação usa.

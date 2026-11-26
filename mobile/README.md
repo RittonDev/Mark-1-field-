@@ -989,17 +989,21 @@ no topo até o técnico mexer na tela.
 Tela `/privacidade` ([src/app/privacidade.tsx](src/app/privacidade.tsx)), só de leitura.
 
 - **Texto**: `PRIVACY_NOTICE` de [src/lib/constants.ts](src/lib/constants.ts), o mesmo da ficha da homologação (cópia
-  idêntica da web), com "Atualizado em 19/11/2026" (`PRIVACY_DATE`: a data de `PRIVACY_VERSION`, sem o ".2" de uma
-  segunda versão no mesmo dia). Cita os dados do cadastro e a chave PIX, o perfil técnico (aptidões, formação,
-  ferramental, meios de transporte e CNH, dias e turnos disponíveis, informado na ficha ou no app, que ajuda a central a
-  escolher quem convidar), o pagamento por PIX, a localização na jornada, as notas fiscais e o Elo; em "Seus direitos",
-  que o técnico aprovado atualiza o perfil técnico em Configurações.
-- **Onde abre**: no Perfil (linha Aviso de privacidade), no fim de Configurações › Chave PIX, no fim da tela Enviar nota
-  fiscal, no fim do "Como funciona" do Meu elo e no cartão de Hoje.
+  idêntica da web), com "Atualizado em 25/11/2026" (`PRIVACY_DATE`: a data de `PRIVACY_VERSION`, sem o ".2" de uma
+  segunda versão no mesmo dia). Cita os dados do cadastro (com CPF, RG, nascimento, telefone secundário, o e-mail
+  validado, a mini biografia, o veículo e os dados da empresa), as formas de recebimento (chaves PIX e contas, com o
+  titular), o perfil técnico (aptidões, formação, ferramental, meios de transporte e CNH, os dias e turnos e os
+  períodos de indisponibilidade, informado na ficha ou no app, que ajuda a central a escolher quem convidar), a
+  situação na operação, o pagamento na forma preferencial, os e-mails do cadastro (automáticos, sem resposta), a
+  localização na jornada, as notas fiscais e o Elo, e o prazo da ficha reprovada (180 dias, com a reabertura); em "Seus
+  direitos", que o técnico aprovado atualiza no app os dados, o perfil técnico e as formas de recebimento (o CPF,
+  depois de informado, só a central corrige).
+- **Onde abre**: no Perfil (linha Aviso de privacidade), no fim de Configurações › Dados pessoais e › Formas de
+  recebimento, no fim da tela Enviar nota fiscal, no fim do "Como funciona" do Meu elo e no cartão de Hoje.
 - **Cartão em Hoje** ([src/components/PrivacyUpdateCard.tsx](src/components/PrivacyUpdateCard.tsx)): quando o texto
   muda (`PRIVACY_VERSION` diferente da versão que este técnico abriu), a aba Hoje mostra, depois da jornada e das
-  ofertas, "Aviso de privacidade atualizado" · "Agora ele fala do seu perfil técnico e dos registros das ofertas de OS."
-  com **Ler aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer
+  ofertas, "Aviso de privacidade atualizado" · "Agora ele inclui RG, veículo, empresa e formas de recebimento." com
+  **Ler aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer
   caminho grava a versão como vista quando a tela termina de entrar (evento `transitionEnd` da pilha; sem ele, como na
   web, 600 ms depois de abrir): o cartão some com Hoje já coberto, sem mexer na tela durante a transição.
 - **Versão vista** ([src/lib/privacySeen.ts](src/lib/privacySeen.ts)): só no aparelho, por técnico, no
@@ -1037,8 +1041,9 @@ WebSocket /api/v1/ws?token= ── evento ticket.* ──► nova rodada de sync
 - OS fechadas/canceladas há mais de 30 dias e sem pendências saem do aparelho no fim do pull (as concluídas continuam no
   Histórico de atendimentos, que vem da central), menos a que está aberta na tela (`holdTicket`, só na memória).
 - Fora do pull e da fila: o elo, as Estatísticas, o Histórico e o Faturamento são só leitura, guardados no kv com a hora
-  ([docs/MOBILE_SYNC.md](../docs/MOBILE_SYNC.md) §2); o cadastro e o perfil técnico são só online e ficam na memória
-  (§1); a resposta à oferta e a nota fiscal são só online (§3).
+  ([docs/MOBILE_SYNC.md](../docs/MOBILE_SYNC.md) §2); o cadastro (com as formas de recebimento e o link do e-mail), o
+  perfil técnico e a busca do CEP são só online e ficam na memória (§1); o "Esqueci minha senha" (§1), a resposta à
+  oferta e a nota fiscal (§3) são só online.
 
 ## Estrutura
 
@@ -1047,8 +1052,9 @@ index.ts               entrada: expo-router + tarefas de segundo plano (rastream
 src/
   app/                 rotas (expo-router)
     _layout.tsx        sessão, tema e "ocultar valores" (a splash espera os dois), Stack com rotas protegidas, toasts
-    login.tsx          login + servidor da API
-    trocar-senha.tsx   primeiro acesso (senha provisória) e Configurações › Senha
+    login.tsx          login + servidor da API; "Esqueci minha senha" abre a tela abaixo
+    esqueci-senha.tsx  Esqueci minha senha (sem login): pede o link por e-mail (POST /auth/forgot-password); API de antes ou envio desligado: pedir à central
+    trocar-senha.tsx   primeiro acesso (senha provisória) e Configurações › Senha, com "Esqueci a senha atual"
     index.tsx          tela inicial: jornada + Hoje / Agenda (calendário) / Faturamento / Perfil
     ticket/[id].tsx    detalhe, ações e abas
     oferta/[id].tsx    oferta de OS com preço (sem o cabeçalho nativo: voltar redondo): mapa da área, valor, duração e data, "Serviços 1/1 lido", WhatsApp, "Aceitar por R$ X" ou "Recusar"
@@ -1057,7 +1063,7 @@ src/
     estatisticas.tsx   Estatísticas: o total, a chegada no horário e os quatro gráficos de 12 meses (/me/stats)
     elo.tsx            Meu elo: a medalha, risco, o que falta para a próxima faixa, números, o que pesou e "Como funciona"
     conta.tsx          Sincronização (a rota continua /conta): sincronização, fila, avisos recusados, rastreamento, notificações e aparelho (?secao=)
-    configuracoes/     Configurações: index.tsx (o menu em 4 grupos); o cadastro (foto, dados-pessoais, contato, endereco, pix); o perfil técnico (disponibilidade, transporte, aptidoes, formacao, ferramental); notificacoes
+    configuracoes/     Configurações: index.tsx (o menu: os 3 grupos de TECH_SECTION_GROUPS e o App); dados pessoais e cadastrais (foto, dados-pessoais, endereco, contato, biografia); financeiros e empresariais (empresa, recebimento; pix só redireciona para recebimento); perfil profissional (disponibilidade, que é Dias e horários, transporte, formacao, aptidoes, ferramental); notificacoes
     meu-cadastro.tsx   só redireciona para /configuracoes (links antigos)
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
     privacidade.tsx    Aviso de privacidade (LGPD), só leitura; abrir grava a versão vista pelo técnico
@@ -1078,19 +1084,25 @@ src/
     Offers.tsx         "Ofertas para você" em Hoje e os blocos da tela da oferta (duração e data, área, serviços)
     offer/OfferHero.tsx  topo da oferta: o desenho de mapa da área com o chip bairro · cidade
     RoundBackButton.tsx  voltar redondo das telas sem o cabeçalho nativo (a oferta)
-    billing/           aba Faturamento: BillingView (a aba), BillingTotals, PixRow, BillingMonthCard, StateIcon, SituationBox, OtherMonth ("Outro mês"), MonthEarnings (o mês) e HideValuesButton (o olho)
-    settings/          peças de Configurações: ChoiceChips, CheckCard, Checkbox, DayCard, SkillSheet, EducationSheet, MonthField, FormSheet, FixedFooter, OfflineNotice, ProfileGate, ProfileFormScreen, PasswordSheet e SavingStatus
+    billing/           aba Faturamento: BillingView (a aba), BillingTotals, PixRow (a forma de recebimento preferencial), BillingMonthCard, StateIcon, SituationBox, OtherMonth ("Outro mês"), MonthEarnings (o mês) e HideValuesButton (o olho)
+    settings/          peças de Configurações: ChoiceChips, CheckCard, Checkbox, DayCard, SkillSheet, EducationSheet, MonthField, FormSheet, FixedFooter, OfflineNotice, ProfileGate, ProfileFormScreen, PasswordSheet e PasswordField (a senha atual, com título e botão por ação), PayoutMethodSheet (chave PIX e conta), PeriodSheet (indisponibilidade), VehicleSheet (veículo), EmailPendingBox (troca de e-mail esperando o link), CadastroUnavailable (o aviso com a API de antes do cadastro V2) e SavingStatus
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico (viz1 e vizGrid: os gráficos)
   theme/fonts.ts       Manrope (pesos 400–700) e o mapeamento de fontWeight para a família
   lib/
     tracking.ts trackingTask.ts  jornada, coleta, fila de pontos e tarefa de segundo plano
     account.ts         /auth/me e troca de senha
-    profile.ts         o cadastro só na memória (GET/PATCH /me/profile, com o perfil técnico), as gravações em fila e a foto reduzida no aparelho (expo-image-manipulator)
-    profileForm.ts useProfileForm.ts  telas do cadastro em Configurações: as regras e os resumos (puro, com sonda) e o estado do formulário
+    auth.ts            login, Sair e o pedido do "Esqueci minha senha" (requestPasswordReset)
+    forgotPassword.ts  Esqueci minha senha: textos, o que o pedido deu (forgotOutcome) e o e-mail que o login entrega à tela pela memória (puro, com sonda)
+    profile.ts         o cadastro só na memória (GET/PATCH /me/profile, com o perfil técnico; hasCadastroV2), as gravações em fila (writeProfile: o PATCH, a foto, as formas de recebimento e o link do e-mail) e a foto reduzida no aparelho (expo-image-manipulator)
+    profileForm.ts useProfileForm.ts  telas do cadastro em Configurações (Dados pessoais, Endereço e CEP, Contato e e-mail, Mini biografia, Dados empresariais e o veículo): as regras e os resumos (puro, com sonda) e o estado do formulário, com a pergunta antes de enviar ("Confira o CPF")
+    cep.ts             busca de CEP do Endereço (GET /public/cep, logado): achou e não achou na memória até a troca de sessão; nunca lança
+    payoutMethods.ts   formas de recebimento: as rotas /me/profile/payout-methods, com a senha, na fila das gravações
+    payoutForm.ts banks.ts  a folha da chave PIX e da conta, a próxima preferencial e os textos (puro, com sonda); os 29 bancos sugeridos, com o código de compensação (conferir na lista do STR do Banco Central)
+    unavailability.ts  indisponibilidade: a folha do período, o corpo do PATCH e o resumo de Dias e horários (puro, com sonda)
     avatarFlow.ts      Foto do perfil: tirar, escolher, remover, o andamento e a recuperação no Android
-    technicalProfile.ts  perfil técnico: o estado das telas de Atendimento, a trava das listas (Aptidões e Formação) e os catálogos na memória (ferramental e sugestões de aptidão)
+    technicalProfile.ts  perfil profissional: o estado das telas, a trava das listas (Aptidões, Formação, Formas de recebimento e Indisponibilidade), o aviso UNAVAILABLE e os catálogos na memória (ferramental e sugestões de aptidão)
     techProfileForm.ts  regras do perfil técnico e o redutor do salvar ao tocar (puro, com sonda)
-    autoSave.ts        salvar ao tocar de Disponibilidade, Transporte e Ferramental (0,6 s, um envio por vez)
+    autoSave.ts        salvar ao tocar dos turnos (Dias e horários), do Transporte e do Ferramental (0,6 s, um envio por vez)
     logout.ts          o Sair do Perfil: confirmação, "Enviar e sair" e o andamento
     navigation.ts      openSync (a Sincronização com ?secao=) e openTicketAnywhere (a OS do aparelho ou da central)
     syncSummary.ts     o resumo da linha Sincronização (Perfil e Configurações)
@@ -1101,7 +1113,7 @@ src/
     earnings.ts        Faturamento: os meses (kv earnings:months), o mês (kv earnings:AAAA-MM) e o primeiro mês aceito (FIRST_MONTH, 2000-01)
     hideValues.ts      "ocultar valores" do Faturamento, por aparelho (SecureStore mc_hide_values)
     privacySeen.ts     versão do aviso de privacidade vista por técnico (Keychain/Keystore), lida na abertura e no login
-    pix.ts masks.ts    chave PIX por tipo (regras e mensagens de backend/app/core/pix.py) e máscaras de CPF, CNPJ, CEP e celular
+    pix.ts masks.ts    chave PIX por tipo (regras e mensagens de backend/app/core/pix.py, na folha das formas de recebimento) e máscaras de CPF, CNPJ, CEP, celular, agência, conta, dígito e documento do titular (RG, órgão emissor e placa ficam em constants.ts)
     types.ts constants.ts workflow.ts   copiados de frontend/src/lib (manter iguais)
     syncTypes.ts       contrato de /sync/pull e /sync/push
     api.ts session.ts  HTTP com refresh + tokens e o fim de sessão pendente no SecureStore
@@ -1127,7 +1139,10 @@ tests/                 sondas das regras puras (node:test); resolve-ts.mjs regis
 `types.ts`, `constants.ts` e `workflow.ts` são cópias exatas dos arquivos da web. Ao mudar regras de
 status ou tipos no backend, atualize os três lugares (backend, `frontend/src/lib`, `mobile/src/lib`).
 Saíram nesta versão: `components/EarningsView.tsx` (virou `components/billing/`), `components/PixCard.tsx` (virou
-`billing/PixRow.tsx`) e o formulário de `app/meu-cadastro.tsx` (virou `app/configuracoes/`).
+`billing/PixRow.tsx`) e o formulário de `app/meu-cadastro.tsx` (virou `app/configuracoes/`). No cadastro V2
+(25/11/2026), a tela Chave PIX (`app/configuracoes/pix.tsx`) virou só um redirecionamento para Formas de recebimento
+(`recebimento.tsx`), e saíram de `profileForm.ts` as regras dela (`PIX_SECTION`, `reviewPix`, `pixSummary`, `NO_PIX`) e
+o `NAME_SECTION` (o nome entrou em Dados pessoais, `PERSONAL_SECTION`).
 
 ## Verificações
 
