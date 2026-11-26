@@ -134,9 +134,9 @@ def test_personal_validators() -> None:
 
 
 def test_issuer_with_the_state_at_the_end() -> None:
-    """"SSP/SP" ou "SSP-SP" no órgão emissor (= splitIssuer): órgão e UF separados; a UF do fim
-    vale quando a do RG está vazia (com outra, fica a do campo); o fim que não é UF fica no órgão,
-    com espaço no lugar da barra."""
+    """Órgão emissor com a UF no fim, "SSP/SP" ou "SSP-SP" (= splitIssuer): órgão e UF separados;
+    a UF do fim vale quando a do RG está vazia (com outra, fica a do campo); o fim que não é UF
+    fica no órgão, com espaço no lugar da barra."""
     assert personal.split_issuer("SSP/SP") == ("SSP", "SP")
     assert personal.split_issuer(" ssp-sp ") == ("SSP", "SP")
     assert personal.split_issuer("SSP / SP") == ("SSP", "SP")
@@ -160,9 +160,9 @@ def test_issuer_with_the_state_at_the_end() -> None:
 
 
 def test_bio_keeps_the_paragraphs() -> None:
-    """= normalizeBio: "\\r\\n" vira "\\n", sem espaços no fim das linhas, três ou mais quebras viram
-    duas e sem quebras nem espaços nas pontas; os 500 contam depois disso. A ficha, o app e a
-    central usam esta mesma regra (personal.bio)."""
+    """= normalizeBio: "\\r\\n" vira "\\n", sem espaços no fim das linhas, três ou mais quebras
+    viram duas e sem quebras nem espaços nas pontas; os 500 contam depois disso. A ficha, o app e
+    a central usam esta mesma regra (personal.bio; os testes com banco passam pelos três)."""
     assert personal.bio("Técnico de redes.  \r\n\r\n\r\n\r\nAtendo a Cidade Exemplo.  ") == (
         "Técnico de redes.\n\nAtendo a Cidade Exemplo."
     )
@@ -196,7 +196,7 @@ NEW_FIELDS = {
     "rg_state": "sp",
     "birth_date": "1990-11-25",
     "phone_secondary": "11977776666",
-    "bio": "  Técnico   de redes e CFTV  ",
+    "bio": "  Técnico de redes e CFTV.  \r\n\r\n\r\nAtendo a Cidade Exemplo.  ",
     "address_line": "Rua Exemplo",
     "address_number": "s/n",
     "address_complement": "Fundos",
@@ -206,6 +206,8 @@ NEW_FIELDS = {
     "vehicle_model": "Modelo Exemplo",
     "vehicle_plate": "abc-1234",
 }
+# A mini biografia como se grava: com os parágrafos (personal.bio).
+BIO = "Técnico de redes e CFTV.\n\nAtendo a Cidade Exemplo."
 
 
 @requires_db
@@ -224,7 +226,7 @@ async def test_new_fields_round_trip(
         "rg_state": "SP",
         "birth_date": "1990-11-25",
         "phone_secondary": "(11) 97777-6666",
-        "bio": "Técnico de redes e CFTV",
+        "bio": BIO,
         "address_line": "Rua Exemplo",
         "address_number": "S/N",
         "address_complement": "Fundos",
@@ -298,7 +300,7 @@ async def test_history_texts_of_new_fields(client: AsyncClient, world: World) ->
         "address_line": (None, "Rua Exemplo"),
         "address_number": (None, "S/N"),
         "address_complement": (None, "Fundos"),
-        "bio": (None, "Técnico de redes e CFTV"),
+        "bio": (None, BIO),
         "company_document": (None, "12.345.678/0001-95"),
         "company_name": (None, "Empresa Exemplo Ltda"),
         "company_trade_name": (None, "Loja Exemplo"),
@@ -396,6 +398,66 @@ async def test_rg_and_company_groups(
     )
     user = await stored(engine, world)
     assert (user.company_document, user.company_name, user.company_trade_name) == (None,) * 3
+
+
+@requires_db
+async def test_issuer_with_the_state_at_the_end_in_the_app(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """O órgão emissor com a UF no fim grava separado: a UF vazia recebe a do fim; com a UF no
+    campo, vale a do campo e o fim sai. O mesmo de novo, escrito de outro jeito, não muda nada."""
+    me = ok(await patch(client, world, rg_number="12.345.678-9", rg_issuer="ssp/sp", rg_state=None))
+    assert (me["rg_issuer"], me["rg_state"]) == ("SSP", "SP")
+    assert (await history(client, world))[0]["changes"] == [
+        {"field": "rg", "from": None, "to": "12.345.678-9 · SSP/SP"}
+    ]
+    count = len(await history(client, world))
+    ok(await patch(client, world, rg_number="12.345.678-9", rg_issuer="SSP - SP", rg_state="sp"))
+    assert len(await history(client, world)) == count
+    me = ok(await patch(client, world, rg_issuer="Detran-RJ", rg_state="MG"))
+    assert (me["rg_issuer"], me["rg_state"]) == ("DETRAN", "MG")
+    user = await stored(engine, world)
+    assert (user.rg_number, user.rg_issuer, user.rg_state) == ("12.345.678-9", "DETRAN", "MG")
+    # Sem UF válida no fim, a barra vira espaço e a UF continua obrigatória.
+    r = await patch(client, world, rg_issuer="SSP/XX", rg_state=None)
+    assert r.status_code == 422 and messages(r) == [personal.RG_INCOMPLETE]
+    me = ok(await patch(client, world, rg_issuer="SSP/XX", rg_state="SP"))
+    assert (me["rg_issuer"], me["rg_state"]) == ("SSP XX", "SP")
+
+
+@requires_db
+async def test_number_saved_by_the_central_is_not_changed_by_the_app(
+    client: AsyncClient, world: World
+) -> None:
+    """A central grava o número em maiúsculas, como o app e a ficha: o técnico que depois muda só o
+    complemento (o app manda as três partes; aqui, o número como foi digitado na central) não lança
+    uma troca de número em nome dele."""
+    url = f"{API}/technicians/{world.tech.user.id}"
+    address = {
+        "address_line": "Rua Exemplo",
+        "address_number": "s/n",
+        "address_complement": "Fundos",
+    }
+    r = await client.patch(url, json=address, headers=world.analyst.headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["address_number"] == "S/N"
+    me = ok(await patch(client, world, **{**address, "address_complement": "Casa 2"}))
+    assert (me["address_number"], me["address_complement"]) == ("S/N", "Casa 2")
+    row, central = (await history(client, world))[:2]
+    assert central["via"] == "central"
+    assert (row["via"], row["changes"]) == (
+        "app",
+        [{"field": "address_complement", "from": "Fundos", "to": "Casa 2"}],
+    )
+
+
+@requires_db
+async def test_birth_date_must_be_a_date(client: AsyncClient, world: World) -> None:
+    """Número não é data no app (como na ficha e na central): viraria segundos desde 1970."""
+    for value in (1577836800, 1577836800.5, True):
+        r = await patch(client, world, birth_date=value)
+        assert r.status_code == 422 and messages(r) == [personal.BIRTH_INVALID], value
+        assert r.json()["detail"][0]["label"] == "Data de nascimento"
 
 
 @requires_db
