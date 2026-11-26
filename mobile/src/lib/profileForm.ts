@@ -14,10 +14,12 @@ import {
   isSendableEmail,
   isValidPlate,
   isValidRg,
-  normalizeIssuer,
+  normalizeBio,
   normalizePlate,
   normalizeRg,
   PROFILE_LIMITS,
+  sameStreet,
+  splitIssuer,
   type CepSlots,
 } from "./constants";
 import { isValidCnpj, isValidCpf, maskCep, maskCnpj, maskCpf, maskPhone, onlyDigits, phoneDigits, UFS } from "./masks";
@@ -155,18 +157,25 @@ export interface PersonalForm {
 }
 export type PersonalField = "name" | "cpf" | "rgNumber" | "rgIssuer" | "rgState" | "birthDate";
 
-/** O RG como o servidor grava (normalizeRg e normalizeIssuer das constants, sem os espaços das pontas). */
+/**
+ * O órgão emissor e a UF do RG como ficam ao salvar (o servidor separa igual): "SSP/SP" ou "SSP-SP" viram órgão "SSP" e
+ * UF "SP" (splitIssuer). A UF do fim do órgão só vale com o campo da UF vazio; com outra UF lá, fica a do campo e o fim
+ * sai. Sem UF válida no fim, "/" e "-" viram espaço ("SSP XX").
+ */
+export function issuerParts(issuer: string, state: string): { issuer: string; state: string } {
+  const split = splitIssuer(issuer);
+  return { issuer: split.issuer, state: state.trim().toUpperCase() || split.state || "" };
+}
+
+/** O RG como o servidor grava (normalizeRg e issuerParts, sem os espaços das pontas). */
 function rgOf(form: Pick<PersonalForm, "rgNumber" | "rgIssuer" | "rgState">) {
-  return {
-    number: normalizeRg(form.rgNumber).trim(),
-    issuer: normalizeIssuer(form.rgIssuer).trim(),
-    state: form.rgState.trim().toUpperCase(),
-  };
+  return { number: normalizeRg(form.rgNumber).trim(), ...issuerParts(form.rgIssuer, form.rgState) };
 }
 
 /**
  * Nome (reviewName); CPF só enquanto não está gravado (11 números válidos; depois, só a central muda); RG com os três
- * juntos (número, órgão emissor e UF; os três vazios limpam); nascimento de 18 a 90 anos completos em `today`.
+ * juntos (número, órgão emissor de 2 a 20 letras e UF, que pode vir no fim do órgão: issuerParts; os três vazios
+ * limpam); nascimento de 18 a 90 anos completos em `today`.
  */
 export function reviewPersonal(form: PersonalForm, base: PersonalForm, today: string = todayIso()): SectionReview<PersonalField> {
   const { body, errors: nameErrors } = reviewName(form, base);
@@ -191,7 +200,7 @@ export function reviewPersonal(form: PersonalForm, base: PersonalForm, today: st
       if (!rg.number) errors.rgNumber = MSG.rgNumber;
       else if (!isValidRg(rg.number)) errors.rgNumber = MSG.rgShort;
       if (!rg.issuer) errors.rgIssuer = MSG.rgIssuer;
-      else if (rg.issuer.length < 2) errors.rgIssuer = MSG.rgIssuerShort;
+      else if (rg.issuer.length < 2 || rg.issuer.length > PROFILE_LIMITS.rgIssuer) errors.rgIssuer = MSG.rgIssuerShort;
       if (!rg.state) errors.rgState = MSG.rgState;
       else if (!UFS.includes(rg.state)) errors.rgState = MSG.uf;
     }
@@ -270,10 +279,19 @@ export interface AddressForm {
 }
 export type AddressField = keyof AddressForm;
 
+/** O número sem número, depois das maiúsculas: "SN", "S/N", "S / N". */
+const NO_NUMBER = /^(S\s*\/\s*N|SN)$/;
+
+/** O número do endereço como o servidor grava (personal.address_number): espaços juntados, em maiúsculas, "SN" → "S/N". */
+export function addressNumberOf(text: string): string {
+  const number = collapse(text).normalize("NFC").toUpperCase();
+  return NO_NUMBER.test(number) ? "S/N" : number;
+}
+
 /**
  * Cidade e UF obrigatórias (só nesta tela); CEP conferido quando muda, e apagado vai como null. Logradouro, número e
  * complemento vão juntos quando um muda (o servidor limpa número e complemento quando o logradouro chega sozinho, como no
- * app antigo). Vazio vira null.
+ * app antigo); o número vai como o servidor grava (addressNumberOf: "s/n" e "S/N" não são mudança). Vazio vira null.
  */
 export function reviewAddress(form: AddressForm, base: AddressForm): SectionReview<AddressField> {
   const body: MyProfileUpdate = {};
@@ -286,9 +304,9 @@ export function reviewAddress(form: AddressForm, base: AddressForm): SectionRevi
   }
 
   const street = form.street.trim();
-  const number = collapse(form.number);
+  const number = addressNumberOf(form.number);
   const complement = collapse(form.complement);
-  if (street !== base.street.trim() || number !== collapse(base.number) || complement !== collapse(base.complement)) {
+  if (street !== base.street.trim() || number !== addressNumberOf(base.number) || complement !== collapse(base.complement)) {
     body.address_line = street || null;
     body.address_number = number || null;
     body.address_complement = complement || null;
@@ -336,15 +354,6 @@ const EVERY_SLOT: ReadonlySet<keyof CepSlots> = new Set(["street", "district", "
 const NO_SLOT: ReadonlySet<keyof CepSlots> = new Set();
 const EMPTY_SLOTS: CepSlots = { street: "", district: "", city: "", state: "" };
 
-/** Sem acento (os sinais soltos do NFD, U+0300 a U+036F), espaços juntados e em maiúsculas: a comparação de cepFill. */
-const fold = (text: string) =>
-  text
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toUpperCase();
-
 export interface CepPatch {
   /** O que muda no formulário (vazio: nada a preencher). */
   patch: Partial<AddressForm>;
@@ -357,8 +366,10 @@ export interface CepPatch {
 /**
  * O CEP achado sobre o Endereço, com a regra dos 6 lugares (cepFill): campo livre (vazio, igual ao gravado ou preenchido
  * pela busca anterior, `auto`) recebe o valor; o digitado fica. `use`: "Usar este endereço" (todos contam como livres).
- * Logradouro trocado: Número e Complemento que a pessoa não mexeu (iguais ao gravado) eram do endereço de antes e ficam
- * vazios.
+ * O que o CEP não traz (CEP geral: logradouro e bairro) esvazia só o campo que ainda tem o valor da busca anterior
+ * (`auto`, o `stale` de cepFill, também no `use`); o digitado e o gravado ficam. Logradouro trocado de fato (sameStreet:
+ * outra grafia não conta): Número e Complemento que a pessoa não mexeu (iguais ao gravado) eram do endereço de antes e
+ * ficam vazios.
  */
 export function cepPatch(
   form: AddressForm,
@@ -367,7 +378,7 @@ export function cepPatch(
   found: CepAddress,
   use = false,
 ): CepPatch {
-  const result = cepFill(addressSlots(form), addressSlots(base), use ? EVERY_SLOT : auto, found);
+  const result = cepFill(addressSlots(form), addressSlots(base), use ? EVERY_SLOT : auto, found, auto);
   const patch: Partial<AddressForm> = {};
   const filled: Partial<CepSlots> = {};
   for (const key of result.filled) {
@@ -375,8 +386,7 @@ export function cepPatch(
     if (key === "state") patch.uf = result.next.state;
     else patch[key] = result.next[key];
   }
-  // Outra rua (não só outra grafia: acento, maiúsculas e espaços não contam).
-  if (result.filled.includes("street") && fold(result.next.street) !== fold(form.street)) {
+  if (result.filled.includes("street") && !sameStreet(result.next.street, form.street)) {
     if (form.number && form.number === base.number) patch.number = "";
     if (form.complement && form.complement === base.complement) patch.complement = "";
   }
