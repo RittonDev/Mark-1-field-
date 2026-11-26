@@ -581,7 +581,9 @@ def _convert_skills() -> int:
 
 
 def _ids(values: Any) -> set[str]:
-    return {found for raw in values if (found := _as_id(raw))} if isinstance(values, list) else set()
+    return (
+        {found for raw in values if (found := _as_id(raw))} if isinstance(values, list) else set()
+    )
 
 
 def _skill_ids(items: Any) -> set[str]:
@@ -593,7 +595,11 @@ def _skill_ids(items: Any) -> set[str]:
 def _mark_used() -> int:
     """6. O 1º uso do que está em técnicos e fichas e do que o histórico cita."""
     conn = op.get_bind()
-    used: dict[str, set[str]] = {"tool_catalog": set(), "area_catalog": set(), "skill_catalog": set()}
+    used: dict[str, set[str]] = {
+        "tool_catalog": set(),
+        "area_catalog": set(),
+        "skill_catalog": set(),
+    }
     for query in (USED_BY_USERS, USED_BY_FICHAS):
         for row in conn.execute(query).mappings().all():
             used["tool_catalog"] |= _ids(_loaded(row["tools"]))
@@ -607,7 +613,10 @@ def _mark_used() -> int:
             row["name_key"]: row["id"] for row in conn.execute(SKILLS).mappings().all()
         },
     }
-    params = {"tools": json.dumps([{"field": "tools"}]), "skills": json.dumps([{"field": "skills"}])}
+    params = {
+        "tools": json.dumps([{"field": "tools"}]),
+        "skills": json.dumps([{"field": "skills"}]),
+    }
     for row in conn.execute(HISTORY_ROWS, params).mappings().all():
         changes = _loaded(row["changes"])
         for field, table in zip(HISTORY_FIELDS, ("tool_catalog", "skill_catalog"), strict=True):
@@ -787,9 +796,7 @@ def upgrade() -> None:
     op.create_table(
         "technician_documents",
         sa.Column("id", UUID, primary_key=True),
-        sa.Column(
-            "user_id", UUID, sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=True
-        ),
+        sa.Column("user_id", UUID, sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=True),
         sa.Column(
             "application_id",
             UUID,
@@ -892,9 +899,7 @@ def upgrade() -> None:
     for step in DATA_STEPS:
         step()
 
-    op.alter_column(
-        "tool_catalog", "name_key", existing_type=sa.String(length=160), nullable=False
-    )
+    op.alter_column("tool_catalog", "name_key", existing_type=sa.String(length=160), nullable=False)
     op.create_unique_constraint(op.f("uq_tool_catalog_name_key"), "tool_catalog", ["name_key"])
 
 

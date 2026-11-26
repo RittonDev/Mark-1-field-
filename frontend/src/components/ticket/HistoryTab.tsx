@@ -26,6 +26,8 @@ import {
   Pencil,
   Send,
   ShieldCheck,
+  Star,
+  StarOff,
   ThumbsDown,
   Trash2,
   UserCog,
@@ -83,6 +85,8 @@ const ICONS: Record<TicketEventType, Icon> = {
   offer_accepted: Handshake,
   offer_declined: ThumbsDown,
   offer_cancelled: CircleOff,
+  rating_set: Star,
+  rating_removed: StarOff,
 };
 
 /** Eventos que a API grava e o tipo do front ainda não lista (pedido de peça, autorização antiga). */
@@ -266,6 +270,17 @@ function scopeReadText(value: unknown, acceptedAt: string): string | null {
   return `escopo lido ${day === dayKey(acceptedAt) ? time : `em ${dayMonthFmt.format(new Date(iso))} ${time}`}`;
 }
 
+/**
+ * A nota da avaliação do cliente: "5 de 5"; corrigida, "4 → 5 de 5" (a mesma nota, só uma vez: mudou o comentário ou
+ * quem avaliou).
+ */
+function scoreChange(from: string | null, to: string | null): string | null {
+  if (!to || !from || from === to) return to ?? from;
+  const before = /^(\d+) de (\d+)$/.exec(from);
+  const after = /^(\d+) de (\d+)$/.exec(to);
+  return before && after && before[2] === after[2] ? `${before[1]} → ${to}` : `${from} → ${to}`;
+}
+
 function isStatus(value: string | null): value is TicketStatus {
   return value !== null && value in STATUS;
 }
@@ -444,6 +459,11 @@ function Detail({ event }: { event: TicketEvent }) {
     }
     case "worklog_added":
       return typeof data.minutes === "number" ? <Joined parts={[formatMinutes(data.minutes)]} /> : null;
+    case "rating_set":
+      // O técnico avaliado e a nota; o comentário vem na nota do evento, embaixo.
+      return <Joined parts={[str(data.technician_name), scoreChange(event.from_value, event.to_value)]} />;
+    case "rating_removed":
+      return <Joined parts={[str(data.technician_name), event.from_value]} />;
   }
   // Tipos que a API grava e o tipo do front não lista: comparados como texto.
   const type: string = event.event_type;
