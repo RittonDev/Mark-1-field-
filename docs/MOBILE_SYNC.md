@@ -15,7 +15,7 @@ Este documento é o contrato que o app do técnico (`mobile/`, Expo; ver [mobile
  push (FCM/APNs) ◄────────────── OS nova, oferta, visita, peça (app fechado; ainda não ligado, §5)
  lembretes locais ◄───────────── agendados no próprio aparelho: 1 dia, 1h40 e 10 min antes da visita
  leituras guardadas (kv) ◄────── elo, estatísticas, histórico, faturamento e ofertas: só leitura, fora da fila (§2)
- cadastro (só na memória) ◄────► GET/PATCH /me/profile e catálogos: só online, fora da fila (§1)
+ cadastro (só na memória) ◄────► /me/profile e as rotas dele, CEP e catálogos: só online, fora da fila (§1)
 ```
 
 ## 1. Login e aparelho
@@ -26,7 +26,17 @@ Este documento é o contrato que o app do técnico (`mobile/`, Expo; ver [mobile
    sempre que o token de push mudar. Responde `200 {"push": "live"|"simulated"}`: com `simulated` (o push
    ainda não chega ao aparelho) o app transforma as novidades do pull em notificação do sistema; com `live`
    ele não repete o aviso do push (§5). `DELETE /devices/{token}` no logout.
-4. `GET /meta` (público) traz status, rótulos, cores e transições para montar a interface.
+4. `GET /meta` (público) traz status, rótulos, cores e transições para montar a interface, e `mail_enabled` (o envio
+   de e-mail ligado no servidor; o app lê o mesmo em `MyProfile.mail_enabled`).
+
+**Esqueci minha senha** (sem login; docs/API.md, "Cadastro V2 (2026-11-25)"): `POST /auth/forgot-password {email}`
+responde 202 com o mesmo texto, exista ou não o cadastro. O link (2 h, uso único) só vai ao técnico com acesso ao app e
+e-mail de login validado e abre a página web `/definir-senha`; a senha nova encerra as sessões abertas, e a chamada
+seguinte do app recebe 401 "Sessão encerrada. Entre novamente.", como na senha redefinida pela central. 429 (pedidos
+demais do mesmo IP) traz o texto do servidor; 503 `MAIL_DISABLED` (servidor sem envio de e-mail) e 404 (API de antes,
+sem a rota): o app manda pedir à central pelo WhatsApp. Só online, fora do lote e da fila. O e-mail digitado no login
+chega à tela pela memória (`forgotHandoff`, em `lib/forgotPassword.ts`), nunca pelo endereço da rota (na versão web,
+iria para a URL).
 
 Aviso de privacidade: não há rota de ciência. A versão que o técnico abriu (`PRIVACY_VERSION`) fica só no aparelho, no
 Keychain/Keystore e por técnico; com versão nova, Hoje mostra o cartão "Aviso de privacidade atualizado" até ele abrir
