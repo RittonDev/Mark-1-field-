@@ -2893,7 +2893,7 @@ Os links dos e-mails usam o `WEB_URL` de sempre. Configure SPF e DKIM do domíni
    para o host, conferido com `pg_restore -l` (a lista sai sem erro). Por exemplo, com o `docker compose` daqui:
    `docker compose exec -T db pg_dump -U chamados -Fc -f /tmp/antes-v2.dump chamados`, depois
    `docker compose exec -T db pg_restore -l /tmp/antes-v2.dump` e `docker compose cp db:/tmp/antes-v2.dump .` (o
-   `-f` e o `cp` evitam o `>` do PowerShell, que estraga arquivo binário).
+   `-f` e o `cp` evitam o `>` do Windows PowerShell, que estraga arquivo binário).
 2. **A migração roda só no start da API nova, com a antiga parada** (o comando do contêiner é
    `alembic upgrade head && uvicorn …`, e há uma instância só). Não rode `alembic upgrade head` à parte com a API antiga
    no ar, nem o comando de checagem do README, que neste ambiente usa o banco real:

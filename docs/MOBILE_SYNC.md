@@ -52,9 +52,9 @@ veículo, chaves PIX, contas e o documento do titular existem só nessa memória
 SecureStore. É lido ao entrar, ao abrir cada tela de Configurações, ao puxar a aba Faturamento e as telas do cadastro,
 ao voltar para o app com uma tela do cadastro aberta (`AppState` "active", em `useProfileLoad`: o link do e-mail abre
 no navegador; a releitura não esconde a tela, e o que foi digitado fica) e, quando falta ou passou de 6 h (o link da
-foto vale 12 h), ao voltar à tela inicial e ao abrir o Faturamento. As gravações (salvar,
-enviar a foto e removê-la, as formas de recebimento e o link do e-mail) saem uma por vez: a seguinte espera a resposta
-da anterior e não sai se a sessão mudou na espera. Uma leitura durante a qual uma gravação saiu, voltou ou ficou no ar
+foto vale 12 h), ao voltar à tela inicial e ao abrir o Faturamento. As gravações (salvar, enviar a foto e removê-la,
+as formas de recebimento e o link do e-mail) saem uma por vez: a seguinte espera a resposta da anterior e não sai se a
+sessão mudou na espera. Uma leitura durante a qual uma gravação saiu, voltou ou ficou no ar
 não é publicada: fica o que a gravação devolveu. O servidor também grava uma por vez por técnico (o
 `PATCH /me/profile`, as rotas do e-mail e as das formas de recebimento travam a linha dele até o fim da transação): a
 gravação seguinte que o app solta quando a anterior passou dos 20 s sem resposta, ou a de outro aparelho, espera a
