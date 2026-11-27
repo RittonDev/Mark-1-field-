@@ -13,22 +13,27 @@ import {
   unavailableOn,
 } from "../src/lib/constants.ts";
 import {
+  cityParam,
+  clearedListQuery,
   EMAIL_STATUS_LABEL,
   EMAIL_TEMPLATE_LABEL,
   emailStatusLabel,
   FICHA_DEFAULT,
   GESTAO_GROUP,
-  listCityOf,
+  hasListFilter,
+  hasStateSuffix,
   listQueryFrom,
   listQueryPatch,
   OPERATIONAL_STATUS_COLOR,
   operationalRank,
+  parseCityParam,
   REVIEW_ACTION_LABEL,
   sectionFromParam,
   technicianHref,
 } from "../src/lib/technicians.ts";
 
 const ID = "3f2c8a1e-5b7d-4c9a-8e6f-1a2b3c4d5e6f";
+const ID2 = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
 const unique = (list) => new Set(list).size === list.length;
 
 /** Os 4 grupos do menu da ficha, como a central monta: os 3 do cadastro e a Gestão. */

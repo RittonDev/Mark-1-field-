@@ -29,12 +29,13 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { MultiSelect } from "@/components/MultiSelect";
 import { Tabs } from "@/components/motion";
 import { NoAccess } from "@/components/NoAccess";
-import { fold, replaceSearch } from "@/components/operacao/hooks";
+import { fold, isUuid, replaceSearch, useSearchChange } from "@/components/operacao/hooks";
+import { DocumentRow } from "@/components/technicians/documents/DocumentRow";
 import { TempPasswordPanel } from "@/components/technicians/GrantAccessDialog";
 import {
   InviteDialog,
@@ -43,6 +44,7 @@ import {
   inviteUsesLabel,
 } from "@/components/technicians/InviteDialog";
 import { refreshTechnicianViews } from "@/components/technicians/refresh";
+import { isPlainClick } from "@/components/ticket/TicketLink";
 import { useToast } from "@/components/Toaster";
 import {
   Button,
@@ -66,11 +68,12 @@ import {
 import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { formatPlate, isManager, isSendableEmail } from "@/lib/constants";
+import { formatPlate, isManager, isSendableEmail, SKILL_LEVEL } from "@/lib/constants";
+import { DOCUMENT_REFRESH_MS, findFileUrl, sortDocuments } from "@/lib/documents";
 import { formatDate, formatDateTime, formatDocument, initials } from "@/lib/format";
 import { labelMap, useOnboardingCatalog } from "@/lib/onboarding";
 import { useCan } from "@/lib/permissions";
-import { useMailEnabled } from "@/lib/queries";
+import { useMailEnabled, useTechCatalog } from "@/lib/queries";
 import { REVIEW_ACTION_LABEL, technicianHref } from "@/lib/technicians";
 import type {
   ApplicationApproved,
@@ -81,9 +84,11 @@ import type {
   EmailQueued,
   InviteState,
   OnboardingInvite,
+  SkillLevel,
   TechnicianRegion,
   TemporaryPassword,
   User,
+  UUID,
 } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
 
@@ -95,6 +100,43 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "rejected", label: "Reprovadas" },
   { key: "links", label: "Links de cadastro" },
 ];
+
+/** A aba na URL (`?aba=`); sem ela, Pendentes. */
+const TAB_PARAM: Record<Tab, string | null> = { pending: null, approved: "aprovadas", rejected: "reprovadas", links: "links" };
+
+/**
+ * O que a lista guarda na URL (aba, busca, UF, áreas e "Com veículo"): recarregar, mandar o link e o Voltar mantêm. O que
+ * não se reconhece fica vazio.
+ */
+interface ListUrl {
+  tab: Tab;
+  q: string;
+  uf: string;
+  areas: string[];
+  vehicle: boolean;
+}
+
+function readListUrl(params: Pick<URLSearchParams, "get">): ListUrl {
+  const aba = params.get("aba");
+  const uf = (params.get("uf") ?? "").trim().toUpperCase();
+  return {
+    tab: (Object.keys(TAB_PARAM) as Tab[]).find((key) => aba !== null && TAB_PARAM[key] === aba) ?? "pending",
+    q: params.get("q") ?? "",
+    uf: /^[A-Z]{2}$/.test(uf) ? uf : "",
+    areas: [
+      ...new Set(
+        (params.get("area") ?? "")
+          .split(",")
+          .map((key) => key.trim())
+          .filter(Boolean),
+      ),
+    ],
+    vehicle: params.get("veiculo") === "sim",
+  };
+}
+
+/** A ficha aberta por esta tela (o Voltar e o Fechar a tiram da URL). */
+type FichaState = { mfFicha?: string } | null;
 
 // Cores dos estados: neutro no que é normal; vermelho só no que foi cancelado ou recusado.
 const NEUTRAL = "#64748b";
@@ -141,16 +183,47 @@ function OnboardingView() {
   const canEdit = useCan("base.onboarding", "edit");
   const searchParams = useSearchParams();
   const now = useNow(60_000);
-  const [tab, setTab] = useState<Tab>("pending");
-  const [openedId, setOpenedId] = useState<string | null>(() => searchParams.get("ficha"));
+  // A aba e os filtros ficam na URL (por replaceSearch, sem entrada no histórico).
+  const [initial] = useState(() => readListUrl(searchParams));
+  const [tab, setTab] = useState<Tab>(initial.tab);
+  const [q, setQ] = useState(initial.q);
+  const [uf, setUf] = useState(initial.uf);
+  const [areaFilter, setAreaFilter] = useState<string[]>(initial.areas);
+  const [withVehicle, setWithVehicle] = useState(initial.vehicle);
+  // A URL mudou com a tela aberta (o link do menu, Voltar, um link com outros filtros): mostra o que ela diz.
+  const urlChange = useSearchChange();
+  if (urlChange) {
+    const next = readListUrl(urlChange);
+    if (next.tab !== tab) setTab(next.tab);
+    if (next.q !== q) setQ(next.q);
+    if (next.uf !== uf) setUf(next.uf);
+    if (next.areas.join(",") !== areaFilter.join(",")) setAreaFilter(next.areas);
+    if (next.vehicle !== withVehicle) setWithVehicle(next.vehicle);
+  }
+  useEffect(() => {
+    replaceSearch({
+      aba: TAB_PARAM[tab],
+      q: q || null,
+      uf: uf || null,
+      area: areaFilter.length ? areaFilter.join(",") : null,
+      veiculo: withVehicle ? "sim" : null,
+    });
+  }, [tab, q, uf, areaFilter, withVehicle]);
+  // A ficha aberta é a da URL (?ficha=): abrir por aqui cria uma entrada no histórico (o Voltar fecha), e recarregar ou
+  // mandar o link mantém; o "Ver ficha da homologação" da ficha do técnico chega com ela.
+  const fichaParam = searchParams.get("ficha");
+  const openedId = isUuid(fichaParam) ? fichaParam : null;
+  // Fechando pelo Voltar: até a URL mudar, um segundo Esc não pode voltar mais uma entrada (sairia da tela).
+  const closingRef = useRef(false);
+  useEffect(() => {
+    closingRef.current = false;
+  }, [openedId]);
   // Convite aberto: novo (sem dados) ou "gerar outro igual" a um link da lista.
   const [inviting, setInviting] = useState<{ preset?: InvitePreset } | null>(null);
-  const [q, setQ] = useState("");
-  const [uf, setUf] = useState("");
-  const [areaFilter, setAreaFilter] = useState<string[]>([]);
-  const [withVehicle, setWithVehicle] = useState(false);
   const catalog = useOnboardingCatalog();
   const areas = useMemo(() => labelMap(catalog.data?.service_areas), [catalog.data]);
+  // O filtro de áreas: as ativas do catálogo (API de antes da Entrega 2: as fixas da ficha, pelo código).
+  const areaCatalog = useTechCatalog("areas", true);
 
   const applications = useQuery({
     queryKey: ["onboarding", "applications", tab],

@@ -306,6 +306,8 @@ describe("a lista", () => {
     assert.equal(documentSentText({ via: "app", uploaded_by: null }, "25/11/2026"), "Enviado pelo técnico em 25/11/2026");
     assert.equal(documentSentText({ via: "central", uploaded_by: ANA }, "25/11/2026"), "Enviado por Analista Exemplo em 25/11/2026");
     assert.equal(documentSentText({ via: "ficha", uploaded_by: null }, "25/11/2026"), "Da ficha da homologação, 25/11/2026");
+    // Quem enviou pela central saiu do sistema (uploaded_by null): fica a central.
+    assert.equal(documentSentText({ via: "central", uploaded_by: null }, "25/11/2026"), "Enviado pela central em 25/11/2026");
   });
 });
 

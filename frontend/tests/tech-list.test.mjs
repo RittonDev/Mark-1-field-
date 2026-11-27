@@ -1,6 +1,6 @@
 // Lista de Técnicos (lib/techListFilter.ts): a região de atuação, a cidade sem acento e sem maiúsculas, a
 // disponibilidade e a regra das contagens — cada opção de cada filtro conta exatamente as linhas que a lista mostra ao
-// escolhê-la. Também os favoritos por técnico e as colunas novas da planilha. 8 técnicos fictícios.
+// escolhê-la. Também os favoritos por técnico e as colunas novas da planilha. 9 técnicos fictícios.
 // Sem dependência nova: node:test com o type stripping do Node 22.
 // Na pasta frontend: node --experimental-strip-types --test "tests/*.test.mjs"
 import assert from "node:assert/strict";
@@ -28,7 +28,7 @@ import {
 } from "../src/lib/techListFilter.ts";
 
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-const [ALFA, BETA, CHARLIE, DELTA, ECHO, FOXTROT, GOLF, HOTEL] = [1, 2, 3, 4, 5, 6, 7, 8].map(uuid);
+const [ALFA, BETA, CHARLIE, DELTA, ECHO, FOXTROT, GOLF, HOTEL, INDIA] = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(uuid);
 const [REDES, CFTV, SEM_USO] = [11, 12, 13].map(uuid);
 const [LINUX, CABEAMENTO] = [21, 22].map(uuid);
 const [MULTIMETRO, ESCADA] = [31, 32].map(uuid);
@@ -140,6 +140,8 @@ const LIST = [
     availability: ["mon:morning", "mon:afternoon"],
     level: { tier: "gold", at_risk: true },
   }),
+  // A casa sem a UF: a opção vale a cidade em qualquer UF.
+  tech(INDIA, "Tecnico India", { home_city: "Cidade Exemplo" }),
 ];
 
 /** Os favoritos efetivos (GET /technicians/favorites, a consulta da aba Favoritos). */
@@ -187,6 +189,7 @@ describe("região de atuação e cidade", () => {
       "Tecnico Foxtrot",
       "Tecnico Golf",
       "Tecnico Hotel",
+      "Tecnico India",
     ]);
     assert.deepEqual(rows(q({ cidade: { city: "Cidade Exemplo", state: "RJ" } })), ["Tecnico Foxtrot"]);
     // A casa de quem tem base não conta (Alfa mora em Cidade Exemplo, mas a base é São Paulo).
@@ -197,9 +200,11 @@ describe("região de atuação e cidade", () => {
     const { cities } = listFacets(LIST, EMPTY, CTX);
     assert.deepEqual(
       cities.map((c) => `${c.label}:${c.count}`),
-      ["Água Branca-AL:1", "Belém-PA:1", "Cidade Exemplo-RJ:1", "Cidade Exemplo-SP:2", "São Paulo-SP:2"],
+      ["Água Branca-AL:1", "Belém-PA:1", "Cidade Exemplo:4", "Cidade Exemplo-RJ:1", "Cidade Exemplo-SP:2", "São Paulo-SP:2"],
     );
     assert.ok(cities.findIndex((c) => c.label === "Água Branca-AL") < cities.findIndex((c) => c.label === "Belém-PA"));
+    // A cidade sem UF conta quem está nela em qualquer UF: o que a lista mostra ao escolhê-la.
+    assert.equal(count(q({ cidade: { city: "Cidade Exemplo", state: null } })), 4);
   });
 
   it("com a UF escolhida, só as cidades dela", () => {
@@ -343,21 +348,22 @@ describe("contagem igual ao filtro", () => {
     });
   }
 
-  it("nenhuma cidade fica de fora das opções (as com alguém)", () => {
-    for (const [, base] of BASES) {
-      const facets = listFacets(LIST, base, CTX);
-      // Quem passa por todos os filtros menos a cidade e tem região está em alguma opção.
-      const withRegion = LIST.filter((t) => regionOf(t) && matchesList(t, base, CTX, "cidade")).length;
-      assert.equal(
-        facets.cities.reduce((sum, c) => sum + c.count, 0),
-        withRegion,
-      );
-      assert.ok(facets.cities.every((c) => c.count > 0));
+  it("nenhuma cidade fica de fora das opções e nenhuma opção vem vazia", () => {
+    for (const [name, base] of BASES) {
+      const keys = listFacets(LIST, base, CTX).cities.map((c) => c.key);
+      // Quem passa por todos os filtros menos a cidade e tem região está na opção da cidade e UF dele.
+      const expected = LIST.filter((t) => regionOf(t) && matchesList(t, base, CTX, "cidade")).map((t) => cityOptionKey(regionOf(t)));
+      assert.deepEqual([...keys].sort(), [...new Set(expected)].sort(), name);
+      assert.ok(listFacets(LIST, base, CTX).cities.every((c) => c.count > 0), name);
     }
   });
 
   it("o elo: null quando a API ainda não manda", () => {
-    const old = LIST.map(({ level, ...rest }) => rest);
+    const old = LIST.map((t) => {
+      const copy = { ...t };
+      delete copy.level;
+      return copy;
+    });
     assert.equal(listFacets(old, EMPTY, CTX).elo, null);
     assert.deepEqual(listFacets(LIST, EMPTY, CTX).elo, { bronze: 1, silver: 1, gold: 2, diamond: 1, at_risk: 2 });
   });

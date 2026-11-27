@@ -159,6 +159,7 @@ export interface CityOption {
   state: string | null;
   /** "São Paulo-SP" (a grafia mais comum entre os técnicos). */
   label: string;
+  /** As linhas ao escolhê-la; sem UF, a cidade em qualquer UF. */
   count: number;
 }
 
@@ -216,8 +217,9 @@ export function listFacets(list: readonly Technician[], q: TechListQuery, ctx: L
   };
   const elo = zeros<LevelTier | "at_risk">([...LIST_TIERS, "at_risk"]);
   let knownLevel = false;
-  // Por cidade: quantos e as grafias (a mais comum vira o rótulo).
-  const cities = new Map<string, { state: string | null; count: number; names: Map<string, number> }>();
+  // Por cidade e UF: quantos e as grafias (a mais comum vira o rótulo). Por cidade (sem acento), quantos em todas as UFs.
+  const cities = new Map<string, { name: string; state: string | null; count: number; names: Map<string, number> }>();
+  const anyState = new Map<string, number>();
 
   for (const t of list) {
     if (t.level) knownLevel = true;
@@ -230,10 +232,12 @@ export function listFacets(list: readonly Technician[], q: TechListQuery, ctx: L
       const region = regionOf(t);
       if (region) {
         const key = cityOptionKey(region);
-        const entry = cities.get(key) ?? { state: region.state, count: 0, names: new Map<string, number>() };
+        const name = cityKey(region.city);
+        const entry = cities.get(key) ?? { name, state: region.state, count: 0, names: new Map<string, number>() };
         entry.count += 1;
         entry.names.set(region.city, (entry.names.get(region.city) ?? 0) + 1);
         cities.set(key, entry);
+        anyState.set(name, (anyState.get(name) ?? 0) + 1);
       }
     }
     if (only("uf", "cidade")) {
@@ -269,7 +273,10 @@ export function listFacets(list: readonly Technician[], q: TechListQuery, ctx: L
       // A grafia mais comum (as de uma cidade só mudam em acento, maiúsculas e espaços); no empate, a que aparece
       // primeiro na lista, que vem em ordem de nome.
       const city = [...entry.names.entries()].reduce((best, next) => (next[1] > best[1] ? next : best))[0];
-      return { key, city, state: entry.state, label: entry.state ? `${city}-${entry.state}` : city, count: entry.count };
+      // Sem UF (cadastro sem a UF), a escolha vale a cidade em qualquer UF, como o `cidade` sem "-UF" da URL: conta
+      // também quem está nela com UF.
+      const count = entry.state ? entry.count : (anyState.get(entry.name) ?? entry.count);
+      return { key, city, state: entry.state, label: entry.state ? `${city}-${entry.state}` : city, count };
     })
     .sort((a, b) => collator.compare(a.city, b.city) || (a.state ?? "").localeCompare(b.state ?? ""));
   return facets;
