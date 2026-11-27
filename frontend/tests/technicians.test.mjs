@@ -137,20 +137,32 @@ describe("menu da ficha (os 4 grupos)", () => {
 
 describe("filtros da lista na URL", () => {
   const URL_TEXT = "acesso=sem-acesso&dia=sab&turno=manha&incompleto=recebimento&elo=ouro&ordem=ultima-os";
+  const EMPTY = listQueryFrom(new URLSearchParams());
+
+  it("sem nada na URL: tudo vazio, pela ordem padrão", () => {
+    assert.deepEqual(EMPTY, {
+      q: "",
+      uf: "",
+      cidade: null,
+      situacao: "",
+      acesso: "",
+      area: "",
+      aptidao: "",
+      ferramenta: "",
+      grupo: "",
+      dia: "",
+      turno: "",
+      favorito: false,
+      certificacao: "",
+      incompleto: "",
+      elo: "",
+      ordem: "name",
+    });
+  });
 
   it("listQueryFrom: grafias da URL para o estado", () => {
     const q = listQueryFrom(new URLSearchParams(URL_TEXT));
-    assert.deepEqual(
-      { acesso: q.acesso, dia: q.dia, turno: q.turno, incompleto: q.incompleto, elo: q.elo, ordem: q.ordem },
-      { acesso: "false", dia: "sat", turno: "morning", incompleto: "payout", elo: "gold", ordem: "visit" },
-    );
-    assert.deepEqual({ q: q.q, uf: q.uf, cidade: q.cidade, grupo: q.grupo, ferramenta: q.ferramenta }, {
-      q: "",
-      uf: "",
-      cidade: "",
-      grupo: "",
-      ferramenta: "",
-    });
+    assert.deepEqual(q, { ...EMPTY, acesso: "false", dia: "sat", turno: "morning", incompleto: "payout", elo: "gold", ordem: "visit" });
   });
 
   it("listQueryPatch volta às mesmas grafias; o vazio sai da URL", () => {
@@ -159,29 +171,58 @@ describe("filtros da lista na URL", () => {
       q: null,
       uf: null,
       cidade: null,
-      grupo: null,
+      situacao: null,
       acesso: "sem-acesso",
+      area: null,
+      aptidao: null,
       ferramenta: null,
+      grupo: null,
       dia: "sab",
       turno: "manha",
+      favorito: null,
+      certificacao: null,
       incompleto: "recebimento",
       elo: "ouro",
       ordem: "ultima-os",
     });
   });
 
+  it("ida e volta com os filtros novos", () => {
+    const text = `situacao=inativo&area=${ID}&aptidao=${ID2}&favorito=sim&certificacao=vencendo&cidade=Cidade%20Exemplo-SP`;
+    const q = listQueryFrom(new URLSearchParams(text));
+    assert.deepEqual(q, {
+      ...EMPTY,
+      situacao: "inactive",
+      area: ID,
+      aptidao: ID2,
+      favorito: true,
+      certificacao: "vencendo",
+      cidade: { city: "Cidade Exemplo", state: "SP" },
+    });
+    const back = Object.fromEntries(Object.entries(listQueryPatch(q)).filter(([, value]) => value !== null));
+    assert.deepEqual(back, Object.fromEntries(new URLSearchParams(text)));
+  });
+
   it("ida e volta com todos os filtros", () => {
-    const text = `q=Tecnico%20Alfa&uf=SP&cidade=Cidade%20Exemplo&grupo=${ID}&acesso=liberado&ferramenta=${ID}&dia=dom&turno=madrugada&incompleto=celular&elo=em-risco&ordem=elo`;
+    const text =
+      `q=Tecnico%20Alfa&uf=SP&cidade=Cidade%20Exemplo-SP&situacao=bloqueado&acesso=liberado&area=${ID}&aptidao=${ID2}` +
+      `&ferramenta=${ID}&grupo=${ID2}&dia=dom&turno=madrugada&favorito=sim&certificacao=vencendo&incompleto=celular` +
+      "&elo=em-risco&ordem=elo";
     const q = listQueryFrom(new URLSearchParams(text));
     assert.deepEqual(q, {
       q: "Tecnico Alfa",
       uf: "SP",
-      cidade: "Cidade Exemplo",
-      grupo: ID,
+      cidade: { city: "Cidade Exemplo", state: "SP" },
+      situacao: "blocked",
       acesso: "true",
+      area: ID,
+      aptidao: ID2,
       ferramenta: ID,
+      grupo: ID2,
       dia: "sun",
       turno: "night",
+      favorito: true,
+      certificacao: "vencendo",
       incompleto: "phone",
       elo: "at_risk",
       ordem: "level",
@@ -192,9 +233,12 @@ describe("filtros da lista na URL", () => {
 
   it("cada grafia de cada filtro vai e volta", () => {
     const values = {
+      situacao: ["ativo", "inativo", "bloqueado"],
       acesso: ["liberado", "sem-acesso"],
       dia: ["seg", "ter", "qua", "qui", "sex", "sab", "dom"],
       turno: ["manha", "tarde", "noite", "madrugada"],
+      favorito: ["sim"],
+      certificacao: ["vencendo"],
       incompleto: ["celular", "regiao", "servicos", "gps", "recebimento"],
       elo: ["bronze", "prata", "ouro", "diamante", "em-risco"],
       ordem: ["ultima-os", "elo"],
@@ -208,37 +252,107 @@ describe("filtros da lista na URL", () => {
     }
   });
 
-  it("valor desconhecido vira vazio; sem ordem, por nome", () => {
+  it("valor desconhecido e id que não é UUID viram vazio; sem ordem, por nome", () => {
     const q = listQueryFrom(
-      new URLSearchParams("acesso=todos&dia=sabado&turno=x&incompleto=pix&elo=gold&ordem=nome&uf=Sao%20Paulo&grupo=abc&ferramenta=1"),
+      new URLSearchParams(
+        "situacao=ativa&acesso=todos&dia=sabado&turno=x&incompleto=pix&elo=gold&ordem=nome&uf=Sao%20Paulo&grupo=abc" +
+          "&ferramenta=1&area=Redes&aptidao=123&favorito=1&certificacao=vencidas",
+      ),
     );
-    assert.deepEqual(
-      [q.acesso, q.dia, q.turno, q.incompleto, q.elo, q.uf, q.grupo, q.ferramenta],
-      ["", "", "", "", "", "", "", ""],
-    );
-    assert.equal(q.ordem, "name");
-    assert.equal(listQueryFrom(new URLSearchParams()).ordem, "name");
-    assert.equal(listQueryPatch(listQueryFrom(new URLSearchParams())).ordem, null);
+    assert.deepEqual(q, EMPTY);
+    // UF que não existe também sai.
+    assert.equal(listQueryFrom(new URLSearchParams("uf=XX")).uf, "");
+    assert.equal(listQueryPatch(EMPTY).ordem, null);
+    assert.ok(Object.values(listQueryPatch(EMPTY)).every((value) => value === null));
   });
 
   it("aceita maiúsculas e espaços nas grafias; UF em maiúsculas", () => {
-    const q = listQueryFrom(new URLSearchParams("dia=SAB&turno=%20Manha%20&uf=sp"));
+    const q = listQueryFrom(
+      new URLSearchParams("dia=SAB&turno=%20Manha%20&uf=sp&situacao=ATIVO&favorito=Sim&certificacao=%20Vencendo%20"),
+    );
     assert.equal(q.dia, "sat");
     assert.equal(q.turno, "morning");
     assert.equal(q.uf, "SP");
+    assert.equal(q.situacao, "active");
+    assert.equal(q.favorito, true);
+    assert.equal(q.certificacao, "vencendo");
   });
 
-  it("listCityOf: a cidade da lista só com a UF; a busca dos Favoritos chega com o -UF", () => {
-    assert.equal(listCityOf("Cidade Exemplo-SP", "SP"), "Cidade Exemplo");
-    assert.equal(listCityOf("Cidade Exemplo-sp", "SP"), "Cidade Exemplo");
-    assert.equal(listCityOf("São Paulo-SP", "SP"), "São Paulo");
-    assert.equal(listCityOf("Cidade Exemplo", "SP"), "Cidade Exemplo");
-    assert.equal(listCityOf("Cidade Exemplo-RJ", "SP"), "Cidade Exemplo-RJ");
-    assert.equal(listCityOf("Cidade Exemplo-SP", ""), "");
-    assert.equal(listCityOf("", "SP"), "");
-    // O link "Favorito em" da ficha (favoritesHref) chega na lista como a cidade.
-    const q = listQueryFrom(new URLSearchParams("aba=favoritos&uf=SP&cidade=Cidade%20Exemplo-SP"));
-    assert.equal(listCityOf(q.cidade, q.uf), "Cidade Exemplo");
+  it("parseCityParam: a cidade e a UF do fim; sem ela, a do uf; sem nenhuma, qualquer UF; vazio, null", () => {
+    assert.deepEqual(parseCityParam("Cidade Exemplo-SP"), { city: "Cidade Exemplo", state: "SP" });
+    assert.deepEqual(parseCityParam("Cidade Exemplo-sp"), { city: "Cidade Exemplo", state: "SP" });
+    assert.deepEqual(parseCityParam("Cidade Exemplo", "SP"), { city: "Cidade Exemplo", state: "SP" });
+    assert.deepEqual(parseCityParam("Cidade Exemplo"), { city: "Cidade Exemplo", state: null });
+    // "-XX" que não é UF fica no nome.
+    assert.deepEqual(parseCityParam("Cidade Exemplo-XX"), { city: "Cidade Exemplo-XX", state: null });
+    assert.deepEqual(parseCityParam("Embu-Guaçu-SP"), { city: "Embu-Guaçu", state: "SP" });
+    assert.deepEqual(parseCityParam("Embu-Guaçu"), { city: "Embu-Guaçu", state: null });
+    // A UF do fim vale mais que o uf; os espaços a mais saem.
+    assert.deepEqual(parseCityParam("  Cidade   Exemplo - RJ ", "SP"), { city: "Cidade Exemplo", state: "RJ" });
+    assert.equal(parseCityParam(""), null);
+    assert.equal(parseCityParam("   ", "SP"), null);
+    assert.equal(parseCityParam(null), null);
+  });
+
+  it("cityParam: Cidade-UF; sem UF, só a cidade; volta igual pela URL", () => {
+    assert.equal(cityParam("Cidade Exemplo", "SP"), "Cidade Exemplo-SP");
+    assert.equal(cityParam("Cidade Exemplo", null), "Cidade Exemplo");
+    assert.deepEqual(parseCityParam(cityParam("Embu-Guaçu", "SP")), { city: "Embu-Guaçu", state: "SP" });
+  });
+
+  it("o link antigo (cidade e uf) e o da aba Favoritos (Cidade-UF) dão a mesma cidade", () => {
+    const old = listQueryFrom(new URLSearchParams("uf=SP&cidade=Cidade%20Exemplo"));
+    const favorites = listQueryFrom(new URLSearchParams("aba=favoritos&uf=SP&cidade=Cidade%20Exemplo-SP"));
+    assert.deepEqual(old.cidade, { city: "Cidade Exemplo", state: "SP" });
+    assert.deepEqual(favorites.cidade, old.cidade);
+    // Gravado de novo, o link antigo vira Cidade-UF.
+    assert.equal(listQueryPatch(old).cidade, "Cidade Exemplo-SP");
+    // Sem UF nenhuma: a cidade em qualquer UF.
+    assert.deepEqual(listQueryFrom(new URLSearchParams("cidade=Cidade%20Exemplo")).cidade, { city: "Cidade Exemplo", state: null });
+  });
+
+  it("a cidade de outra UF que a escolhida sai (como ao trocar a UF na tela)", () => {
+    const q = listQueryFrom(new URLSearchParams("uf=RJ&cidade=Cidade%20Exemplo-SP"));
+    assert.equal(q.uf, "RJ");
+    assert.equal(q.cidade, null);
+  });
+
+  it("hasStateSuffix: só a busca da aba Favoritos que termina numa UF vale como cidade na lista", () => {
+    assert.equal(hasStateSuffix("Cidade Exemplo-SP"), true);
+    assert.equal(hasStateSuffix("Cidade Exemplo - rj"), true);
+    assert.equal(hasStateSuffix("Cidade Exemplo"), false);
+    assert.equal(hasStateSuffix("Tecnico Alfa"), false);
+    assert.equal(hasStateSuffix("Cidade Exemplo-XX"), false);
+    assert.equal(hasStateSuffix(""), false);
+    assert.equal(hasStateSuffix(null), false);
+  });
+
+  it("hasListFilter e clearedListQuery: Limpar filtros apaga todos, menos a ordem", () => {
+    assert.equal(hasListFilter(EMPTY), false);
+    // A ordem sozinha não é filtro.
+    assert.equal(hasListFilter({ ...EMPTY, ordem: "visit" }), false);
+    assert.equal(hasListFilter({ ...EMPTY, q: "   " }), false);
+    const one = [
+      { q: "Tecnico Alfa" },
+      { cidade: { city: "Cidade Exemplo", state: null } },
+      { uf: "SP" },
+      { situacao: "active" },
+      { acesso: "false" },
+      { area: ID },
+      { aptidao: ID },
+      { ferramenta: ID },
+      { grupo: ID },
+      { dia: "mon" },
+      { turno: "night" },
+      { favorito: true },
+      { certificacao: "vencendo" },
+      { incompleto: "gps" },
+      { elo: "gold" },
+    ];
+    for (const patch of one) assert.equal(hasListFilter({ ...EMPTY, ...patch }), true, JSON.stringify(patch));
+    const cleared = clearedListQuery("level");
+    assert.deepEqual(cleared, { ...EMPTY, ordem: "level" });
+    assert.equal(hasListFilter(cleared), false);
   });
 });
 

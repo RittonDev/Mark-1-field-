@@ -162,7 +162,8 @@ export function sendFavorite(techId: UUID, place: Place, change: Change) {
 /**
  * Depois de gravar: o cartão (e a seção Favoritos da ficha) muda na hora com a cidade que a API devolveu; a lista de um
  * técnico (a ficha) ganha ou perde a cidade conforme ele ficou favorito, tirado ou nada nela. A lista, a OS (estrela e
- * ordem do Colaborador), as sugestões, a estrela da lista de Técnicos e o histórico do cadastro releem.
+ * ordem do Colaborador), a estrela e o filtro da lista de Técnicos (todos na consulta dos favoritos), as sugestões e o
+ * histórico do cadastro (a API grava a mudança nele) releem.
  */
 function applyDetail(queryClient: QueryClient, detail: FavoriteCityDetail) {
   queryClient.setQueryData(detailKey(detail.state, detail.key), detail);
@@ -181,7 +182,6 @@ function applyDetail(queryClient: QueryClient, detail: FavoriteCityDetail) {
   }
   void queryClient.invalidateQueries({ queryKey: ["technician-favorites"] });
   void queryClient.invalidateQueries({ queryKey: ["technician-suggest"] });
-  void queryClient.invalidateQueries({ queryKey: ["technicians", "list"] });
   void queryClient.invalidateQueries({ queryKey: ["technicians", "changes"] });
 }
 

@@ -164,6 +164,14 @@ const years = (n: number) => `${n} ${n === 1 ? "ano" : "anos"}`;
 /** Desde quando a ficha espera análise: a reaberta conta da reabertura (como a exclusão automática). */
 const waitingSince = (a: ApplicationSummary) => a.reopened_at ?? a.created_at;
 
+/**
+ * As áreas de atuação da ficha pelo nome: as gravadas, com o nome de agora (também as desativadas); na API de antes da
+ * Entrega 2 (sem `areas`), os códigos pelo catálogo da ficha.
+ */
+function areaNames(a: Pick<ApplicationSummary, "areas" | "service_areas">, labels: Record<string, string>): string[] {
+  return Array.isArray(a.areas) ? a.areas.map((ref) => ref.name) : a.service_areas.map((key) => labels[key] ?? key);
+}
+
 /** Motivo de reabrir: de 3 a 500 caracteres (o mesmo da API). */
 const REOPEN_MAX = 500;
 
@@ -262,9 +270,43 @@ function OnboardingView() {
     setAreaFilter([]);
     setWithVehicle(false);
   };
+  // As opções do filtro de áreas: as ativas do catálogo e as que as fichas desta aba citam (também as desativadas, para
+  // filtrar pelo que a coluna mostra), em ordem alfabética. A da URL que não está em nenhuma continua marcada.
+  const areaOptions = useMemo(() => {
+    const names = new Map<string, string>();
+    if (areaCatalog.data) for (const item of areaCatalog.data) names.set(item.id, item.name);
+    else for (const item of catalog.data?.service_areas ?? []) names.set(item.key, item.label);
+    for (const a of all) for (const ref of a.areas ?? []) if (!names.has(ref.id)) names.set(ref.id, ref.name);
+    for (const key of areaFilter) if (!names.has(key)) names.set(key, areas[key] ?? "Área removida");
+    return [...names]
+      .map(([value, label]) => ({ value, label }))
+      .sort((x, y) => x.label.localeCompare(y.label, "pt-BR", { sensitivity: "base" }));
+  }, [areaCatalog.data, catalog.data, all, areaFilter, areas]);
+  /** A ficha numa aba nova (Ctrl/⌘+clique, botão do meio): a mesma aba da lista por trás. */
+  const fichaHref = (id: UUID) => {
+    const params = new URLSearchParams();
+    const aba = TAB_PARAM[tab];
+    if (aba) params.set("aba", aba);
+    params.set("ficha", id);
+    return `/homologacao?${params.toString()}`;
+  };
+  // Abrir pela lista cria a entrada no histórico (o Voltar fecha), como o painel da OS.
+  const openApplication = (id: UUID) => {
+    if (openedId === id) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("ficha", id);
+    const state: FichaState = { mfFicha: id };
+    window.history.pushState(state, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+  // Aberta por aqui: volta a entrada (o Avançar reabre). Pelo link ou depois de recarregar: só tira o ?ficha.
   const closeApplication = () => {
-    setOpenedId(null);
-    if (searchParams.get("ficha")) replaceSearch({ ficha: null });
+    if (!openedId || closingRef.current) return;
+    if ((window.history.state as FichaState)?.mfFicha === openedId) {
+      closingRef.current = true;
+      window.history.back();
+    } else {
+      replaceSearch({ ficha: null });
+    }
   };
 
   if (!canView) return <NoAccess kind="module" item="base.onboarding" />;
@@ -327,7 +369,7 @@ function OnboardingView() {
                   ariaLabel="Áreas de atuação"
                   value={areaFilter}
                   onChange={setAreaFilter}
-                  options={(catalog.data?.service_areas ?? []).map((s) => ({ value: s.key, label: s.label }))}
+                  options={areaOptions}
                 />
               </div>
               <Checkbox label="Com veículo" checked={withVehicle} onChange={setWithVehicle} />
@@ -386,7 +428,7 @@ function OnboardingView() {
                         key={a.id}
                         className="cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
                         onClick={(e) => {
-                          if (e.currentTarget.contains(e.target as Node)) setOpenedId(a.id);
+                          if (e.currentTarget.contains(e.target as Node)) openApplication(a.id);
                         }}
                       >
                         <Td>
@@ -396,7 +438,20 @@ function OnboardingView() {
                             </span>
                             <span className="min-w-0">
                               <span className="flex min-w-0 items-center gap-1.5">
-                                <span className="truncate font-semibold text-ink">{a.full_name}</span>
+                                {/* Link real: o clique abre a ficha aqui; Ctrl/⌘+clique e o botão do meio, em outra aba. */}
+                                <Link
+                                  href={fichaHref(a.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!isPlainClick(e)) return;
+                                    e.preventDefault();
+                                    openApplication(a.id);
+                                  }}
+                                  onAuxClick={(e) => e.stopPropagation()}
+                                  className="truncate rounded font-semibold text-ink underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                                >
+                                  {a.full_name}
+                                </Link>
                                 {a.status === "pending" && a.reopened_at ? (
                                   <span title={`Reaberta em ${formatDateTime(a.reopened_at)}`} className="inline-flex shrink-0">
                                     <Pill color={NEUTRAL}>Reaberta</Pill>
@@ -422,9 +477,7 @@ function OnboardingView() {
                           {a.city}-{a.state}
                         </Td>
                         <Td className="hidden lg:table-cell">
-                          <span className="line-clamp-2 text-xs text-ink-muted">
-                            {a.service_areas.map((k) => areas[k] ?? k).join(" · ")}
-                          </span>
+                          <span className="line-clamp-2 text-xs text-ink-muted">{areaNames(a, areas).join(" · ")}</span>
                         </Td>
                         <Td className="hidden sm:table-cell">
                           {a.years_experience != null ? years(a.years_experience) : "—"}
@@ -454,7 +507,7 @@ function OnboardingView() {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setOpenedId(a.id);
+                              openApplication(a.id);
                             }}
                             className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-brand shadow-elev-1 transition-[border-color,background-color] duration-150 hover:border-brand/40 hover:bg-brand-soft focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
                             aria-label={`${canEdit ? "Analisar" : "Ver"} a ficha de ${a.full_name}`}
@@ -669,7 +722,11 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
   const detail = useQuery({
     queryKey: ["onboarding", "application", id],
     queryFn: () => api.get<ApplicationDetail>(`/onboarding/applications/${id}`),
+    // Os links assinados dos documentos valem 30 min: a ficha aberta relê a cada 20.
+    refetchInterval: DOCUMENT_REFRESH_MS,
   });
+  /** Abrir um arquivo com a ficha lida há muito: relê a ficha e acha o link novo (no atual ou nas versões). */
+  const refetchFile = async (fileId: UUID) => findFileUrl((await detail.refetch()).data?.documents ?? [], fileId);
   // Quantos técnicos ativos já atendem a cidade e a UF do candidato (para decidir se a região precisa dele).
   const regions = useQuery({
     queryKey: ["technicians", "regions", "true"],
@@ -896,6 +953,7 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
         <ApplicationView
           application={a}
           labels={{ areas, availability, levels, vehicles }}
+          files={{ fetchedAt: detail.dataUpdatedAt, refetchFile }}
           coverage={coverage}
           approveError={pending ? approve.error : null}
           resend={
@@ -913,12 +971,15 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
 function ApplicationView({
   application: a,
   labels,
+  files,
   coverage,
   approveError,
   resend,
 }: {
   application: ApplicationDetail;
   labels: Record<"areas" | "availability" | "levels" | "vehicles", Record<string, string>>;
+  /** Os documentos da ficha: quando ela foi lida (os links valem 30 min) e como achar o link novo de um arquivo. */
+  files: { fetchedAt: number; refetchFile: (fileId: UUID) => Promise<string | null> };
   coverage: { inCity: number; inState: number } | null;
   approveError: unknown;
   /** "Reenviar validação" (ficha pendente com o e-mail sem validar, com Editar); `off`: envio de e-mail desligado. */
@@ -945,6 +1006,9 @@ function ApplicationView({
     a.company_name ? `Razão social ${a.company_name}` : null,
     a.company_trade_name ? `Nome fantasia ${a.company_trade_name}` : null,
   ].filter((line): line is string => Boolean(line));
+  // Os arquivos que o candidato mandou depois da ficha (API de antes da Entrega 2: nenhum). Aprovada, eles passam para o
+  // técnico e continuam aqui.
+  const documents = sortDocuments(a.documents ?? []);
   return (
     <div className="flex flex-col gap-5">
       {approveError ? <ErrorBox title="Não foi possível aprovar" message={errorMessage(approveError)} /> : null}
@@ -1041,9 +1105,9 @@ function ApplicationView({
       ) : null}
       <Section title="Atuação">
         <div className="flex flex-wrap gap-1.5">
-          {a.service_areas.map((k) => (
-            <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
-              {areas[k] ?? k}
+          {areaNames(a, areas).map((name, i) => (
+            <span key={`${name}-${i}`} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
+              {name}
             </span>
           ))}
         </div>
@@ -1054,10 +1118,14 @@ function ApplicationView({
       {a.skills.length ? (
         <Section title="Aptidões">
           <ul className="grid gap-1 sm:grid-cols-2">
-            {a.skills.map((s) => (
-              <li key={s.name} className="flex items-center justify-between gap-2 rounded-md border border-line px-2.5 py-1">
-                <span className="truncate">{s.name}</span>
-                <span className="shrink-0 text-xs text-ink-muted">{levels[s.level] ?? s.level}</span>
+            {a.skills.map((s, i) => (
+              <li key={s.skill_id ?? `${s.name}-${i}`} className="flex items-center justify-between gap-2 rounded-md border border-line px-2.5 py-1">
+                <span className="truncate" title={s.name}>
+                  {s.name}
+                </span>
+                <span className="shrink-0 text-xs text-ink-muted">
+                  {SKILL_LEVEL[s.level as SkillLevel] ?? levels[s.level] ?? s.level}
+                </span>
               </li>
             ))}
           </ul>
@@ -1066,6 +1134,18 @@ function ApplicationView({
       {a.bio ? (
         <Section title="Mini biografia">
           <p className="whitespace-pre-line">{a.bio}</p>
+        </Section>
+      ) : null}
+      {documents.length ? (
+        <Section title="Documentos">
+          <ul className="flex flex-col divide-y divide-line">
+            {documents.map((doc) => (
+              <li key={doc.id} className="py-2 first:pt-0 last:pb-0">
+                {/* Só consulta: a ficha não edita (aprovada, os documentos são do técnico, na ficha dele). */}
+                <DocumentRow doc={doc} fetchedAt={files.fetchedAt} refetchFile={files.refetchFile} canEdit={false} showKind />
+              </li>
+            ))}
+          </ul>
         </Section>
       ) : null}
       {a.certifications || a.tools || a.notes ? (

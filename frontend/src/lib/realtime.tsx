@@ -334,8 +334,39 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
  */
 const PROFILE_KEYS = ["technicians", "users", "technician-favorites", "technician-suggest", "assignable", "tracking"];
 
-/** Partes do perfil técnico: mudadas pelo técnico, só atualizam a base técnica (e as sugestões, se for a disponibilidade). */
-const TECH_PROFILE_FIELDS: readonly string[] = ["tools", "availability", "transport", "skills", "education"];
+/**
+ * O que só a base técnica mostra (a lista, o cadastro aberto com os documentos e as avaliações dele e o histórico, tudo
+ * sob ["technicians"]): o perfil técnico (pelo app ou pela central), os documentos e anexos internos, as avaliações do
+ * cliente e os favoritos. Mudar só isso não relê usuários, atribuíveis nem o mapa; o resto que cada um desatualiza está
+ * em PROFILE_FIELD_KEYS.
+ */
+const TECH_PROFILE_FIELDS: readonly string[] = [
+  "tools",
+  "availability",
+  "transport",
+  "skills",
+  "education",
+  "areas",
+  "documents",
+  "internal_attachments",
+  "ratings",
+  "favorites",
+];
+
+/**
+ * O que mais um campo do cadastro desatualiza: as sugestões de técnico (a disponibilidade, as áreas de atuação e os
+ * favoritos pesam nelas), quantos técnicos usam cada item dos catálogos (filtros de Técnicos e Configurações ›
+ * Técnicos), os favoritos por cidade (a aba, a ficha, a estrela da lista e a ordem do Colaborador na OS) e o Início
+ * (técnicos com certificação vencendo).
+ */
+const PROFILE_FIELD_KEYS: ReadonlyMap<string, readonly QueryKey[]> = new Map<string, readonly QueryKey[]>([
+  ["availability", [["technician-suggest"]]],
+  ["areas", [["technician-suggest"], ["technician-areas"]]],
+  ["skills", [["technician-skills"]]],
+  ["tools", [["technician-tools"]]],
+  ["favorites", [["technician-favorites"], ["technician-suggest"]]],
+  ["documents", [["dashboard", "home"]]],
+]);
 
 // Telas que listam OS ou dependem delas, além da própria OS: só as abertas buscam de novo.
 const ALL_EXTRA = ["expenses", "payouts", "quotes", "repairs", "reports", "projects", "project", "customer", "location", "technicians"];
@@ -795,15 +826,13 @@ export function RealtimeProvider({
         const raw: unknown = event.data?.fields;
         const fields: string[] = Array.isArray(raw) ? raw.map(String) : [];
         if (fields.length && fields.every((f) => TECH_PROFILE_FIELDS.includes(f))) {
-          // ["technicians"] cobre a lista, o cadastro aberto (["technicians", "one", id]) e o histórico dele
-          // (["technicians", "changes", id], com as páginas já abertas).
+          // ["technicians"] cobre a lista, o cadastro aberto (["technicians", "one", id]), os documentos e as
+          // avaliações dele e o histórico (["technicians", "changes", id], com as páginas já abertas).
           invalidate(["technicians"]);
-          if (fields.includes("availability")) invalidate(["technician-suggest"]);
         } else {
           for (const key of PROFILE_KEYS) invalidate([key]);
         }
-        // Quantos técnicos marcaram cada ferramenta (filtro de Técnicos e Configurações › Técnicos).
-        if (fields.includes("tools")) invalidate(["technician-tools"]);
+        for (const field of fields) for (const key of PROFILE_FIELD_KEYS.get(field) ?? []) invalidate(key);
         // O destino do pagamento (a linha de recebimento e o "Nova" em Pagamentos).
         if (fields.some((field) => PAYOUT_FIELDS.includes(field))) invalidate(["payouts"]);
       } else if (type === "part_request.created") {
