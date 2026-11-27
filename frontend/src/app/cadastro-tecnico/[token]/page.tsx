@@ -773,6 +773,11 @@ function loadSent(token: string): SentState | null {
   }
 }
 
+/** A ficha que acabou de sair: ainda sem arquivo nem cartão. */
+function sentNow(result: SubmitResult, login: string): SentState {
+  return { ...result, login, documents: [], drafts: [], savedAt: Date.now() };
+}
+
 function saveSent(token: string, sent: SentState) {
   try {
     window.sessionStorage.setItem(SENT_KEY + token, JSON.stringify(sent));
@@ -1078,7 +1083,7 @@ export default function TechnicianSignupPage() {
         },
       });
       clearDraft();
-      setSent({ ...res, login: form.email.trim().toLowerCase(), documents: [], drafts: [], savedAt: Date.now() });
+      setSent(sentNow(res, form.email.trim().toLowerCase()));
       window.scrollTo({ top: 0 });
     } catch (error) {
       if (error instanceof ApiError && error.status === 410) {
