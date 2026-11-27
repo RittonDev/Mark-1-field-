@@ -327,9 +327,10 @@ O site recebe só um código de uso único (60 s) e troca pelos tokens, que nunc
   (422) e a gravação desfeita por outra ao mesmo tempo (503 "Outra gravação ao mesmo tempo. Tente de novo") deixam no
   log só o SQLSTATE, o nome da restrição e a rota (pelo nome dos parâmetros), nunca o texto do erro do banco, que
   traria o valor (o CPF de um índice único, por exemplo).
-- **Texto livre sem invisíveis:** os nomes de aptidão, curso, instituição e ferramenta se gravam sem caracteres de
-  controle nem invisíveis (espaço de largura zero, marcas de direção como U+202E), que fariam dois nomes iguais
-  parecerem diferentes ou embaralhariam a ficha e o CSV; no app, a conferência é a mesma.
+- **Texto livre sem invisíveis:** os nomes de aptidão, área de atuação, curso, instituição e ferramenta e os títulos dos
+  documentos se gravam sem caracteres de controle nem invisíveis (espaço de largura zero, marcas de direção como
+  U+202E), que fariam dois nomes iguais parecerem diferentes ou embaralhariam a ficha e o CSV; no app, a conferência é
+  a mesma.
 - **Conta invadida não desvia pagamento:** e-mail, dados da empresa e formas de recebimento do técnico pedem a senha
   atual no app (5 erros em 15 minutos bloqueiam, somando a troca de senha) e ficam fechados com a senha provisória; a
   central é avisada na hora e, se a troca vem até 72 h depois de a central redefinir a senha, o aviso diz quem
