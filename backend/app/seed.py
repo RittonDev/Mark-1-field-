@@ -451,7 +451,8 @@ async def seed() -> None:
             asset_id=a["imp_rh"].id,
         )
 
-        # 3. Atribuída e agendada (campo)
+        # 3. Atribuída e agendada (campo). Agendar, pausar e devolver são da central: o técnico só
+        # sai, inicia e conclui (workflow.TECHNICIAN_TARGETS) e nunca mexe no horário.
         t3 = await ticket(
             supervisor,
             title="Desktop do financeiro não liga",
@@ -465,7 +466,7 @@ async def seed() -> None:
         )
         await move(
             t3,
-            carlos,
+            supervisor,
             TicketStatus.SCHEDULED,
             scheduled_start=now + timedelta(hours=3),
             scheduled_end=now + timedelta(hours=4),
@@ -531,7 +532,7 @@ async def seed() -> None:
             assignee_id=carlos.id,
         )
         t6 = await move(t6, carlos, TicketStatus.IN_PROGRESS)
-        await move(t6, carlos, TicketStatus.ON_HOLD_VENDOR, note="Pedido de compra 4471")
+        await move(t6, supervisor, TicketStatus.ON_HOLD_VENDOR, note="Pedido de compra 4471")
 
         # 7. Aguardando cliente
         t7 = await ticket(
@@ -546,7 +547,7 @@ async def seed() -> None:
         )
         await move(
             t7,
-            juliana,
+            supervisor,
             TicketStatus.ON_HOLD_CUSTOMER,
             note="Aguardando a diretora informar o modelo do celular",
         )
