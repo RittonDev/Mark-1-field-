@@ -1016,11 +1016,11 @@ os limites e os avisos de rede. Código: `src/app/configuracoes/`, [src/lib/tech
 - **Gravações em fila** ([src/lib/profile.ts](src/lib/profile.ts), `writeProfile`): salvar, enviar a foto e removê-la,
   as formas de recebimento, o link do e-mail (enviar e cancelar a troca) e os documentos (enviar, substituir, editar e
   excluir) saem uma por vez, e cada uma guarda o `MyProfile` que voltou (a seguinte espera a anterior responder, e não
-  sai se a sessão mudou na espera; a resposta sem corpo faz a fila reler o cadastro). Uma leitura durante a qual uma
-  gravação saiu, voltou ou ficou no ar não desfaz a tela (fica o que a gravação devolveu). O servidor também grava uma
-  por vez por técnico, também quando a central grava junto: a gravação seguinte que a fila solta quando a anterior
-  passou dos 20 s sem resposta (ou a de outro aparelho, ou a da central) espera a anterior terminar no servidor e não
-  apaga o que ela gravou; central e app mudando a mesma parte quase juntos, vale a última gravação.
+  sai se a sessão mudou na espera; nos documentos, a resposta sem corpo faz a fila reler o cadastro). Uma leitura
+  durante a qual uma gravação saiu, voltou ou ficou no ar não desfaz a tela (fica o que a gravação devolveu). O servidor
+  também grava uma por vez por técnico, também quando a central grava junto: a gravação seguinte que a fila solta
+  quando a anterior passou dos 20 s sem resposta (ou a de outro aparelho, ou a da central) espera a anterior terminar
+  no servidor e não apaga o que ela gravou; central e app mudando a mesma parte quase juntos, vale a última gravação.
 - **A central mudou o cadastro** (desde 26/11/2026: o perfil profissional, os documentos e os outros dados que a ficha
   da central edita): o tempo real manda só a este técnico o `me.profile_changed`, sem dados
   ([src/lib/realtime.ts](src/lib/realtime.ts) repassa o evento, e [src/lib/sync.ts](src/lib/sync.ts) o trata antes da
@@ -1222,7 +1222,7 @@ src/
     estatisticas.tsx   Estatísticas: o total, a chegada no horário e os quatro gráficos de 12 meses (/me/stats)
     elo.tsx            Meu elo: a medalha, risco, o que falta para a próxima faixa, números, o que pesou e "Como funciona"
     conta.tsx          Sincronização (a rota continua /conta): sincronização, fila, avisos recusados, rastreamento, notificações e aparelho (?secao=)
-    configuracoes/     Configurações: index.tsx (o menu: os 3 grupos de TECH_SECTION_GROUPS e o App); dados pessoais e cadastrais (foto, dados-pessoais, endereco, contato, biografia); financeiros e empresariais (empresa, recebimento; pix só redireciona para recebimento); perfil profissional (disponibilidade, que é Dias e horários, transporte, formacao, aptidoes, ferramental); notificacoes
+    configuracoes/     Configurações: index.tsx (o menu: os 3 grupos de TECH_SECTION_GROUPS e o App); dados pessoais e cadastrais (foto, dados-pessoais, endereco, contato, documentos e documento, que inclui e edita uma certificação ou um documento pessoal, biografia); financeiros e empresariais (empresa, recebimento; pix só redireciona para recebimento); perfil profissional (disponibilidade, que é Dias e horários, transporte, curriculo, formacao, areas, que é Áreas de atuação, aptidoes, ferramental); notificacoes
     meu-cadastro.tsx   só redireciona para /configuracoes (links antigos)
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
     privacidade.tsx    Aviso de privacidade (LGPD), só leitura; abrir grava a versão vista pelo técnico
@@ -1244,7 +1244,7 @@ src/
     offer/OfferHero.tsx  topo da oferta: o desenho de mapa da área com o chip bairro · cidade
     RoundBackButton.tsx  voltar redondo das telas sem o cabeçalho nativo (a oferta)
     billing/           aba Faturamento: BillingView (a aba), BillingTotals, PixRow (a forma de recebimento preferencial), BillingMonthCard, StateIcon, SituationBox, OtherMonth ("Outro mês"), MonthEarnings (o mês) e HideValuesButton (o olho)
-    settings/          peças de Configurações: ChoiceChips, CheckCard, Checkbox, DayCard, SkillSheet, EducationSheet, MonthField, FormSheet, FixedFooter, OfflineNotice, ProfileGate, ProfileFormScreen, PasswordSheet (a folha da senha atual, com título e botão por ação), PasswordField (o campo Senha atual), PayoutMethodSheet (chave PIX e conta), PeriodSheet (indisponibilidade), VehicleSheet (veículo), EmailPendingBox (troca de e-mail esperando o link), CadastroUnavailable (o aviso com a API de antes do cadastro V2) e SavingStatus
+    settings/          peças de Configurações: ChoiceChips, CheckCard, Checkbox, DayCard, SkillSheet ("Editar aptidão": só o nível), SkillCatalogSheet ("Adicionar aptidão": várias do catálogo, com um nível), EducationSheet, MonthField, FormSheet, FixedFooter, OfflineNotice, ProfileGate, ProfileFormScreen, PasswordSheet (a folha da senha atual, com título e botão por ação), PasswordField (o campo Senha atual), PayoutMethodSheet (chave PIX e conta), PeriodSheet (indisponibilidade), VehicleSheet (veículo), EmailPendingBox (troca de e-mail esperando o link), FileField (o arquivo do documento e do currículo: escolher, tirar foto, da galeria, abrir e trocar), CentralStamp ("Atualizado pela central em …"), CadastroUnavailable (o aviso com a API de antes do cadastro V2 ou da gestão) e SavingStatus
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico (viz1 e vizGrid: os gráficos)
   theme/fonts.ts       Manrope (pesos 400–700) e o mapeamento de fontWeight para a família
   lib/
@@ -1252,16 +1252,20 @@ src/
     account.ts         /auth/me e troca de senha
     auth.ts            login, Sair e o pedido do "Esqueci minha senha" (requestPasswordReset)
     forgotPassword.ts  Esqueci minha senha: textos, o que o pedido deu (forgotOutcome) e o e-mail que o login entrega à tela pela memória (puro, com sonda)
-    profile.ts         o cadastro só na memória (GET/PATCH /me/profile, com o perfil técnico; hasCadastroV2), as gravações em fila (writeProfile: o PATCH, a foto, as formas de recebimento e o link do e-mail) e a foto reduzida no aparelho (expo-image-manipulator)
+    profile.ts         o cadastro só na memória (GET/PATCH /me/profile, com o perfil técnico e os documentos; hasCadastroV2 e hasCadastroE2), as gravações em fila (writeProfile: o PATCH, a foto, as formas de recebimento, o link do e-mail e os documentos), a releitura quando a central muda o cadastro (profileChangedElsewhere, pelo me.profile_changed) e a foto reduzida no aparelho (expo-image-manipulator)
     profileForm.ts useProfileForm.ts  telas do cadastro em Configurações (Dados pessoais, Endereço e CEP, Contato e e-mail, Mini biografia, Dados empresariais e o veículo): as regras e os resumos (puro, com sonda) e o estado do formulário, com a pergunta antes de enviar ("Confira o CPF")
     cep.ts             busca de CEP do Endereço (GET /public/cep, logado): achou e não achou na memória até a troca de sessão; nunca lança
     payoutMethods.ts   formas de recebimento: as rotas /me/profile/payout-methods, com a senha, na fila das gravações
     payoutForm.ts banks.ts  a folha da chave PIX e da conta, a próxima preferencial, os textos e quando reler a lista depois de uma falha (payoutListStale) (puro, com sonda); os 29 bancos sugeridos, com o código de compensação (conferir na lista do STR do Banco Central)
     unavailability.ts  indisponibilidade: a folha do período, o corpo do PATCH e o resumo de Dias e horários (puro, com sonda)
     avatarFlow.ts      Foto do perfil: tirar, escolher, remover, o andamento e a recuperação no Android
-    technicalProfile.ts  perfil profissional: o estado das telas, a trava das listas (Aptidões, Formação, Formas de recebimento e Indisponibilidade), o aviso UNAVAILABLE e os catálogos na memória (ferramental e sugestões de aptidão)
-    techProfileForm.ts  regras do perfil técnico e o redutor do salvar ao tocar (puro, com sonda)
-    autoSave.ts        salvar ao tocar dos turnos (Dias e horários), do Transporte e do Ferramental (0,6 s, um envio por vez)
+    documents.ts       documentos e currículo: as rotas /me/profile/documents (enviar, substituir, editar, excluir e o link de 30 min), na fila das gravações do cadastro
+    documentRules.ts   regras dos documentos e do currículo: o tipo e o tamanho do arquivo, o formulário, os campos do envio e da troca, o PATCH só do que mudou, os blocos e os resumos das linhas do menu (puro, com sonda)
+    documentFile.ts pickedFile.ts  o arquivo do documento e do currículo: o seletor do sistema, a câmera ou a galeria, a cópia em cache/documentos/<uuid>/ e a limpeza; pickedFile.web.ts com <input type="file">
+    resumeFlow.ts      Currículo: escolher já envia, excluir, o andamento (a tela e a linha do menu) e a recuperação da foto no Android
+    technicalProfile.ts  perfil profissional e as telas da gestão: o estado das telas (com o que cada uma pede a mais do cadastro, como hasCadastroE2), a trava das listas (Aptidões, Formação, Formas de recebimento, Indisponibilidade e Documentos), o aviso UNAVAILABLE e os catálogos na memória (ferramental, aptidões e áreas de atuação)
+    techProfileForm.ts  regras do perfil técnico (as aptidões do catálogo, a busca, o corpo pelo id ou pelo nome e o carimbo da central) e o redutor do salvar ao tocar (puro, com sonda)
+    autoSave.ts        salvar ao tocar dos turnos (Dias e horários), do Transporte, das Áreas de atuação e do Ferramental (0,6 s, um envio por vez)
     logout.ts          o Sair do Perfil: confirmação, "Enviar e sair" e o andamento
     navigation.ts      openSync (a Sincronização com ?secao=) e openTicketAnywhere (a OS do aparelho ou da central)
     syncSummary.ts     o resumo da linha Sincronização (Perfil e Configurações)
@@ -1284,12 +1288,12 @@ src/
     visitReminders.ts  lembretes da visita (1 dia, 1h40 e 10 min antes): plano e textos, sem import nativo
     onsiteAlerts.ts    notificações locais do tempo na loja
     backgroundSync.ts  sincronização fora da tela (jornada e tarefa periódica); .web.ts sem efeito
-    sync.ts            motor de sync, fila, fotos, gatilhos
+    sync.ts            motor de sync, fila, fotos, gatilhos (o me.profile_changed só relê o cadastro, sem rodada)
     offers.ts          ofertas de OS: lista guardada, prazo pelo relógio do servidor, "Escopo lido" (com a hora que vai no aceite) e avisos
     invoices.ts        notas fiscais: /me/invoices (lista guardada por competência, envio, exclusão, abrir arquivo) e a versão que relê o Faturamento
     invoiceFile.ts     arquivo da nota: seletor do sistema ou foto, cópia no cache; .web.ts com <input type="file">
     level.ts           Meu elo: o elo guardado (kv my_level), leitura nas telas, comemoração da subida (com a medalha) e datas
-    realtime.ts        WebSocket
+    realtime.ts        WebSocket (os eventos das OS e o me.profile_changed, só deste técnico)
     sla.ts             porta de backend/app/services/sla.py::compute_sla_status
     device.ts          POST/DELETE /devices (o servidor diz se o push chega: live ou simulated)
 tests/                 sondas das regras puras (node:test); resolve-ts.mjs registra o gancho que resolve "./masks" para "./masks.ts"; stubs/ tem os dublês (SecureStore, API, React, Expo) da sonda que roda session.ts e profile.ts de verdade
@@ -1301,7 +1305,10 @@ Saíram nesta versão: `components/EarningsView.tsx` (virou `components/billing/
 `billing/PixRow.tsx`) e o formulário de `app/meu-cadastro.tsx` (virou `app/configuracoes/`). No cadastro V2
 (25/11/2026), a tela Chave PIX (`app/configuracoes/pix.tsx`) virou só um redirecionamento para Formas de recebimento
 (`recebimento.tsx`), e saíram de `profileForm.ts` as regras dela (`PIX_SECTION`, `reviewPix`, `pixSummary`, `NO_PIX`) e
-o `NAME_SECTION` (Dados pessoais agora é o `PERSONAL_SECTION`, com o nome, o CPF, o RG e o nascimento).
+o `NAME_SECTION` (Dados pessoais agora é o `PERSONAL_SECTION`, com o nome, o CPF, o RG e o nascimento). Na gestão
+(26/11/2026), as aptidões passaram a vir do catálogo da central: saíram de `techProfileForm.ts` o `skillProblem` e o
+`suggestionsFor` e de `technicalProfile.ts` o `useSkillSuggestions` e o `reloadSkillSuggestions` (as sugestões da
+ficha), no lugar de `useSkillCatalog`, `skillsAdd`, `skillKey` e `skillsBody`.
 
 ## Verificações
 
