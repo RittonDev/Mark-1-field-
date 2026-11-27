@@ -283,7 +283,7 @@ async def test_same_body_again_changes_nothing(
 
 
 async def test_central_edit_sends_me_profile_changed_only_to_the_technician(
-    client: AsyncClient, world: World, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A central mudou algo que o app mostra: a central recebe o profile.changed de sempre e o
     técnico, só ele, o me.profile_changed sem dados (o app relê GET /me/profile). Nada para o
@@ -336,10 +336,8 @@ async def test_central_edit_sends_me_profile_changed_only_to_the_technician(
     assert _types(events) == ["profile.changed"]
 
     # Favoritos: só a central.
-    maker = async_sessionmaker(engine_of(client), expire_on_commit=False) if False else None
-    assert maker is None
+    await _add_store(engine, world)
     events.clear()
-    await _add_store(client, world)
     r = await client.put(
         f"{API}/technicians/favorites/{tech_id}",
         json={"state": "SP", "city": "Cidade Exemplo"},
@@ -397,18 +395,20 @@ async def test_central_edit_sends_me_profile_changed_only_to_the_technician(
     assert hidden.isdisjoint(user_history.APP_FIELDS)
 
 
-def engine_of(_: AsyncClient) -> None:  # pragma: no cover - só para o tipo acima
-    return None
-
-
-async def _add_store(client: AsyncClient, world: World) -> None:
+async def _add_store(engine: AsyncEngine, world: World) -> None:
     """Uma loja em Cidade Exemplo-SP (os favoritos são por cidade de loja)."""
-    r = await client.post(
-        f"{API}/customers/{world.customer_id}/locations",
-        json={"name": "Loja Exemplo", "city": "Cidade Exemplo", "state": "SP"},
-        headers=world.admin.headers,
-    )
-    assert r.status_code in (200, 201), r.text
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        db.add(
+            Location(
+                customer_id=uuid.UUID(world.customer_id),
+                name="Loja Exemplo",
+                city="Cidade Exemplo",
+                state="SP",
+                is_active=True,
+            )
+        )
+        await db.commit()
 
 
 # ------------------------------------------------------------------ aptidões e mensagens
@@ -527,7 +527,7 @@ async def test_central_uses_the_app_messages(
         r = await _patch(client, world, **body)
         assert (r.status_code, r.json()) == (422, expected), body
 
-    labeled: list[tuple[dict[str, Any], tuple[str, str]]] = [
+    labeled: list[tuple[dict[str, Any], tuple[str, str | None]]] = [
         ({"availability": ["sat:lunch"]}, ("Disponibilidade", "Turno desconhecido: sat:lunch")),
         ({"transport": None}, ("Transporte", "Informe os meios de transporte")),
         ({"vehicle_plate": "12"}, ("Placa", "Placa inválida: confira as letras e os números")),
@@ -668,14 +668,12 @@ async def test_technician_out_brings_areas_certification_and_ratings(
         soon = certification("NR35 Exemplo", today + timedelta(days=10))
         later = certification("NR33 Exemplo", today + timedelta(days=90))
         db.add_all([expired, soon, later])
-        location = await db.get(Location, uuid.UUID(world.location_id))
-        assert location is not None
         tickets = [
             Ticket(
                 title="Visita de exemplo",
                 status=TicketStatus.CLOSED,
                 customer_id=uuid.UUID(world.customer_id),
-                location_id=location.id,
+                location_id=uuid.UUID(world.location_id),
                 assignee_id=tech,
             )
             for _ in range(4)
