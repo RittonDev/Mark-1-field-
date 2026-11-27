@@ -230,17 +230,16 @@ function LevelRulesForm({
   };
 
   /** A regra: o nome em negrito, a linha de apoio, o estado e o Aprovar (o conteúdo vem em `children`). */
-  const rule = (key: LevelRuleKey, children: React.ReactNode, className?: string) => {
+  const rule = (key: LevelRuleKey, children: React.ReactNode) => {
     const status = rules.items[key];
     const state = status?.state ?? "pending";
     const support = supportText(key, status);
     return (
       <div
-        key={key}
         id={ruleId(key)}
         role="group"
         aria-labelledby={`${ruleId(key)}-nome`}
-        className={["flex min-w-0 scroll-mt-32 flex-col gap-2.5 rounded-lg border border-line p-3", className].filter(Boolean).join(" ")}
+        className="flex min-w-0 scroll-mt-32 flex-col gap-2.5 rounded-lg border border-line p-3"
       >
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
           <div className="min-w-0">
@@ -277,6 +276,7 @@ function LevelRulesForm({
   const opening = openingLine(draft);
 
   return (
+    // A barra de alteração não salva é filha direta do formulário: presa ao rodapé enquanto o cartão está na tela.
     <form
       id={formId}
       noValidate
@@ -284,17 +284,18 @@ function LevelRulesForm({
         e.preventDefault();
         submit();
       }}
+      className="flex flex-col px-5 pt-4 pb-5"
     >
       <Situation rules={rules} />
       {changedElsewhere ? (
-        <div className="flex flex-col items-start gap-2 px-5 pt-4">
+        <div className="flex flex-col items-start gap-2 pt-4">
           <ErrorBox message="As regras do elo mudaram em outra tela." />
           <Button size="sm" onClick={onReload} loading={reloading}>
             Recarregar
           </Button>
         </div>
       ) : null}
-      <fieldset disabled={busy} className="m-0 flex min-w-0 flex-col gap-6 border-0 p-5">
+      <fieldset disabled={busy} className="m-0 flex min-w-0 flex-col gap-6 border-0 p-0 pt-5">
         <Block title="Categorias">
           <div className="grid gap-3 lg:grid-cols-2">
             {rule(
@@ -487,16 +488,14 @@ function LevelRulesForm({
         </Block>
       </fieldset>
       {dirty ? (
-        <div className="px-5 pb-5">
-          <UnsavedBar message="Regras do elo alteradas e não salvas">
-            <Button onClick={discard} disabled={busy}>
-              Descartar
-            </Button>
-            <Button type="submit" variant="primary" loading={save.isPending} disabled={approve.isPending}>
-              Salvar regras
-            </Button>
-          </UnsavedBar>
-        </div>
+        <UnsavedBar message="Regras do elo alteradas e não salvas">
+          <Button onClick={discard} disabled={busy}>
+            Descartar
+          </Button>
+          <Button type="submit" variant="primary" loading={save.isPending} disabled={approve.isPending}>
+            Salvar regras
+          </Button>
+        </UnsavedBar>
       ) : null}
     </form>
   );
@@ -507,7 +506,7 @@ function Situation({ rules }: { rules: LevelRules }) {
   const define = rules.missing?.define ?? [];
   const approve = rules.missing?.approve ?? [];
   return (
-    <section aria-label="Situação" className="mx-5 mt-4 flex flex-col gap-1 rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-ink-muted">
+    <section aria-label="Situação" className="flex flex-col gap-1 rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-ink-muted">
       {rules.active ? null : (
         <p>
           <strong className="font-semibold text-ink">Ainda não ativo.</strong> O elo de 12 meses continua valendo.
@@ -668,9 +667,10 @@ function BandTable({
                 <Td className="align-top">
                   <LevelBadge tier={row.tier} size="md" className="mt-1.5" />
                 </Td>
-                <Td className="align-top tabular-nums">{field ?? <span className="inline-block pt-1.5">{number(row.from)}</span>}</Td>
+                {/* Os textos na altura do meio do campo (o selo e o número alinhados com ele). */}
+                <Td className="align-top tabular-nums">{field ?? <span className="inline-block pt-2">{number(row.from)}</span>}</Td>
                 <Td className="align-top text-ink-muted tabular-nums">
-                  <span className="inline-block pt-1.5">{i === rows.length - 1 ? last : number(row.to)}</span>
+                  <span className="inline-block pt-2">{i === rows.length - 1 ? last : number(row.to)}</span>
                 </Td>
               </tr>
             );

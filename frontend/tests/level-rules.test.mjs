@@ -470,11 +470,11 @@ function pythonItem(text, key) {
 
 describe("leitura do backend (as funções da sonda)", () => {
   it("pythonInt, pythonBlock, pythonLabels e pythonItem", () => {
-    const module = 'COUNT_MAX = 100000\nPOINTS_MAX: int = 1_000_000\nREASON_MIN, REASON_MAX = 10, 500\nX = f"{COUNT_MAX}"\n';
-    assert.equal(pythonInt(module, "COUNT_MAX"), 100000);
-    assert.equal(pythonInt(module, "POINTS_MAX"), 1000000);
-    assert.equal(pythonInt(module, "REASON_MAX"), 500);
-    assert.equal(pythonInt(module, "X"), undefined);
+    const source = 'COUNT_MAX = 100000\nPOINTS_MAX: int = 1_000_000\nREASON_MIN, REASON_MAX = 10, 500\nX = f"{COUNT_MAX}"\n';
+    assert.equal(pythonInt(source, "COUNT_MAX"), 100000);
+    assert.equal(pythonInt(source, "POINTS_MAX"), 1000000);
+    assert.equal(pythonInt(source, "REASON_MAX"), 500);
+    assert.equal(pythonInt(source, "X"), undefined);
 
     const schema = 'RULE_KEYS: tuple[str, ...] = (\n    "count_bands",\n    "points_bands",\n)\nRULE_LABELS: dict[str, str] = {\n    "count_bands": "Abertura por atendimentos",\n}\n';
     assert.deepEqual(pythonStrings(pythonBlock(schema, "RULE_KEYS")), ["count_bands", "points_bands"]);

@@ -15,6 +15,7 @@ from app.api.routes import (
     forms,
     home,
     invoices,
+    level_rules,
     messages,
     my_profile,
     offers,
@@ -75,6 +76,9 @@ for module in (
     expenses,
     company,
     field,
+    # Configurações › Elo (elo por pontos): /level-rules, /level-rules/approve e
+    # /level-rules/history.
+    level_rules,
     quotes,
     projects,
     repairs,

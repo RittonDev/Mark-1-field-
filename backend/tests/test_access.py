@@ -722,7 +722,7 @@ def test_resolve_rules() -> None:
         access_overrides = {"items": {"commercial.payouts": "view"}, "queue_unowned": True}
 
     acc = permissions.resolve(U(), P())
-    assert len(acc.items) == len(permissions.ITEM_KEYS) == 19
+    assert len(acc.items) == len(permissions.ITEM_KEYS) == 20
     assert acc.level("analysis.reports") == "view"  # Editar numa tela só de leitura vira Ver
     assert acc.level("setup.settings") == "none"  # padrão do analista
     assert acc.level("commercial.payouts") == "view"
@@ -744,13 +744,13 @@ async def test_me_and_login_bring_effective_access(client: AsyncClient, world: W
     )
     assert r.status_code == 200, r.text
     access = r.json()["user"]["access"]
-    assert len(access["items"]) == 19
+    assert len(access["items"]) == 20
     assert access["full"] is False
     assert access["items"]["setup.users"] == "view"
     assert access["items"]["setup.settings"] == "none"
     assert access["queues"] == {"scope": "all", "unowned": True}
     me = (await client.get(f"{API}/auth/me", headers=world.supervisor.headers)).json()
-    assert len(me["access"]["items"]) == 19 and me["access"]["items"]["setup.settings"] == "edit"
+    assert len(me["access"]["items"]) == 20 and me["access"]["items"]["setup.settings"] == "edit"
     tech = (await client.get(f"{API}/auth/me", headers=world.tech.headers)).json()
     assert tech["access"] is None
 
@@ -781,7 +781,7 @@ async def test_profile_crud(client: AsyncClient, world: World) -> None:
     assert (await client.post(f"{API}/access/profiles", json=body, headers=sup)).status_code == 403
     created = await new_profile(client, world, "Comercial", items={"analysis.dashboard": "none"})
     # Sem "começar igual a": o Analista, com as telas enviadas por cima (dicionário completo).
-    assert len(created["items"]) == 19
+    assert len(created["items"]) == 20
     assert created["items"]["setup.settings"] == "none"
     assert created["items"]["analysis.dashboard"] == "none"
     r = await client.post(f"{API}/access/profiles", json={"name": "comercial"}, headers=adm)
@@ -830,7 +830,7 @@ async def test_profile_crud(client: AsyncClient, world: World) -> None:
         "analysis",
         "setup",
     ]
-    assert sum(len(m["items"]) for m in catalog["modules"]) == 19
+    assert sum(len(m["items"]) for m in catalog["modules"]) == 20
     assert catalog["defaults"]["analyst"]["setup.users"] == "view"
 
 

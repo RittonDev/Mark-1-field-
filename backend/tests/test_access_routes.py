@@ -173,6 +173,12 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("PUT", "/settings/expenses"): (("setup.settings",), E),
     ("PUT", "/settings/field"): (("setup.settings",), E),
     ("PUT", "/ticket-tag-rules"): (("setup.settings",), E),
+    # Elo por pontos (Etapa 1): Configurações › Elo. Lê quem tem Configurações; grava e aprova
+    # Configurações em Editar, só administrador ou supervisor.
+    ("GET", "/level-rules"): (("setup.settings",), V),
+    ("GET", "/level-rules/history"): (("setup.settings",), V),
+    ("PUT", "/level-rules"): (("setup.settings",), E, MANAGER),
+    ("POST", "/level-rules/approve"): (("setup.settings",), E, MANAGER),
     # Catálogos de Configurações › Técnicos (Ferramental, Áreas de atuação e Aptidões): incluir,
     # renomear, desativar e excluir só o que nunca foi usado.
     ("POST", "/technician-tools"): (("setup.settings",), E),
@@ -474,10 +480,15 @@ def test_other_routes_keep_their_role_rules() -> None:
         assert found[key][0] == kind, (key, found[key])
 
 
+# "Elo: confirmar ocorrências" ganha as rotas nas Etapas 3 e 4 (abandono e retorno).
+NO_ROUTE_YET = {"base.level_confirm"}
+
+
 def test_every_screen_has_a_route() -> None:
     """Cada tela do catálogo protege ao menos uma rota (as só de leitura não têm "Editar")."""
     used = {item for spec in GUARDED.values() for item in spec[0]}
-    assert used == set(permissions.ITEM_KEYS)
+    assert not (used & NO_ROUTE_YET), "a tela já tem rota: tire de NO_ROUTE_YET"
+    assert used | NO_ROUTE_YET == set(permissions.ITEM_KEYS)
     for (_method, _path), (items, level, *_) in GUARDED.items():
         if level == E:
             assert all(permissions.ITEM_BY_KEY[i].levels[-1] == E for i in items)

@@ -666,6 +666,9 @@ class Report:
 
 
 WIPE_SQL = [
+    # O livro de pontos do elo é imutável (o gatilho recusa DELETE) e as FKs dele são RESTRICT:
+    # sai primeiro, por TRUNCATE (não dispara gatilho de linha).
+    ("technician_level_entries", "TRUNCATE technician_level_entries"),
     ("ticket_part_requests", "DELETE FROM ticket_part_requests"),
     ("quotes", "DELETE FROM quotes"),
     ("ticket_expenses", "DELETE FROM ticket_expenses"),

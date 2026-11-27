@@ -583,6 +583,15 @@ CONSTRAINT_MESSAGES: dict[str, str] = {
     ),
     "uq_technician_payout_methods_pix": "Esta chave PIX já está na lista",
     "uq_technician_payout_methods_bank": "Esta conta já está na lista",
+    # Livro de pontos do elo (services/level_ledger.py): o gatilho recusa UPDATE e DELETE (erro
+    # 23001 com o nome dele); o serviço trava o técnico e confere antes, os índices ficam de
+    # reserva para duas gravações juntas.
+    "technician_level_entries_immutable": (
+        "Lançamento de pontos não muda nem se apaga: use o estorno"
+    ),
+    "uq_technician_level_entries_occurrence": "Esta ocorrência já foi lançada no elo",
+    "uq_technician_level_entries_reverses_id": "Este lançamento já foi estornado",
+    "uq_technician_level_entries_seq": "Outro lançamento deste técnico entrou agora. Tente de novo",
 }
 CONFLICT = "Conflito de dados: registro duplicado ou referência inválida"
 
