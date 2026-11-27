@@ -660,20 +660,22 @@ O elo do técnico aparece como uma medalha, a patente ([src/components/LevelBadg
 
 **Perfil › Configurações** ([src/app/configuracoes/index.tsx](src/app/configuracoes/index.tsx)): o cadastro do técnico
 nos três grupos de seções que a central usa na ficha do técnico, com os mesmos nomes (`TECH_SECTION_GROUPS` em
-`lib/constants.ts`, cópia da web; só as seções desta entrega, `CADASTRO_DELIVERY`; "Credenciais" aqui é a linha
-"Senha"), mais o grupo App. Cada linha tem o resumo à direita (o rótulo fica com a largura dele, até metade da linha,
+`lib/constants.ts`, cópia da web; só as seções das entregas no ar, `CADASTRO_DELIVERY`, hoje 2: desde 26/11/2026, com
+Documentos, Currículo e Áreas de atuação; "Credenciais" aqui é a linha "Senha"), mais o grupo App. Cada linha tem o resumo à direita (o rótulo fica com a largura dele, até metade da linha,
 quebrando entre palavras, e o resumo fica com o resto, cortado com "…"; com a fonte do aparelho a partir de 1,3×, o
 resumo desce para baixo do rótulo; [src/components/MenuRow.tsx](src/components/MenuRow.tsx), o mesmo da lista do
-Perfil). Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do técnico", "Perfil técnico" e "Cadastro V2
-(2026-11-25)". O antigo Meu cadastro foi dividido nas telas abaixo; `/meu-cadastro` só redireciona para
+Perfil). Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do técnico", "Perfil técnico", "Cadastro V2
+(2026-11-25)" e "Gestão dos técnicos (2026-11-26)". O antigo Meu cadastro foi dividido nas telas abaixo; `/meu-cadastro` só redireciona para
 `/configuracoes`, e `/configuracoes/pix` (a antiga Chave PIX), para `/configuracoes/recebimento` (links antigos).
 
 - **Dados pessoais e cadastrais**: Foto do perfil (a foto à direita; enviando ou removendo, o andamento), Dados
   pessoais (o nome), Endereço ("Cidade Exemplo/SP" ou "Não informado"), Contato ("(11) 98888-7777"; "Sem celular" ou,
   com a troca de e-mail esperando o link, "E-mail pendente", em âmbar; com o envio de e-mail ligado e o login que recebe
   e-mail ainda sem validação, "E-mail não validado", neutro: sem validar, o "Esqueci minha senha" não chega a ele),
-  Senha (abre "Trocar senha") e Mini biografia (o texto numa linha, com os parágrafos juntados, ou "Não informada"; o
-  leitor de tela fala só o começo).
+  Senha (abre "Trocar senha"), Documentos (com certificação vencida, "1 vencida" ou "2 vencidas", senão a que vence
+  primeiro em até 30 dias, "Vence em 12 dias", as duas em âmbar; senão "3 documentos", "1 documento" ou "Nenhum"; o
+  currículo não conta) e Mini biografia (o texto numa linha, com os parágrafos juntados, ou "Não informada"; o leitor de
+  tela fala só o começo).
 - **Dados financeiros e empresariais**: Dados empresariais (o nome fantasia, senão a razão social, senão o CNPJ; nada,
   "Não informados") e Formas de recebimento (a preferencial mascarada, "PIX CPF •••.456.789-••" ou "Banco Exemplo
   ••••5678-9"; sem nenhuma, "Nenhuma" em âmbar; o leitor de tela fala só o tipo da chave ou o banco).
@@ -681,7 +683,9 @@ Perfil). Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do técnico",
   até 05/12"; senão os turnos, por `availabilitySummary` em `lib/constants.ts`: os dias com os mesmos turnos, seguidos
   ou não, como "Seg a sex · manhã e tarde", "Seg, qua e sex · manhã" e "Seg a qua e sex · manhã"; os 28 turnos, "Todos
   os dias · todos os turnos"; dias com turnos diferentes, "6 dias · turnos variados"; nada, "Não informados"),
-  Transporte ("Carro, Moto · com CNH", "Nenhum · sem CNH" ou "Não informado"), Formação, Aptidões e Ferramental
+  Transporte ("Carro, Moto · com CNH", "Nenhum · sem CNH" ou "Não informado"), Currículo ("Enviado" ou "Não enviado";
+  enviando ou excluindo, o indicador com "Enviando…" ou "Excluindo…", como a Foto do perfil), Formação, Áreas de atuação
+  ("3 áreas"; sem nenhuma, "Nenhuma" em âmbar: é a área que leva às sugestões de técnico), Aptidões e Ferramental
   ("3 aptidões", "1 formação", "Nenhuma"). Com a API antiga, "Indisponível".
 - **App**: Aparência (folha com Sistema, "Acompanha o modo do celular", Claro e Escuro), Notificações ("Ligadas",
   "Desligadas", "Bloqueadas" em âmbar ou "Indisponíveis") e Sincronização (o mesmo resumo do Perfil).
@@ -690,9 +694,14 @@ Perfil). Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do técnico",
   atualizar relê o cadastro e o resumo das notificações; voltar ao app (do navegador, do e-mail) com uma tela do
   cadastro aberta também relê, sem esconder a tela. Com a API de antes do cadastro V2 (`hasCadastroV2` em
   `lib/profile.ts`), Dados pessoais, Endereço, Contato, Mini biografia, Dados empresariais e Formas de recebimento dizem
-  "Indisponível"; Foto, Senha e o Perfil profissional seguem como antes.
+  "Indisponível"; Foto, Senha e o Perfil profissional seguem como antes. Com a API de antes da gestão (`hasCadastroE2`:
+  o cadastro sem `documents` ou sem `area_ids`), Documentos, Currículo e Áreas de atuação dizem "Indisponível" e as
+  Aptidões seguem pelo nome. O menu também envia, no Android, a foto do currículo tirada antes de o sistema fechar o app
+  com a câmera aberta (`useResumeRecovery`, como a da Foto do perfil).
 - Grupo, cargo, acesso ao app, situação na operação, serviços e jornada ficam com a central; o CPF, depois de
-  informado, só a central corrige.
+  informado, só a central corrige. Desde 26/11/2026, a central também muda o perfil profissional (com o veículo e a
+  indisponibilidade) e os documentos: o app relê sozinho (ver "Sem internet e o que fica no aparelho", abaixo). Os
+  anexos internos e as avaliações do cliente que a central guarda nunca chegam ao app.
 
 ### Cadastro: foto, dados pessoais, endereço, contato, mini biografia, empresa e formas de recebimento
 
@@ -830,15 +839,75 @@ gravam nada.
   (12 h), aparecem as iniciais.
 - O `expo-image-manipulator` é nativo e já vem no Expo Go; um development build feito antes dele precisa ser refeito.
 
-### Perfil profissional: dias e horários, transporte, formação, aptidões e ferramental
+### Documentos e currículo
+
+O que o técnico manda para a central: as certificações e os documentos pessoais (Configurações › Documentos, no grupo
+Dados pessoais e cadastrais) e o currículo (Configurações › Currículo, no Perfil profissional). A central vê na ficha do
+técnico, com as versões anteriores, e também envia, troca e exclui (o que ela muda aparece aqui como "enviado pela
+central"). As rotas `/me/profile/documents*` ([src/lib/documents.ts](src/lib/documents.ts)) saem na fila das gravações
+do cadastro (`writeProfile`), e cada uma guarda o `MyProfile` que volta (a lista vem em `MyProfile.documents`, sem
+link). As regras puras ficam em [src/lib/documentRules.ts](src/lib/documentRules.ts) (sonda `tests/documents.test.mjs`).
+Com a API de antes da gestão (`hasCadastroE2` falso), as três telas mostram "Indisponível no momento".
+
+- **Documentos** ([src/app/configuracoes/documentos.tsx](src/app/configuracoes/documentos.tsx)): os blocos
+  "Certificações" e "Documentos pessoais", na ordem do servidor (a certificação que vence primeiro em cima, sem validade
+  no fim; os documentos pelo título). Cada item tem o título em negrito, a validade no tom do problema (`documentDueText`:
+  "Vencida em 25/11/2026" em vermelho, "Vence em 12 dias" em âmbar, "Válida até 27/12/2026" neutro) e o arquivo ("PDF ·
+  enviado em 20/11/2026" ou "Foto · enviado pela central em 20/11/2026"). Tocar abre o formulário; "Adicionar
+  certificação" e "Adicionar documento" abrem o de incluir; a lixeira exclui, com a pergunta ("Excluir a
+  certificação?"), e um 404 relê o cadastro e conta como excluído. Uma exclusão por vez (`trackListWrite("documents")`),
+  também depois de sair e voltar. Vazio: "Nenhuma certificação." e "Nenhum documento.". Com 30 entre os dois blocos,
+  "Limite de 30 documentos e certificações. Exclua um para incluir outro." e os botões desligam. Sem rede, "Sem
+  internet: conecte o aparelho para enviar ou excluir.". O anexo interno nunca chega aqui. No fim, o link **Aviso de
+  privacidade**.
+- **Documento** ([src/app/configuracoes/documento.tsx](src/app/configuracoes/documento.tsx), `?grupo=certificacao` ou
+  `?grupo=pessoal` para incluir, `?id=` para editar; o título da tela é "Nova certificação", "Editar documento"…):
+  - **Título** (até 80), com as sugestões enquanto está vazio (`DOCUMENT_TITLE_SUGGESTIONS`: NR10, NR35, NR33 e NR12 na
+    certificação; RG, CNH, CPF e Comprovante de residência no documento pessoal);
+  - **Validade**, só na certificação e opcional, de 2000-01-01 a hoje + 20 anos, com o texto do vencimento no tom (no
+    iPhone, nas rodas de dia, mês e ano, porque a data costuma estar a anos de hoje);
+  - **Arquivo** ([src/components/settings/FileField.tsx](src/components/settings/FileField.tsx)): sem arquivo, "Escolher
+    arquivo" (o seletor do sistema, PDF ou foto) e, numa linha, "Tirar foto" e "Da galeria"; com arquivo, o cartão com
+    o nome, o tipo e o tamanho, "Abrir" (só o gravado: o link de 30 min é pedido na hora) e "Trocar".
+
+  Erros: "Informe o título.", "No máximo 80 caracteres.", "Confira a validade.", "Escolha o arquivo.", "Use PDF ou foto
+  (JPG, PNG ou WebP)." e "Arquivo maior que 10 MB.". Incluir manda o arquivo com os dados (`POST /me/profile/documents`);
+  editar com arquivo novo troca o arquivo (`…/replace`, só com o que mudou; "" tira a validade) e a central guarda o
+  anterior; só os dados vão no `PATCH`. O tipo nunca muda. Cada arquivo leva um `client_upload_id`, repetido nas
+  tentativas do mesmo arquivo: a resposta perdida não vira documento repetido. Sem rede, avisa e o formulário fica
+  preenchido. Pergunta antes de descartar ("Descartar a certificação?") e não sai durante o envio. Avisos: "Certificação
+  enviada", "Documento atualizado", "Documento excluído"…
+- **Currículo** ([src/app/configuracoes/curriculo.tsx](src/app/configuracoes/curriculo.tsx) e
+  [src/lib/resumeFlow.ts](src/lib/resumeFlow.ts)): um arquivo só (PDF ou foto, até 10 MB). Escolher o arquivo, tirar a
+  foto ou pegar da galeria já envia, com o título "Currículo", como a Foto do perfil; com um currículo gravado,
+  "Substituir" troca o arquivo e a central guarda o anterior. "Abrir" pede o link na hora; "Excluir" pergunta antes
+  ("Excluir o currículo?" / "Ele sai do seu cadastro."). O andamento ("Enviando currículo…", "Excluindo currículo…") é o
+  mesmo da linha do menu e continua se a tela sair (`useResumeTask`). No Android, a foto tirada antes de o sistema fechar
+  o app com a câmera aberta é enviada quando o Currículo ou o menu abrem (`useResumeRecovery`). Sem rede, avisa antes de
+  abrir o seletor. No fim, o link **Aviso de privacidade**.
+- **O arquivo no aparelho** ([src/lib/pickedFile.ts](src/lib/pickedFile.ts), com a política de
+  [src/lib/documentFile.ts](src/lib/documentFile.ts); na pré-visualização web, `pickedFile.web.ts` com
+  `<input type="file">`): o documento vem do seletor do sistema (`File.pickFileAsync` do expo-file-system, o caminho da
+  nota fiscal) e a foto, da câmera ou da galeria (`photoCapture`, alvo `{ kind: "document"; slot: "document" | "resume"
+  }`). O escolhido é copiado para uma pasta só dele no cache do app (`cache/documentos/<uuid>/`): o `content://` do
+  Android vira um arquivo que o envio lê, o tamanho é conferido ali e ele sobe com o nome do aparelho limpo ou
+  "documento-AAAA-MM-DD" / "curriculo-AAAA-MM-DD". O original nunca é apagado (no Android, apagar o `content://`
+  apagaria o arquivo do técnico); a cópia sai ao trocar o arquivo, ao fechar a tela e depois do envio, e as que sobraram
+  de uma tela que o sistema fechou saem na abertura seguinte. O tipo vale pela extensão (ou pelo que o sistema informa),
+  e o servidor confere de novo pelo conteúdo.
+
+### Perfil profissional: dias e horários, transporte, formação, áreas de atuação, aptidões e ferramental
 
 O que a central vê no grupo **Perfil profissional** da ficha do técnico e usa para escolher quem convidar (a
 disponibilidade é um sinal pequeno na sugestão de técnicos). Não pede senha. Cada parte vai inteira em
 `PATCH /me/profile`, e o servidor devolve a parte como gravou: turnos e meios na ordem, o "desde" de cada aptidão, o id
 de cada formação e de cada período e as listas na ordem dele. A ficha aprovada na homologação já entra com a
-disponibilidade, o veículo, a CNH e as aptidões. As telas não têm texto de explicação no topo: só os vazios, os limites
-e os avisos de rede. Código: `src/app/configuracoes/`, [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts) (o
-estado das telas e os catálogos), [src/lib/autoSave.ts](src/lib/autoSave.ts) e as regras puras de
+disponibilidade, o veículo, a CNH, as aptidões e as áreas de atuação. Desde 26/11/2026, a central também muda cada
+parte (na ficha do técnico): quando foi ela que mudou a parte por último, a tela mostra "Atualizado pela central em
+20/11/2026" logo abaixo dos avisos do topo ([src/components/settings/CentralStamp.tsx](src/components/settings/CentralStamp.tsx),
+`centralStampText`; pelo app ou pela ficha, nada aparece). As telas não têm texto de explicação no topo: só os vazios,
+os limites e os avisos de rede. Código: `src/app/configuracoes/`, [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts)
+(o estado das telas e os catálogos), [src/lib/autoSave.ts](src/lib/autoSave.ts) e as regras puras de
 [src/lib/techProfileForm.ts](src/lib/techProfileForm.ts) e [src/lib/unavailability.ts](src/lib/unavailability.ts).
 
 - **Dias e horários** (`/configuracoes/disponibilidade`), em duas seções:
