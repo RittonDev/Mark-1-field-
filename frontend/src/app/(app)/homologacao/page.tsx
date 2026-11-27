@@ -71,6 +71,7 @@ import { useAuth } from "@/lib/auth";
 import { formatPlate, isManager, isSendableEmail, SKILL_LEVEL } from "@/lib/constants";
 import { DOCUMENT_REFRESH_MS, findFileUrl, sortDocuments } from "@/lib/documents";
 import { formatDate, formatDateTime, formatDocument, initials } from "@/lib/format";
+import { useDebounced } from "@/lib/hooks";
 import { labelMap, useOnboardingCatalog } from "@/lib/onboarding";
 import { useCan } from "@/lib/permissions";
 import { useMailEnabled, useTechCatalog } from "@/lib/queries";
@@ -191,19 +192,23 @@ function OnboardingView() {
   const canEdit = useCan("base.onboarding", "edit");
   const searchParams = useSearchParams();
   const now = useNow(60_000);
-  // A aba e os filtros ficam na URL (por replaceSearch, sem entrada no histórico).
+  // A aba e os filtros ficam na URL (por replaceSearch, sem entrada no histórico). A busca vai depois da pausa na
+  // digitação (apagar vale na hora); a lista filtra na hora.
   const [initial] = useState(() => readListUrl(searchParams));
   const [tab, setTab] = useState<Tab>(initial.tab);
   const [q, setQ] = useState(initial.q);
+  const typed = useDebounced(q.trim());
+  const urlQ = q.trim() ? typed : "";
   const [uf, setUf] = useState(initial.uf);
   const [areaFilter, setAreaFilter] = useState<string[]>(initial.areas);
   const [withVehicle, setWithVehicle] = useState(initial.vehicle);
-  // A URL mudou com a tela aberta (o link do menu, Voltar, um link com outros filtros): mostra o que ela diz.
+  // A URL mudou com a tela aberta (o link do menu, Voltar, um link com outros filtros): mostra o que ela diz. A volta da
+  // própria gravação traz a busca que já foi gravada; outra busca (um link) troca o que foi digitado.
   const urlChange = useSearchChange();
   if (urlChange) {
     const next = readListUrl(urlChange);
     if (next.tab !== tab) setTab(next.tab);
-    if (next.q !== q) setQ(next.q);
+    if (next.q.trim() !== urlQ) setQ(next.q);
     if (next.uf !== uf) setUf(next.uf);
     if (next.areas.join(",") !== areaFilter.join(",")) setAreaFilter(next.areas);
     if (next.vehicle !== withVehicle) setWithVehicle(next.vehicle);
@@ -211,12 +216,12 @@ function OnboardingView() {
   useEffect(() => {
     replaceSearch({
       aba: TAB_PARAM[tab],
-      q: q || null,
+      q: urlQ || null,
       uf: uf || null,
       area: areaFilter.length ? areaFilter.join(",") : null,
       veiculo: withVehicle ? "sim" : null,
     });
-  }, [tab, q, uf, areaFilter, withVehicle]);
+  }, [tab, urlQ, uf, areaFilter, withVehicle]);
   // A ficha aberta é a da URL (?ficha=): abrir por aqui cria uma entrada no histórico (o Voltar fecha), e recarregar ou
   // mandar o link mantém; o "Ver ficha da homologação" da ficha do técnico chega com ela.
   const fichaParam = searchParams.get("ficha");

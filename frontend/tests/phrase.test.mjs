@@ -1,49 +1,50 @@
-// Frase da busca da central (a Mia), sem dependência nova: node:test com o type stripping do Node 22.
+// Frase da busca da central (o Maxx Agent), sem dependência nova: node:test com o type stripping do Node 22.
 // Na pasta frontend: node --experimental-strip-types --test "tests/*.test.mjs"
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { AGENT_NAME, dropWords, normalizeText, stripAgentName } from "../src/components/home/phrase.ts";
 
 describe("stripAgentName", () => {
-  it("tira o nome da agente do começo da frase, com pontuação depois ou saudação antes", () => {
-    assert.equal(stripAgentName("Mia, atrasadas em campinas"), "atrasadas em campinas");
-    assert.equal(stripAgentName("oi mia sem técnico"), "sem técnico");
-    assert.equal(stripAgentName("Olá, Mia! agendadas amanhã"), "agendadas amanhã");
-    assert.equal(stripAgentName("MIA: 16976"), "16976");
-    assert.equal(stripAgentName("e aí Mia, pendente pgto"), "pendente pgto");
+  it("tira o nome do agente do começo da frase, com pontuação depois ou saudação antes", () => {
+    assert.equal(stripAgentName("Maxx Agent, atrasadas em campinas"), "atrasadas em campinas");
+    assert.equal(stripAgentName("oi maxx agent sem técnico"), "sem técnico");
+    assert.equal(stripAgentName("Olá, Maxx Agent! agendadas amanhã"), "agendadas amanhã");
+    assert.equal(stripAgentName("MAXX AGENT: 16976"), "16976");
+    assert.equal(stripAgentName("e aí Maxx Agent, pendente pgto"), "pendente pgto");
   });
 
-  it("aceita a pontuação colada no texto; o ponto, só com espaço depois", () => {
-    assert.equal(stripAgentName("Mia,16976"), "16976");
-    assert.equal(stripAgentName("Mia,atrasadas"), "atrasadas");
-    assert.equal(stripAgentName("Mia , atrasadas"), "atrasadas");
-    assert.equal(stripAgentName("ei, mia: sem técnico"), "sem técnico");
-    assert.equal(stripAgentName("Mia. atrasadas"), "atrasadas");
-    assert.equal(stripAgentName("Mia... atrasadas"), "atrasadas");
-    assert.equal(stripAgentName("oi mia. agendadas"), "agendadas");
-    assert.equal(stripAgentName("mia!"), "");
+  it("aceita a pontuação colada no texto e espaço a mais no nome; o ponto, só com espaço depois", () => {
+    assert.equal(stripAgentName("Maxx Agent,16976"), "16976");
+    assert.equal(stripAgentName("Maxx Agent,atrasadas"), "atrasadas");
+    assert.equal(stripAgentName("Maxx Agent , atrasadas"), "atrasadas");
+    assert.equal(stripAgentName("Maxx  Agent, atrasadas"), "atrasadas");
+    assert.equal(stripAgentName("ei, maxx agent: sem técnico"), "sem técnico");
+    assert.equal(stripAgentName("Maxx Agent. atrasadas"), "atrasadas");
+    assert.equal(stripAgentName("Maxx Agent... atrasadas"), "atrasadas");
+    assert.equal(stripAgentName("oi maxx agent. agendadas"), "agendadas");
+    assert.equal(stripAgentName("maxx agent!"), "");
   });
 
   it("deixa a frase igual quando o nome é parte do que se procura", () => {
     for (const text of [
-      "mia",
-      "mia atrasadas",
-      "Miami",
-      "Miami, loja 41",
-      "técnico mia",
-      "oi miami",
-      "mia.com.br",
-      "mia.silva@exemplo.com",
-      "MIA.01",
-      "Mia.01 centro",
-      "oi mia.com.br",
+      "maxx agent",
+      "maxx agent atrasadas",
+      "Maxx Agentes",
+      "Maxx Agentes, loja 41",
+      "técnico maxx agent",
+      "oi maxx agentes",
+      "maxx agent.com.br",
+      "Maxx Agent.01 centro",
+      "oi maxx agent.com.br",
+      "Maxx, loja 41",
+      "Maxx Group",
     ]) {
       assert.equal(stripAgentName(text), text);
     }
   });
 
-  it("usa o nome da agente", () => {
-    assert.equal(AGENT_NAME, "Mia");
+  it("usa o nome do agente", () => {
+    assert.equal(AGENT_NAME, "Maxx Agent");
   });
 });
 

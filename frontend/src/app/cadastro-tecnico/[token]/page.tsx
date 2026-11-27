@@ -2254,11 +2254,17 @@ function FichaDocuments({
   const [removeError, setRemoveError] = useState<{ id: string; message: string } | null>(null);
   const [closedMessage, setClosedMessage] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
-  // Depois de somar, enviar ou tirar, para onde vai o foco (o elemento de antes sumiu da tela).
-  const [focusTarget, setFocusTarget] = useState<{ selector: string } | null>(null);
+  // Depois de somar, enviar ou tirar, para onde vai o foco (o elemento de antes sumiu da tela): o primeiro que existir.
+  const [focusTarget, setFocusTarget] = useState<{ selectors: string[] } | null>(null);
   useEffect(() => {
     if (!focusTarget) return;
-    rootRef.current?.querySelector<HTMLElement>(focusTarget.selector)?.focus();
+    for (const selector of focusTarget.selectors) {
+      const target = rootRef.current?.querySelector<HTMLElement>(selector);
+      if (target) {
+        target.focus();
+        return;
+      }
+    }
   }, [focusTarget]);
 
   const expired = expiresAt ? now >= Date.parse(expiresAt) : false;
@@ -2267,8 +2273,8 @@ function FichaDocuments({
   const hasResume = documents.some((d) => d.kind === "resume") || drafts.some((d) => d.kind === "resume");
   const canAdd = (kind: FichaKind) => !closed && !atLimit && (kind !== "resume" || !hasResume);
   const today = todayISO();
-  // O foco volta ao "Adicionar" do grupo ou, sem ele (no limite), ao título do grupo.
-  const groupFocus = (kind: FichaKind) => ({ selector: `[data-add="${kind}"], [data-group-title="${kind}"]` });
+  // O foco volta ao "Adicionar" do grupo ou, sem ele (no limite, o currículo já enviado), ao título do grupo.
+  const groupFocus = (kind: FichaKind) => ({ selectors: [`[data-add="${kind}"]`, `[data-group-title="${kind}"]`] });
   const deadline = expiresAt
     ? dayKey(expiresAt) === dayKey(now)
       ? `Envie até as ${formatTime(expiresAt)}.`
@@ -2279,7 +2285,7 @@ function FichaDocuments({
     const id = newUploadId();
     onChange((s) => ({ drafts: [...s.drafts, { id, kind, title: "", expires_on: "" }] }));
     // O primeiro campo do cartão: o título (no currículo, "Tirar foto").
-    setFocusTarget({ selector: `[data-draft="${id}"] input` });
+    setFocusTarget({ selectors: [`[data-draft="${id}"] input`] });
   };
   const patchDraft = (id: string, patch: Partial<Pick<FichaDraft, "title" | "expires_on">>) => {
     onChange((s) => ({ drafts: s.drafts.map((d) => (d.id === id ? { ...d, ...patch } : d)) }));
@@ -2304,7 +2310,7 @@ function FichaDocuments({
     if (problem) {
       // O arquivo fica guardado no cartão: corrigido o campo, "Enviar" manda o mesmo.
       setErrors((e) => ({ ...e, [draft.id]: problem }));
-      setFocusTarget({ selector: `[data-draft="${draft.id}"] [data-field="${problem.field}"]` });
+      setFocusTarget({ selectors: [`[data-draft="${draft.id}"] [data-field="${problem.field}"]`] });
       return;
     }
     setErrors((e) => withoutKey(e, draft.id));
@@ -2356,7 +2362,7 @@ function FichaDocuments({
     setRemoveError(null);
     const removed = () => {
       onChange((s) => ({ documents: s.documents.filter((d) => d.id !== doc.id) }));
-      setAnnouncement(`${doc.title} removido da ficha.`);
+      setAnnouncement(`Arquivo removido: ${doc.title}.`);
       setFocusTarget(groupFocus(doc.kind));
     };
     try {

@@ -2,7 +2,7 @@
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AGENT_LABEL, AGENT_PROMPT, AgentBadge, AgentMark, AgentScan } from "@/components/home/agent";
+import { AGENT_LABEL, AGENT_PROMPT, AgentMark, AgentScan } from "@/components/home/agent";
 import { readRecent } from "@/components/home/search";
 import { AgentReply, SearchResults, useSearchController } from "@/components/home/SearchResults";
 import { isTopLayer, Kbd, lockScroll, restoreFocus, trapTab } from "@/components/ui";
@@ -13,7 +13,7 @@ export { type RecentTicket, rememberRecentTicket } from "@/components/home/searc
 
 const OPEN_EVENT = "mf:command-open";
 
-/** Abre a Mia, a busca da central (o atalho Ctrl+K / ⌘K também abre). */
+/** Abre o Maxx Agent, a busca da central (o atalho Ctrl+K / ⌘K também abre). */
 export function openCommandPalette() {
   window.dispatchEvent(new Event(OPEN_EVENT));
 }
@@ -41,10 +41,10 @@ export function CommandPalette({ user }: { user: User }) {
 }
 
 /**
- * A Mia em qualquer tela (Ctrl+K): a mesma busca da caixa do Início. A frase vai para a busca inteligente
- * da API ("atrasadas em santos", "16976", "técnico joão novembro"), que devolve o que entendeu, as OS, os
- * clientes, os locais e os técnicos; as telas e ações são achadas aqui mesmo, sem acento importar. A
- * moldura do diálogo fica neutra: a cara da Mia é só a linha do campo e a resposta.
+ * O Maxx Agent em qualquer tela (Ctrl+K): a mesma busca da caixa do Início. A frase vai para a busca
+ * inteligente da API ("atrasadas em santos", "16976", "técnico joão novembro"), que devolve o que entendeu, as
+ * OS, os clientes, os locais e os técnicos; as telas e ações são achadas aqui mesmo, sem acento importar. A
+ * moldura do diálogo fica neutra: a cara do agente é só a marca, a linha do campo e a resposta.
  */
 function Palette({ user, onClose }: { user: User; onClose: () => void }) {
   const [recent] = useState(() => readRecent(user.id));
@@ -116,11 +116,10 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
             spellCheck={false}
             enterKeyHint="search"
           />
-          <AgentBadge from="sm" />
           <span aria-hidden className="hidden sm:inline-flex">
             <Kbd>Esc</Kbd>
           </span>
-          {/* O fio da Mia sob o campo; enquanto ela procura, a linha que corre. */}
+          {/* O fio do agente sob o campo; enquanto ele procura, a linha que corre. */}
           <span aria-hidden className="mf-agent-rule" />
           {ctl.thinking ? <AgentScan /> : null}
         </div>

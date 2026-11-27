@@ -26,7 +26,7 @@ import { createPortal } from "react-dom";
 import { applyTheme, clearThemeChoice, Logo, ThemeToggle, type ThemeChoice, useThemeChoice } from "@/components/Brand";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useConfirm, useConfirmLeave } from "@/components/Confirm";
-import { AgentBadge, AgentMark } from "@/components/home/agent";
+import { AGENT_LABEL, AgentMark } from "@/components/home/agent";
 import { onChangePasswordRequest } from "@/components/home/events";
 import { AGENT_NAME } from "@/components/home/phrase";
 import { GROUPS, type NavItem, visibleNav } from "@/components/nav";
@@ -41,7 +41,6 @@ import {
   Field,
   Input,
   isTopLayer,
-  Kbd,
   lockScroll,
   restoreFocus,
   trapTab,
@@ -1032,22 +1031,22 @@ export function Topbar({ onOpenMenu, menuOpen = false }: { onOpenMenu?: () => vo
             <Menu aria-hidden className="size-5" />
           </button>
         ) : null}
-        {/* A Mia, a busca com IA (abre o Ctrl+K). Borda, fundo e sombra vêm do .mf-agent-field (globals.css). */}
+        {/* O Maxx Agent, a busca com IA (abre o Ctrl+K): o nome em destaque, sem selo nem teclas em volta (o
+            atalho fica na dica e no leitor de tela). Borda, fundo e sombra vêm do .mf-agent-field e do
+            .mf-agent-launch (globals.css). */}
         <button
           type="button"
           onClick={openCommandPalette}
           aria-haspopup="dialog"
           aria-keyshortcuts="Control+K"
-          className="mf-agent-field inline-flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-sm text-ink-muted hover:text-ink sm:max-w-md"
+          aria-label={AGENT_LABEL}
+          title={`${AGENT_NAME} (Ctrl+K)`}
+          className="mf-agent-field mf-agent-launch inline-flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-xl pr-3 pl-1 text-sm sm:max-w-lg"
         >
-          <AgentMark size="sm" />
+          <AgentMark size="md" />
           <span className="min-w-0 flex-1 truncate text-left">
-            Diga à <span className="font-semibold text-ink">{AGENT_NAME}</span> o que procura<span className="sr-only">, busca com IA</span>
-          </span>
-          <AgentBadge from="md" />
-          <span aria-hidden className="hidden items-center gap-1 sm:inline-flex">
-            <Kbd>Ctrl</Kbd>
-            <Kbd>K</Kbd>
+            <span className="font-bold text-ink">{AGENT_NAME}</span>
+            <span className="hidden text-ink-muted sm:inline"> · o que você procura?</span>
           </span>
         </button>
         <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">

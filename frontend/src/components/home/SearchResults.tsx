@@ -73,7 +73,7 @@ export interface Entry {
 }
 
 const GROUP = {
-  agent: `Sugestão da ${AGENT_NAME}`,
+  agent: `Sugestão do ${AGENT_NAME}`,
   recent: "Recentes",
   tickets: "Ordens de serviço",
   customers: "Clientes",
@@ -118,7 +118,7 @@ function TicketDetail({ ticket }: { ticket: SmartTicket }) {
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString("pt-BR")} ${n === 1 ? one : many}`;
 
 /**
- * A resposta da Mia, sempre o trabalho à vista: o que virou filtro, o que foi procurado como texto e
+ * A resposta do Maxx Agent, sempre o trabalho à vista: o que virou filtro, o que foi procurado como texto e
  * quantas OS deu. "understood": entendeu algum filtro; "partial": entendeu filtros, mas o texto que
  * sobrou zerou a busca; "text": só procurou o texto (achando OS ou nenhuma).
  */
@@ -136,7 +136,7 @@ export interface SearchController {
   setQuery: (value: string) => void;
   /** O texto do campo, sem espaços nas pontas. */
   typed: string;
-  /** O que vai para a busca: o texto sem o nome da Mia no começo ("Mia, atrasadas" -> "atrasadas"). */
+  /** O que vai para a busca: o texto sem o nome do agente no começo ("Maxx Agent, atrasadas" -> "atrasadas"). */
   asked: string;
   entries: Entry[];
   chips: SearchChip[];
@@ -147,11 +147,11 @@ export interface SearchController {
   listId: string;
   /** O que está na tela não é a resposta do texto atual: digitando, buscando ou esperando a internet. */
   stale: boolean;
-  /** Um pedido da Mia está em andamento (os brilhos piscam e a linha corre); sem internet, nada se mexe. */
+  /** Um pedido do agente está em andamento (os brilhos piscam e a linha corre); sem internet, nada se mexe. */
   thinking: boolean;
   /** Sem internet: a busca do texto atual espera a conexão voltar. */
   paused: boolean;
-  /** O que a Mia entendeu da última busca que voltou (null antes da 1ª resposta, sem texto que dê busca ou com erro). */
+  /** O que o agente entendeu da última busca que voltou (null antes da 1ª resposta, sem texto que dê busca ou com erro). */
   reply: AgentAnswer | null;
   /** A busca falhou e não há outra tentativa em andamento: o alerta com "Tentar de novo". */
   failed: boolean;
@@ -192,14 +192,14 @@ export function useSearchController({
   const ranEnter = useRef(0);
   const listId = useId();
   const typed = query.trim();
-  // "Mia, atrasadas em campinas": o nome dela no começo da frase não vai para a busca.
+  // "Maxx Agent, atrasadas em campinas": o nome dele no começo da frase não vai para a busca.
   const asked = stripAgentName(typed).trim();
   // Uma busca por pausa na digitação.
   const q = useDebounced(asked, 200);
   const searching = isSearchable(q);
   const smart = useSmartSearch(q, searching);
   const data = searching ? smart.data : undefined;
-  // Sem internet o pedido fica parado (não sai): a Mia não "pensa" e avisa que espera a conexão.
+  // Sem internet o pedido fica parado (não sai): o agente não "pensa" e avisa que espera a conexão.
   const paused = isSearchable(asked) && searching && smart.isPaused;
   const stale = asked !== q || (searching && (smart.isFetching || smart.isPlaceholderData || smart.isPaused));
   // "Tentar de novo" em andamento (ou esperando a internet) não é erro: o alerta sai e volta se falhar de novo.
@@ -209,7 +209,7 @@ export function useSearchController({
   // de a digitação parar): o Enter abre o que está na tela, sem esperar a conexão.
   const ownOffline = paused && asked === q && !smart.isPlaceholderData && !!data;
 
-  // O que a Mia diz da busca que voltou: os filtros que entendeu, ou só o texto que procurou.
+  // O que o agente diz da busca que voltou: os filtros que entendeu, ou só o texto que procurou.
   const reply = ((): AgentAnswer | null => {
     if (!data || !isSearchable(asked) || failed) return null;
     const text = data.chips.find((c) => c.kind === "text")?.label ?? null;
@@ -330,7 +330,7 @@ export function useSearchController({
           id: "t-list",
           group: GROUP.tickets,
           label: data.total === 1 ? "Ver a OS na lista de Chamados" : `Ver as ${data.total.toLocaleString("pt-BR")} OS na lista de Chamados`,
-          detail: <span className="block truncate text-xs text-ink-muted">Com o que a {AGENT_NAME} entendeu, para exportar ou agir em lote</span>,
+          detail: <span className="block truncate text-xs text-ink-muted">Com o que o {AGENT_NAME} entendeu, para exportar ou agir em lote</span>,
           icon: <ArrowRight className="size-4" />,
           href,
           run: (mods) => go(href, mods),
@@ -492,7 +492,7 @@ const CHIP_ICON: Record<ChipKind, React.ComponentType<{ className?: string }>> =
   text: Type,
 };
 
-/** Um filtro que a Mia entendeu (status, cidade, técnico, período...). */
+/** Um filtro que o agente entendeu (status, cidade, técnico, período...). */
 function FilterChip({ chip }: { chip: SearchChip }) {
   const Icon = CHIP_ICON[chip.kind] ?? Type;
   return (
@@ -503,7 +503,7 @@ function FilterChip({ chip }: { chip: SearchChip }) {
   );
 }
 
-/** O que a Mia procurou como texto: tracejado, porque não virou filtro. */
+/** O que o agente procurou como texto: tracejado, porque não virou filtro. */
 function TextChip({ label }: { label: string }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-line-strong bg-surface px-[5px] py-px text-[11px] leading-4 font-medium text-ink-muted">
@@ -515,12 +515,12 @@ function TextChip({ label }: { label: string }) {
 const osCount = (total: number) => (total === 0 ? "nenhuma OS" : `${total.toLocaleString("pt-BR")} OS`);
 
 /** Sem internet: a busca do texto atual fica esperando a conexão. */
-const OFFLINE = `Sem internet: a ${AGENT_NAME} busca quando a conexão voltar.`;
+const OFFLINE = `Sem internet: o ${AGENT_NAME} busca quando a conexão voltar.`;
 
 /**
- * A resposta da Mia, entre o campo e a lista, fora da área que rola: "Entendi:" com os filtros (e o
+ * A resposta do agente, entre o campo e a lista, fora da área que rola: "Entendi:" com os filtros (e o
  * texto, tracejado) ou "Procurei" com o texto, e quantas OS deu (mesmo nenhuma, para a caixa não sumir
- * quando a busca volta). Enquanto ela procura, a resposta anterior fica esmaecida; sem resposta
+ * quando a busca volta). Enquanto ele procura, a resposta anterior fica esmaecida; sem resposta
  * anterior, "Procurando…". Sem internet, uma linha parada no lugar da resposta.
  */
 export function AgentReply({ ctl }: { ctl: SearchController }) {
@@ -565,7 +565,7 @@ export function AgentReply({ ctl }: { ctl: SearchController }) {
   );
 }
 
-/** O que o leitor de tela ouve quando a busca volta: o resumo da Mia e quantos resultados há. */
+/** O que o leitor de tela ouve quando a busca volta: o resumo do agente e quantos resultados há. */
 function spokenSummary(ctl: SearchController): string {
   const results = `${plural(ctl.entries.length, "resultado", "resultados")}.`;
   const reply = ctl.reply;
@@ -582,13 +582,13 @@ function spokenSummary(ctl: SearchController): string {
 
 /**
  * Resultados da busca (lista de opções do combobox): grupos, erro com "Tentar de novo", nada encontrado e
- * o resumo para o leitor de tela. A resposta da Mia (AgentReply) fica fora daqui, entre o campo e a lista.
+ * o resumo para o leitor de tela. A resposta do agente (AgentReply) fica fora daqui, entre o campo e a lista.
  * Quem usa põe em volta a área que rola (com o listRef passado ao controlador).
  */
 export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave?: () => void }) {
   const groups = groupEntries(ctl.entries);
-  // Nada na lista: a dica do que a Mia entende. Com algum filtro entendido, a resposta dela já diz o que
-  // faltou; sem internet, ela ainda não buscou.
+  // Nada na lista: a dica do que o agente entende. Com algum filtro entendido, a resposta dele já diz o que
+  // faltou; sem internet, ele ainda não buscou.
   const empty =
     ctl.asked !== "" &&
     !ctl.thinking &&
@@ -603,7 +603,7 @@ export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave
           role="alert"
           className="mx-1 mb-2 flex items-center gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
         >
-          <span className="flex-1">A {AGENT_NAME} não conseguiu buscar agora.</span>
+          <span className="flex-1">O {AGENT_NAME} não conseguiu buscar agora.</span>
           <button
             type="button"
             onClick={ctl.retry}
@@ -667,7 +667,7 @@ export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave
       </div>
       {empty ? (
         <div className="px-4 py-7 text-center">
-          <p className="text-sm font-semibold text-ink">A {AGENT_NAME} não achou nada para “{ctl.asked}”.</p>
+          <p className="text-sm font-semibold text-ink">O {AGENT_NAME} não achou nada para “{ctl.asked}”.</p>
           <p className="mx-auto mt-1 max-w-sm text-xs text-ink-muted">
             Tente o nº da OS, o nome do cliente ou da loja, um técnico, uma cidade, uma etiqueta ou um período.
           </p>

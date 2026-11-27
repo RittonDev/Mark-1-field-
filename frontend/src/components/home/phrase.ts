@@ -1,9 +1,9 @@
-// A frase da busca da central (a Mia): o nome da agente, o texto sem acento e os ajustes feitos na frase
-// antes de ela ir para a API. Sem React e sem o alias "@/": o teste de unidade (tests/phrase.test.mjs)
+// A frase da busca da central (o Maxx Agent): o nome do agente, o texto sem acento e os ajustes feitos na
+// frase antes de ela ir para a API. Sem React e sem o alias "@/": o teste de unidade (tests/phrase.test.mjs)
 // importa este arquivo direto no Node.
 
-/** Nome da agente de busca da central: M(axx) + IA. Os textos da interface a tratam no feminino. */
-export const AGENT_NAME = "Mia";
+/** Nome do agente de IA da central. Os textos da interface o tratam no masculino ("o Maxx Agent"). */
+export const AGENT_NAME = "Maxx Agent";
 
 /** Texto sem acento, em minúsculas e sem espaços nas pontas ("Técnico" -> "tecnico"). */
 export function normalizeText(s: string): string {
@@ -14,18 +14,22 @@ export function normalizeText(s: string): string {
     .trim();
 }
 
-const NAME = AGENT_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// As palavras do nome escapadas, com qualquer espaço entre elas ("Maxx  Agent" também vale).
+const NAME = AGENT_NAME.split(/\s+/)
+  .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  .join(String.raw`\s+`);
 
-// Só no começo da frase e só com pontuação depois do nome ("Mia, ...", "Mia,16976", "MIA: ...") ou
-// saudação antes ("oi Mia ...", "Olá, Mia! ...", "e aí Mia, ..."): "mia", "mia atrasadas", "Miami" e
-// "técnico mia" ficam. O ponto só conta seguido de espaço ou no fim: "mia.com.br", "mia.silva@exemplo.com"
-// e "MIA.01" são o que se procura. Depois da saudação, o nome não pode seguir com letra, número ou ".x".
+// Só no começo da frase e só com pontuação depois do nome ("Maxx Agent, ...", "Maxx Agent,16976",
+// "MAXX AGENT: ...") ou saudação antes ("oi Maxx Agent ...", "Olá, Maxx Agent! ...", "e aí Maxx Agent, ..."):
+// "maxx agent", "maxx agent atrasadas", "Maxx Agentes" e "técnico maxx agent" ficam. O ponto só conta seguido
+// de espaço ou no fim: "maxx agent.com.br" e "Maxx Agent.01" são o que se procura. Depois da saudação, o nome
+// não pode seguir com letra, número ou ".x".
 const VOCATIVE = new RegExp(
   String.raw`^\s*(?:(?:oi|ol[aá]|ei|e\s+a[ií])[\s,!.]+${NAME}(?![\p{L}\p{N}_]|\.[^\s,:;!.])|${NAME}(?:\s*[,:;!]|\.+(?=\s|$)))[\s,:;!.-]*`,
   "iu",
 );
 
-/** A frase sem o nome da agente quando a pessoa fala com ela ("Mia, atrasadas" -> "atrasadas"). */
+/** A frase sem o nome do agente quando a pessoa fala com ele ("Maxx Agent, atrasadas" -> "atrasadas"). */
 export function stripAgentName(text: string): string {
   return text.replace(VOCATIVE, "");
 }

@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Kbd } from "@/components/ui";
 import type { User } from "@/lib/types";
-import { AGENT_PROMPT, AgentBadge, AgentMark, AgentScan } from "./agent";
+import { AGENT_PROMPT, AgentMark, AgentScan } from "./agent";
 import { readRecent, type RecentTicket } from "./search";
 import { AgentReply, SearchResults, useSearchController } from "./SearchResults";
 
@@ -18,9 +18,9 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * A Mia no Início, a busca grande: OS, clientes, locais, técnicos, telas e ações, com a frase entendida
- * pela API ("atrasadas em santos", "16976", "técnico joão novembro"). "/" leva o foco para ela; a
- * resposta da Mia e os resultados abrem logo abaixo, com setas, Enter (Ctrl+Enter abre a página;
+ * O Maxx Agent no Início, a busca grande: OS, clientes, locais, técnicos, telas e ações, com a frase
+ * entendida pela API ("atrasadas em santos", "16976", "técnico joão novembro"). "/" leva o foco para ele; a
+ * resposta do agente e os resultados abrem logo abaixo, com setas, Enter (Ctrl+Enter abre a página;
  * Shift+Enter, outra aba) e Esc.
  */
 export function HomeSearch({ user }: { user: User }) {
@@ -32,7 +32,7 @@ export function HomeSearch({ user }: { user: User }) {
   const hintId = useId();
   const close = () => setOpen(false);
   const ctl = useSearchController({ user, recent, mode: "home", onLeave: close, listRef });
-  // Só "Mia," no campo ainda não é busca: a lista mostra as recentes, como com o campo vazio.
+  // Só "Maxx Agent," no campo ainda não é busca: a lista mostra as recentes, como com o campo vazio.
   const showPanel = open && (ctl.asked !== "" || recent.length > 0);
 
   // "/" em qualquer lugar da tela (fora de um campo, sem diálogo ou menu aberto) leva à busca.
@@ -108,7 +108,6 @@ export function HomeSearch({ user }: { user: User }) {
           spellCheck={false}
           enterKeyHint="search"
         />
-        <AgentBadge from="sm" />
         {ctl.query ? (
           <button
             type="button"

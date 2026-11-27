@@ -60,6 +60,7 @@ import {
   APP_ACCESS,
   DAY_PERIOD,
   DAY_PERIOD_ORDER,
+  DOCUMENT_KIND,
   LEVEL_TIER,
   LEVEL_TIER_ORDER,
   OPERATIONAL_STATUS,
@@ -991,7 +992,10 @@ function TechniciansView() {
                                       </span>
                                     ) : null}
                                     {due && dueState && dueText ? (
-                                      <span title={`Certificação · validade ${formatDate(due.expires_on)}`} className="inline-flex">
+                                      <span
+                                        title={`${DOCUMENT_KIND.certification} · validade ${formatDate(due.expires_on)}`}
+                                        className="inline-flex"
+                                      >
                                         <Pill color={CERTIFICATION_COLOR[dueState]}>{dueText}</Pill>
                                       </span>
                                     ) : null}

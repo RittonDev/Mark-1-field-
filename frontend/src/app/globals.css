@@ -616,7 +616,7 @@ tr:hover > td.edit-col {
 }
 
 /*
- * Mia, a busca com IA da central: o botão do topo, o Ctrl+K, a caixa da Início e a resposta dela. É o
+ * Maxx Agent, a busca com IA da central: o botão do topo, o Ctrl+K, a caixa da Início e a resposta dele. É o
  * único lugar com os brilhos e o degradê fino da marca (azul -> ciano -> verde-água, sem roxo nem menta);
  * o resto da central segue sem cara de IA. Nada se mexe com a tela parada: os brilhos piscam e a linha
  * corre só enquanto a busca está em andamento.
@@ -629,7 +629,7 @@ tr:hover > td.edit-col {
   initial-value: 40%;
 }
 :root {
-  /* Foco do campo da Mia: anel de 1 px na cor do foco (8:1 no claro) e o brilho azul-ciano. */
+  /* Foco do campo do Maxx Agent: anel de 1 px na cor do foco (8:1 no claro) e o brilho azul-ciano. */
   --agent-glow:
     0 0 0 1px var(--focus), 0 0 0 4px color-mix(in srgb, var(--brand) 12%, transparent),
     0 10px 28px -14px color-mix(in srgb, var(--brand-cyan) 55%, transparent);
@@ -639,7 +639,7 @@ tr:hover > td.edit-col {
     0 0 0 1px var(--focus), 0 0 0 4px color-mix(in srgb, var(--brand) 22%, transparent),
     0 10px 28px -14px color-mix(in srgb, var(--brand-cyan) 45%, transparent);
 }
-/* O campo da Mia: fio de 1 px em degradê, que fica mais forte no hover e inteiro no foco. */
+/* O campo do Maxx Agent: fio de 1 px em degradê, que fica mais forte no hover e inteiro no foco. */
 .mf-agent-field {
   --agent-fill: var(--surface);
   --agent-mix: 40%;
@@ -672,19 +672,24 @@ tr:hover > td.edit-col {
 :root[data-theme="dark"] .mf-agent-field {
   --agent-fill: var(--surface-2);
 }
-/* A placa dos brilhos (AgentMark). */
-.mf-agent-mark {
-  color: var(--brand);
-  background-image: linear-gradient(135deg, var(--brand-soft), color-mix(in srgb, var(--brand-cyan) 14%, var(--surface)));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 18%, transparent);
+/* O botão do Maxx Agent no topo: o fio em degradê já forte parado e inteiro no hover, e uma sombra azul leve
+   que o destaca do resto da barra. */
+.mf-agent-launch {
+  --agent-mix: 75%;
+  box-shadow:
+    var(--elev-1),
+    0 6px 18px -12px color-mix(in srgb, var(--brand) 60%, transparent);
 }
-:root[data-theme="dark"] .mf-agent-mark {
-  color: var(--brand-ink);
-  background-image: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--brand) 24%, transparent),
-    color-mix(in srgb, var(--brand-cyan) 14%, transparent)
-  );
+.mf-agent-launch:hover {
+  --agent-mix: 100%;
+}
+/* A placa dos brilhos (AgentMark): o degradê da marca com os brilhos brancos, no claro e no escuro. */
+.mf-agent-mark {
+  color: #fff;
+  background-image: linear-gradient(135deg, var(--brand), var(--brand-cyan));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #fff 16%, transparent),
+    0 2px 6px -2px color-mix(in srgb, var(--brand) 55%, transparent);
 }
 /* Pensando: a estrela grande respira e as cruzinhas (Sparkles do lucide: estrela, depois 2 pares de
    traços) piscam, um par de cada vez. */
@@ -781,6 +786,11 @@ tr:hover > td.edit-col {
     border-color: CanvasText;
     background: Canvas;
     box-shadow: none;
+  }
+  .mf-agent-mark {
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: inset 0 0 0 1px CanvasText;
   }
   .mf-agent-rule {
     background: CanvasText;

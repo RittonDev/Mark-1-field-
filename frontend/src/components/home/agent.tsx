@@ -1,15 +1,15 @@
-// A cara da Mia, a busca com IA da central: só no botão do topo, no Ctrl+K, na caixa da Início e na
-// resposta dela. O resto da central segue sem brilhos nem degradês. Cores e movimento em globals.css
+// A cara do Maxx Agent, o agente de IA da central: só no botão do topo, no Ctrl+K, na caixa da Início e na
+// resposta dele. O resto da central segue sem brilhos nem degradês. Cores e movimento em globals.css
 // (.mf-agent-*).
 
 import clsx from "clsx";
 import { Sparkles } from "lucide-react";
 import { AGENT_NAME } from "./phrase";
 
-/** O convite nos campos da Mia (botão do topo, Ctrl+K e a caixa da Início). */
-export const AGENT_PROMPT = `Diga à ${AGENT_NAME} o que procura`;
+/** O convite nos campos do agente (Ctrl+K e a caixa da Início). */
+export const AGENT_PROMPT = `Pergunte ao ${AGENT_NAME}`;
 
-/** Nome do diálogo do Ctrl+K. */
+/** Nome do diálogo do Ctrl+K e do botão do topo para o leitor de tela. */
 export const AGENT_LABEL = `${AGENT_NAME}, busca com IA`;
 
 const MARK_SIZE = {
@@ -19,8 +19,8 @@ const MARK_SIZE = {
 };
 
 /**
- * A marca da Mia: os brilhos azuis numa placa. Com `thinking` eles piscam, só enquanto a busca está em
- * andamento; parada, nada se mexe.
+ * A marca do Maxx Agent: os brilhos brancos numa placa no degradê da marca. Com `thinking` eles piscam, só
+ * enquanto a busca está em andamento; parada, nada se mexe.
  */
 export function AgentMark({
   size = "sm",
@@ -41,24 +41,7 @@ export function AgentMark({
   );
 }
 
-/** Selo "IA" dos campos da Mia; `from` é a largura a partir da qual ele aparece. */
-export function AgentBadge({ from, className }: { from?: "sm" | "md"; className?: string }) {
-  return (
-    <span
-      aria-hidden
-      title={`${AGENT_NAME}, a IA de busca do Maxx Field`}
-      className={clsx(
-        from === "md" ? "hidden md:inline-flex" : from === "sm" ? "hidden sm:inline-flex" : "inline-flex",
-        "h-5 shrink-0 items-center rounded-full bg-brand-soft px-1.5 text-[10px] font-bold tracking-[0.06em] text-brand-ink ring-1 ring-brand/15 ring-inset",
-        className,
-      )}
-    >
-      IA
-    </span>
-  );
-}
-
-/** A linha em degradê que corre na base do campo enquanto a Mia procura (entra depois de 150 ms). */
+/** A linha em degradê que corre na base do campo enquanto o agente procura (entra depois de 150 ms). */
 export function AgentScan() {
   return <span aria-hidden className="mf-agent-scan" />;
 }

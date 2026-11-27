@@ -190,8 +190,9 @@ function afterResetText(data: Partial<ProfileChangedData>): string {
 /**
  * profile.changed pelo app (Perfil › Configurações): as formas de recebimento, o e-mail de login, o CNPJ, o nome ou o
  * celular mudaram. Uma conta invadida desviaria o pagamento: a troca do destino do pagamento pede confirmação no grupo
- * antes do próximo pagamento. O que a central muda e o resto do que o técnico muda só atualizam as listas. "Ver" abre a
- * ficha já na seção do que mudou (sem Técnicos, Pagamentos).
+ * antes do próximo pagamento. O que a central muda (também favoritos, avaliações e anexos internos) e o resto do que o
+ * técnico muda (também as áreas de atuação e os documentos) só atualizam as listas. "Ver" abre a ficha já na seção do que
+ * mudou (sem Técnicos, Pagamentos).
  */
 function profileNotice(event: RealtimeEvent): NoticeDraft | null {
   const data = (event.data ?? {}) as Partial<ProfileChangedData>;
@@ -340,7 +341,7 @@ const PROFILE_KEYS = ["technicians", "users", "technician-favorites", "technicia
  * cliente e os favoritos. Mudar só isso não relê usuários, atribuíveis nem o mapa; o resto que cada um desatualiza está
  * em PROFILE_FIELD_KEYS.
  */
-const TECH_PROFILE_FIELDS: readonly string[] = [
+const TECH_ONLY_FIELDS: readonly string[] = [
   "tools",
   "availability",
   "transport",
@@ -825,7 +826,7 @@ export function RealtimeProvider({
         if (event.actor_id && event.actor_id === userId) return;
         const raw: unknown = event.data?.fields;
         const fields: string[] = Array.isArray(raw) ? raw.map(String) : [];
-        if (fields.length && fields.every((f) => TECH_PROFILE_FIELDS.includes(f))) {
+        if (fields.length && fields.every((f) => TECH_ONLY_FIELDS.includes(f))) {
           // ["technicians"] cobre a lista, o cadastro aberto (["technicians", "one", id]), os documentos e as
           // avaliações dele e o histórico (["technicians", "changes", id], com as páginas já abertas).
           invalidate(["technicians"]);
