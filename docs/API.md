@@ -1933,12 +1933,14 @@ id); o Ferramental passa a excluir o que nunca foi usado, o `GET` traz `applicat
 - `tool_ids`: só as ferramentas **ativas** do catálogo, na ordem do nome;
 - `availability`: na ordem da grade;
 - `transport: {modes, driver_license} | null` (null: nunca informou);
-- `skills: [{name, level, since}]`, com `since` "AAAA-MM-DD" (o dia, em Brasília, em que a aptidão entrou no perfil): o
+- `skills: [{skill_id, name, level, since}]` (até 25/11/2026, `{name, level, since}`; desde 26/11/2026, só as ativas do
+  catálogo, com o nome atual dele), com `since` "AAAA-MM-DD" (o dia, em Brasília, em que a aptidão entrou no perfil): o
   "desde" mais novo primeiro, depois o nome;
 - `education: [{id, course, level, institution, start, end}]`, meses "AAAA-MM", `end` null em andamento: os em
   andamento primeiro, depois o fim e o início mais novos, depois o curso;
-- `tech_profile_updated: {tools, availability, transport, skills, education}`, cada uma `{at, via: "app" | "ficha"} |
-  null` (null: nunca informada).
+- desde 26/11/2026, `area_ids`: as áreas de atuação ativas do catálogo, na ordem do nome;
+- `tech_profile_updated: {tools, availability, transport, skills, education}` (desde 26/11/2026, + `areas`), cada uma
+  `{at, via: "app" | "ficha" | "central"} | null` (null: nunca informada; `central` desde 26/11/2026).
 
 ```json
 {
@@ -1946,7 +1948,8 @@ id); o Ferramental passa a excluir o que nunca foi usado, o `GET` traz `applicat
   "tool_ids": ["5b1e…", "9c40…"],
   "availability": ["mon:morning", "mon:afternoon", "sat:morning"],
   "transport": {"modes": ["car"], "driver_license": true},
-  "skills": [{"name": "Windows 10/11", "level": "intermediario", "since": "2026-11-12"}],
+  "skills": [{"skill_id": "3c1a…", "name": "Windows 10/11", "level": "intermediario", "since": "2026-11-12"}],
+  "area_ids": ["7d2e…"],
   "education": [{"id": "1f0c…", "course": "Técnico em redes", "level": "technical",
                  "institution": "Escola Exemplo", "start": "2024-02", "end": null}],
   "tech_profile_updated": {
@@ -1954,12 +1957,14 @@ id); o Ferramental passa a excluir o que nunca foi usado, o `GET` traz `applicat
     "availability": {"at": "2026-11-12T10:00:00Z", "via": "ficha"},
     "transport": {"at": "2026-11-12T10:00:00Z", "via": "ficha"},
     "skills": {"at": "2026-11-12T10:00:00Z", "via": "ficha"},
-    "education": null
+    "education": null,
+    "areas": {"at": "2026-11-26T15:30:00Z", "via": "central"}
   }
 }
 ```
 
-**`PATCH /me/profile`** com `tool_ids`, `availability`, `transport`, `skills` ou `education` (`MyProfileUpdate`):
+**`PATCH /me/profile`** com `tool_ids`, `availability`, `transport`, `skills` ou `education` (desde 26/11/2026, também
+`area_ids`) (`MyProfileUpdate`):
 - Nenhuma parte pede `current_password`, e a senha provisória não trava (só e-mail, dados da empresa e formas de
   recebimento; até 24/11/2026, e-mail e PIX).
 - Cada parte vem **inteira** e substitui a gravada: `[]` ou null limpa (menos `transport`). Só conta o que veio no
@@ -1975,7 +1980,8 @@ id); o Ferramental passa a excluir o que nunca foi usado, o `GET` traz `applicat
 | `tool_ids` (ids de `GET /technician-tools`, até 200) | repetidos contam uma vez; id **desativado** é ignorado; os desativados já gravados ficam guardados (voltam se a central reativar) | o conjunto final (os enviados ativos mais os guardados desativados) é outro |
 | `availability` (até 28) | sem repetir, na ordem da grade | o conjunto é outro; `[]` sem a parte informada não muda nada |
 | `transport` (`{modes, driver_license}`, até 6 meios) | meios sem repetir, na ordem da lista | a parte nunca foi informada, ou (meios, CNH) mudou. `{modes: [], driver_license: false}` na 1ª vez é informação ("Nenhum · sem CNH"; no app, o "Nenhum" no fim dos meios) |
-| `skills` (`[{name, level}]`, até 30) | nome limpo; o servidor põe o `since`: o de uma aptidão gravada com o mesmo nome (sem acento e sem maiúsculas) fica, e a nova ganha hoje (dia de Brasília) | o conjunto de (nome, nível) é outro: trocar só a grafia ("linux" → "Linux") grava, e o "desde" fica |
+| `skills` (desde 26/11/2026, `[{skill_id, level}]` ou, do app de antes, `[{name, level}]`, casado pelo nome sem acento e sem maiúsculas; até 30) | o servidor põe o `since`: o da aptidão gravada de mesmo id fica, e a nova ganha hoje (dia de Brasília); desativada enviada é ignorada e as desativadas guardadas ficam (até 25/11/2026: pelo nome limpo, e o `since` ficava pelo nome) | o conjunto de (`skill_id`, nível) é outro |
+| `area_ids` (desde 26/11/2026; ids de `GET /technician-areas`) | repetidos contam uma vez; desativada enviada é ignorada; as desativadas guardadas ficam; até 20 no fim | o conjunto é outro |
 | `education` (`[{id?, course, level, institution, start, end?}]`, até 20) | textos limpos; `end` vazio = null; item com o `id` de um curso gravado mantém o id; sem `id` (ou com um desconhecido), reaproveita o id de um gravado igual (curso, nível, instituição, início e fim) que nenhum outro item citou, senão ganha um novo | o conjunto de (id, curso, nível, instituição, início, fim) é outro |
 
 Reordenar não é mudança. As comparações são as mesmas do histórico do cadastro (`tech_profile.wanted` e
@@ -1986,7 +1992,8 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
 {"tool_ids": ["5b1e…", "9c40…"]}
 {"availability": ["mon:morning", "mon:afternoon", "sat:morning"]}
 {"transport": {"modes": ["car", "motorcycle"], "driver_license": true}}
-{"skills": [{"name": "Windows 10/11", "level": "avancado"}, {"name": "Fibra óptica", "level": "basico"}]}
+{"skills": [{"skill_id": "3c1a…", "level": "avancado"}, {"skill_id": "8f42…", "level": "basico"}]}
+{"area_ids": ["7d2e…", "a91b…"]}
 {"education": [{"id": null, "course": "Técnico em redes", "level": "technical", "institution": "Escola Exemplo",
                 "start": "2024-02", "end": null}]}
 ```
@@ -2007,7 +2014,8 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
 | nome da aptidão com menos de 2 caracteres, depois de limpo | "Informe o nome da aptidão" | Nome |
 | nome da aptidão com mais de 80 | "No máximo 80 caracteres" | Nome |
 | nível fora da lista | "Escolha uma das opções: basico, intermediario ou avancado" (na formação, os 6 códigos) | Nível |
-| aptidão repetida (sem acento e sem maiúsculas) | "Aptidão repetida: Linux" (o nome do item que repete, limpo) | Aptidões |
+| aptidão repetida (desde 26/11/2026, pelo id ou pelo nome, no serviço: `{"detail", "code": "SKILL_REPEATED"}`) | "Aptidão repetida: Linux" (o nome do catálogo) | — |
+| `skill_id` e `name` juntos, ou nenhum dos dois (desde 26/11/2026) | "Escolha a aptidão" | — |
 | curso / instituição com menos de 2 | "Informe o curso" / "Informe a instituição" | Curso / Instituição |
 | curso ou instituição com mais de 120 | "No máximo 120 caracteres" | Curso / Instituição |
 | mês fora de AAAA-MM (mês de 01 a 12) | "Mês inválido: use AAAA-MM" | Início / Fim |
@@ -2017,34 +2025,44 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
 | o mesmo `id` duas vezes, ou o mesmo curso, instituição (sem acento e sem maiúsculas), nível e início | "Formação repetida: Técnico em redes" | Formação |
 | chave a mais num item (`since`, `added_at`…) ou no `transport` | "Campo não aceito" | — |
 
-**Ferramental: o catálogo** (`api/routes/catalog.py`, seção "ferramental dos técnicos").
+Desde 26/11/2026, as áreas e as aptidões do catálogo dão também os 422 com código `AREA_NOT_FOUND`, `AREAS_LIMIT`,
+`SKILL_NOT_FOUND` e `SKILL_UNKNOWN_NAME` (ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)).
+
+**Ferramental: o catálogo** (`api/routes/catalog.py`, seção "ferramental dos técnicos"; desde 26/11/2026, a mesma regra
+das Áreas de atuação e das Aptidões, em `services/technician_catalogs.py`).
 
 | Rota | Quem | Entrada | Resposta | Erros |
 |---|---|---|---|---|
-| `GET /technician-tools?active=` | a gestão e o técnico (`StaffUser`) | `active` (só a gestão: true as ativas, false as inativas; sem ele, todas) | 200 `TechnicianTool[] = [{id, name, is_active, technicians}]`, em ordem alfabética (sem acento e sem maiúsculas) | 401; 403 (cliente) |
-| `POST /technician-tools` | Configurações em Editar (`setup.settings`) | `{name}` (limpo, 2 a 80) | 201 `TechnicianTool`, já ativa, com `technicians: 0` | 422 "Informe o nome da ferramenta" / "No máximo 80 caracteres" (`label` "Nome"); 409 "Já existe uma ferramenta com este nome"; 422 "O catálogo aceita até 200 ferramentas" (ativas e inativas); 403 `MODULE_FORBIDDEN` |
+| `GET /technician-tools?active=` | a gestão e o técnico (`StaffUser`) | `active` (só a gestão: true as ativas, false as inativas; sem ele, todas) | 200 `TechnicianTool[] = [{id, name, is_active, technicians}]` (desde 26/11/2026, + `applications`, sempre 0, e `in_use`), em ordem alfabética (sem acento e sem maiúsculas) | 401; 403 (cliente) |
+| `POST /technician-tools` | Configurações em Editar (`setup.settings`) | `{name}` (limpo, 2 a 80) | 201 `TechnicianTool`, já ativa, com `technicians: 0` | 422 "Informe o nome da ferramenta" (desde 26/11/2026, `{"detail"}`) / "No máximo 80 caracteres" (`label` "Nome"); 409 "Já existe uma ferramenta com este nome" (desde 26/11/2026, com o `code` `CATALOG_NAME_TAKEN`); 422 "O catálogo aceita até 200 ferramentas" (ativas e inativas); 403 `MODULE_FORBIDDEN` |
 | `PATCH /technician-tools/{tool_id}` | Configurações em Editar | `{name?, is_active?}` (null é ignorado; chave a mais: "Campo não aceito") | 200 `TechnicianTool` | 404 "Ferramenta não encontrada"; 409 nome repetido (a própria não conta); 422 nome; 403 `MODULE_FORBIDDEN` |
+| `DELETE /technician-tools/{tool_id}` (desde 26/11/2026) | Configurações em Editar | — | 204 | 409 `CATALOG_IN_USE` "Esta ferramenta já foi usada: desative para tirar das escolhas"; 404 "Ferramenta não encontrada" |
 
 - O técnico recebe só as ativas, com `technicians: null`, e o `active` é ignorado para ele. A gestão recebe em
   `technicians` quantos técnicos (papel técnico, ativos ou não) marcaram cada uma: a mesma regra do filtro `tool_id` de
   `GET /technicians`, cuja lista padrão mostra todas as situações (o número bate com o que o link abre).
-- Cadastrar e renomear travam o catálogo até o fim da transação (`_lock_tool_catalog`, `pg_advisory_xact_lock`) e só
-  então conferem o nome repetido sem acento e sem maiúsculas ("Multimetro" = "Multímetro") e, no cadastro, o limite de
-  200: dois pedidos juntos com "Multímetro" e "multimetro" dão 201 e 409, e o catálogo com 199 recebe só mais uma. Só
-  ativar ou desativar não trava. O índice único (`uq_tool_catalog_name`) fica de reserva para o nome exato, com a mesma
+- Cadastrar e renomear travam o catálogo até o fim da transação (`pg_advisory_xact_lock`; desde 26/11/2026, a trava
+  por tabela de `technician_catalogs`) e só então conferem o nome repetido sem acento e sem maiúsculas ("Multimetro" =
+  "Multímetro"; desde 26/11/2026, pelo `name_key`) e, no cadastro, o limite de 200: dois pedidos juntos com "Multímetro"
+  e "multimetro" dão 201 e 409, e o catálogo com 199 recebe só mais uma. Só ativar ou desativar não trava. Os índices
+  únicos (`uq_tool_catalog_name` e, desde 26/11/2026, `uq_tool_catalog_name_key`) ficam de reserva, com a mesma
   mensagem.
-- Sem excluir e sem ordem manual. Renomear muda para todos (o técnico guarda o id). Desativar não mexe nos técnicos: a
+- Sem ordem manual. Até 25/11/2026, sem excluir; desde 26/11/2026, exclui só a ferramenta nunca usada (`in_use` falso;
+  com uso, 409 `CATALOG_IN_USE`: desative). Renomear muda para todos (o técnico guarda o id). Desativar não mexe nos técnicos: a
   ferramenta some do app, da ficha (`tool_ids`/`tools` só trazem as ativas) e do filtro da web (que lista só as
   ativas), e volta para quem tinha marcado quando reativada. O `tool_id` de uma desativada, mandado direto na API (ou
   num link `?ferramenta=` antigo), ainda acha quem a tem guardada.
 - Sem evento em tempo real: outra aba da central vê a mudança na próxima busca (até 1 min), e o app busca o catálogo
   ao abrir o Ferramental e guarda na memória por 10 min (puxar a tela busca de novo).
-- Ferramenta que sumiu do banco (a API não exclui; só apagando direto no banco) fica guardada nos técnicos como as
-  desativadas, e o histórico do cadastro a mostra como "Ferramenta removida".
+- Ferramenta que sumiu do banco (a API só exclui a nunca usada; fora disso, só apagando direto no banco) fica guardada
+  nos técnicos como as desativadas, e o histórico do cadastro a mostra como "Ferramenta removida".
 - Na web, Configurações › seção **Técnicos** › cartão **Ferramental**: a lista com Ferramenta, Técnicos ("{n}
   técnicos" abre `/tecnicos?ferramenta={id}`), Situação e Editar, a busca a partir de 13 ferramentas, "Nova ferramenta"
   e o diálogo com "Nome" e "Ativa". Com Configurações só em Visualizar, a lista fica sem os botões. Contra uma API sem
-  estas rotas (404), o cartão mostra "O servidor ainda não tem o ferramental. Tente de novo mais tarde.".
+  estas rotas (404), o cartão mostrava "O servidor ainda não tem o ferramental. Tente de novo mais tarde.". Desde
+  26/11/2026, o mesmo cartão (`TechCatalogCard`) serve também às Áreas de atuação e às Aptidões, com o Excluir da
+  ferramenta nunca usada, e a rota que falta dá "Indisponível no momento. Tente de novo mais tarde.", com "Tentar de
+  novo": ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26).
 
 **Central** (Técnicos, ver).
 - `TechnicianOut`, na lista e no detalhe: `tool_ids` (só as ativas, na ordem do nome), `availability`, `transport`
