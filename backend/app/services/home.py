@@ -86,7 +86,7 @@ from app.schemas.home import (
     WeekFlow,
 )
 from app.schemas.quote import format_quote_code
-from app.services import durations, tag_rules
+from app.services import durations, tag_rules, technician_documents
 from app.services import field as field_svc
 from app.services import portal as portal_svc
 from app.services import quotes as quotes_svc
@@ -1911,7 +1911,12 @@ def _quality(counts: dict[str, Any], store_return: Ratio, unproductive: int) -> 
     )
 
 
-def _team(rows: list[Any], counts: dict[str, Any], onsite_hours: int) -> HomeTeam:
+def _team(
+    rows: list[Any],
+    counts: dict[str, Any],
+    onsite_hours: int,
+    certifications_due: int | None = None,
+) -> HomeTeam:
     per_technician = sorted((row.resolved for row in rows), reverse=True)
     median = counts["onsite_median_s"]
     return HomeTeam(
@@ -1922,7 +1927,17 @@ def _team(rows: list[Any], counts: dict[str, Any], onsite_hours: int) -> HomeTea
         onsite_median_minutes=round(median / 60) if median is not None else None,
         onsite_over=Ratio(count=counts["onsite_over"], base=counts["onsite_base"]),
         onsite_limit_hours=onsite_hours,
+        certifications_due=certifications_due,
     )
+
+
+async def _certifications_due(db: AsyncSession, m: Moment) -> int | None:
+    """A linha "técnicos com certificação vencendo" do cartão Equipe: os Ativos (com ou sem acesso
+    ao app) com certificação vencida ou vencendo em até 30 dias, a regra da lista de Técnicos. Sem
+    Técnicos em Visualizar: None (nem conta)."""
+    if not m.can("base.technicians"):
+        return None
+    return await technician_documents.due_count(db, today=m.today)
 
 
 def _weeks(m: Moment, counts: dict[str, Any]) -> list[WeekFlow]:
@@ -1949,7 +1964,7 @@ async def _pulse(
         tomorrow=_tomorrow(m, counts, tomorrow_technicians),
         backlog=_backlog(m, counts),
         quality=_quality(counts, store_return, unproductive),
-        team=_team(team_rows, counts, onsite_hours),
+        team=_team(team_rows, counts, onsite_hours, await _certifications_due(db, m)),
         customers=await _customers(db, m, counts["entered_30d"]),
         # Valores só para quem tem Custos extras e Pagamentos; orçamentos, com Orçamentos (sem o
         # acesso, o bloco nem é calculado e a tela mostra "sem permissão").

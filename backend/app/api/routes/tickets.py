@@ -86,6 +86,9 @@ _INTERNAL_EVENT_TYPES = {
     "offer_accepted",
     "offer_declined",
     "offer_cancelled",
+    # Avaliação do cliente registrada pela central (services/technician_ratings.py): só a gestão.
+    "rating_set",
+    "rating_removed",
 }
 
 

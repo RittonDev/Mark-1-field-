@@ -1,23 +1,31 @@
-"""Homologação: link de convite, ficha pública do técnico e análise pela gestão."""
+"""Homologação: link de convite, ficha pública do técnico e análise pela gestão.
 
-from datetime import date, datetime
+As áreas de atuação e as aptidões da ficha são as dos catálogos de Configurações › Técnicos (os
+iniciais vêm do `world`): a ficha nova manda os ids; `ficha()` manda os códigos e os nomes da ficha
+de antes da Entrega 2, que continuam aceitos (trocados pelos ids no envio).
+"""
+
+import uuid
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import AsyncClient
 from pydantic import ValidationError
-from sqlalchemy import text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
+from app.core.security import decode_token
+from app.models import ServiceArea, Skill, TechnicianApplication
 from app.schemas.onboarding import (
     AVAILABILITY,
     CODE_MAX,
     PRIVACY_VERSION,
-    SERVICE_AREAS,
     ApplicationIn,
 )
-from app.services import activities, onboarding
+from app.schemas.tech_profile import AREA_VALUE_MAX
+from app.services import activities, onboarding, technician_catalogs
 from tests.conftest import World, requires_db
 
 pytestmark = requires_db
@@ -65,7 +73,10 @@ async def test_invite_form_and_approval(
     token = await new_invite(client, world, label="Tecnico Alfa (indicação)")
     assert (await client.get(f"{API}/public/onboarding/{token}")).json()["valid"] is True
     catalog = (await client.get(f"{API}/public/onboarding/catalog")).json()
-    assert {"cftv", "impressoras"} <= {a["key"] for a in catalog["service_areas"]}
+    # As listas vêm dos catálogos: a chave é o id.
+    keys = {a["key"] for a in catalog["service_areas"]}
+    assert {world.area_ids["cftv"], world.area_ids["impressoras"]} <= keys
+    assert world.skill_ids["DVR/NVR Intelbras"] in {s["key"] for s in catalog["skills"]}
 
     # Validações do lado do servidor (o formulário também valida, mas não basta).
     bad = await client.post(
@@ -78,6 +89,12 @@ async def test_invite_form_and_approval(
     r = await client.post(f"{API}/public/onboarding/{token}", json=ficha())
     assert r.status_code == 201, r.text
     assert r.json()["protocol"].startswith("HOM-")
+    # O token dos arquivos da ficha (2 h, só dela) vem na resposta.
+    sent_at = datetime.now(UTC)
+    upload = decode_token(r.json()["upload_token"], "ficha_upload")
+    expires = datetime.fromisoformat(r.json()["upload_expires_at"])
+    assert abs(expires - (sent_at + timedelta(hours=2))) < timedelta(minutes=1)
+    assert upload["sub"].startswith("application:")
 
     # Link de uso único: depois de usado, não abre nem aceita outra ficha.
     assert (await client.get(f"{API}/public/onboarding/{token}")).json()["valid"] is False
@@ -99,6 +116,7 @@ async def test_invite_form_and_approval(
     ).json()
     assert len(pending) == 1
     app_id = pending[0]["id"]
+    assert upload["sub"] == f"application:{app_id}"
     assert (
         await client.get(f"{API}/onboarding/applications/pending-count", headers=an)
     ).json() == {"pending": 1}
@@ -158,9 +176,10 @@ async def test_invite_form_and_approval(
 async def test_approval_prefills_the_tech_profile(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
-    """Aprovada, a ficha já entra no perfil técnico (disponibilidade, transporte e CNH, aptidões),
-    marcada "ficha" com a data da ficha. O histórico do cadastro começa com a aprovação (via
-    ficha, por quem aprovou). Ferramentas e certificações são texto livre e ficam só na ficha."""
+    """Aprovada, a ficha já entra no perfil técnico (disponibilidade, transporte e CNH, aptidões e
+    áreas de atuação, pelos ids do catálogo), marcada "ficha" com a data da ficha. O histórico do
+    cadastro começa com a aprovação (via ficha, por quem aprovou). Ferramentas e certificações são
+    texto livre e ficam só na ficha."""
     an = world.analyst.headers
     token = await new_invite(client, world)
     body = ficha(
@@ -206,13 +225,26 @@ async def test_approval_prefills_the_tech_profile(
     ]
     assert me["transport"] == {"modes": ["motorcycle"], "driver_license": True}
     since = created.astimezone(ZoneInfo(settings.TIMEZONE)).date().isoformat()
-    assert me["skills"] == [{"name": "DVR/NVR Intelbras", "level": "avancado", "since": since}]
+    dvr = world.skill_ids["DVR/NVR Intelbras"]
+    assert me["skills"] == [
+        {"skill_id": dvr, "name": "DVR/NVR Intelbras", "level": "avancado", "since": since}
+    ]
+    # Os códigos da ficha de antes viraram os ids (CFTV e câmeras IP, Redes e cabeamento).
+    assert me["area_ids"] == [world.area_ids["cftv"], world.area_ids["redes"]]
     assert (me["tool_ids"], me["education"]) == ([], [])
     stamps = me["tech_profile_updated"]
     assert (stamps["tools"], stamps["education"]) == (None, None)
-    for part in ("availability", "transport", "skills"):
+    for part in ("availability", "transport", "skills", "areas"):
         assert stamps[part]["via"] == "ficha", part
         assert datetime.fromisoformat(stamps[part]["at"]) == created, part
+    async with engine.connect() as conn:
+        stored = (
+            await conn.execute(
+                text("SELECT service_areas, skills FROM users WHERE id = :i"), {"i": technician_id}
+            )
+        ).one()
+    assert sorted(stored.service_areas) == sorted([world.area_ids["cftv"], world.area_ids["redes"]])
+    assert stored.skills == [{"skill_id": dvr, "level": "avancado", "since": since}]
 
     history = await client.get(f"{API}/technicians/{technician_id}/changes", headers=an)
     assert history.status_code == 200, history.text

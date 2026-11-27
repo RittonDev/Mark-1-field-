@@ -322,6 +322,9 @@ async def test_payout_change_warns_the_central(
     assert event["audience"] == {"managers_only": True}
     assert "12345678909" not in str(event)
 
+    # O próprio técnico mudou pelo app: nada para o app dele (só a central é avisada).
+    assert [e["type"] for e in published] == ["profile.changed"]
+
     # Sem mudança, nenhum aviso (a mesma chave de novo é repetida).
     published.clear()
     again = await add_method(client, world.tech.headers, CPF_KEY)
@@ -329,16 +332,21 @@ async def test_payout_change_warns_the_central(
     assert (await patch(client, world, name="Tecnico")).status_code == 200
     assert published == []
 
-    # A central removendo também avisa (via central, sem virar alerta na web).
+    # A central removendo também avisa (via central, sem virar alerta na web) e o app do técnico
+    # relê o cadastro (me.profile_changed só para ele, sem dados nem quem fez).
     method_id = r.json()["payout_methods"][0]["id"]
     r = await client.delete(
         f"{API}/technicians/{world.tech.user.id}/payout-methods/{method_id}",
         headers=world.analyst.headers,
     )
     assert r.status_code == 204
-    assert [(e["data"], e["actor_id"]) for e in published] == [
+    changed = [e for e in published if e["type"] == "profile.changed"]
+    assert [(e["data"], e["actor_id"]) for e in changed] == [
         ({"fields": PAYOUT_FIELDS, "via": "central"}, str(world.analyst.user.id))
     ]
+    [mine] = [e for e in published if e["type"] == "me.profile_changed"]
+    assert mine["audience"] == {"user_ids": [str(world.tech.user.id)]}
+    assert mine["data"] == {} and "actor_id" not in mine and "12345678909" not in str(mine)
 
 
 async def test_payout_methods_visibility(client: AsyncClient, world: World) -> None:
@@ -529,6 +537,10 @@ async def test_central_changes_go_to_history(
         {"fields": ["phone", "password"], "via": "central"},
         {"fields": ["email", "team", "is_active"], "via": "central"},
     ]
+    # O app relê o cadastro quando a central muda algo que ele mostra (o celular, o e-mail, o
+    # grupo); a senha provisória sozinha não vai.
+    mine = [e for e in published if e["type"] == "me.profile_changed"]
+    assert [e["audience"] for e in mine] == [{"user_ids": [str(world.tech.user.id)]}] * 2
 
     # Cadastro de quem não é técnico não entra no histórico.
     r = await client.patch(

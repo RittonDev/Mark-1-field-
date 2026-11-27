@@ -377,23 +377,34 @@ async def test_central_reads_the_tech_profile(
     assert r.headers["x-total-count"] == "3"
     rows = {row["id"]: row for row in r.json()}
 
-    # Lista: o resumo do perfil técnico; a ferramenta desativada fica guardada e não aparece.
+    # Lista: o resumo do perfil técnico; a ferramenta, a aptidão e a área desativadas ficam
+    # guardadas e não aparecem. As aptidões com o id e o nome do catálogo ("desde" mais novo
+    # primeiro); as áreas pelos ids, na ordem do nome (CFTV, Redes).
+    skills, areas = world.skill_ids, world.area_ids
     full = rows[tech]
     assert full["tool_ids"] == [ids["ladder"], ids["meter"]]  # Escada, Multímetro
     assert full["availability"] == ["mon:morning", "sat:afternoon"]
     assert full["transport"] == {"modes": ["car"], "driver_license": True}
     assert full["skills"] == [
-        {"name": "Linux", "level": "avancado", "since": "2026-11-12"},
-        {"name": "Cabeamento estruturado", "level": "basico", "since": "2026-10-01"},
+        {"skill_id": skills["Linux"], "name": "Linux", "level": "avancado", "since": "2026-11-12"},
+        {
+            "skill_id": skills["Certificação de cabeamento"],
+            "name": "Certificação de cabeamento",
+            "level": "basico",
+            "since": "2026-10-01",
+        },
     ]
+    assert full["area_ids"] == [areas["cftv"], areas["redes"]]
+    assert "service_areas" not in full and full.get("areas") is None
     assert full["education_count"] == 1
     assert _when(full["tech_profile_updated_at"]) == datetime.fromisoformat(NEWEST_AT)
     assert (full["tools"], full["education"], full["tech_profile_updated"]) == (None, None, None)
 
-    # As aptidões vêm do perfil técnico (não da ficha); áreas e link continuam da ficha.
+    # As aptidões e as áreas vêm do perfil técnico (não da ficha, que a aprovação já copiou); o
+    # link continua para a ficha.
     partial = rows[other]
-    assert partial["skills"] == []
-    assert (partial["service_areas"], partial["application_id"]) == (["cftv"], ids["application"])
+    assert (partial["skills"], partial["area_ids"]) == ([], [])
+    assert partial["application_id"] == ids["application"]
     assert (partial["tool_ids"], partial["availability"]) == ([ids["ladder"]], ["sat:morning"])
     assert (partial["transport"], partial["education_count"]) == (None, 0)
     assert _when(partial["tech_profile_updated_at"]) == datetime.fromisoformat(SAT_MORNING_AT)
@@ -402,15 +413,20 @@ async def test_central_reads_the_tech_profile(
     assert (empty["tool_ids"], empty["availability"], empty["skills"]) == ([], [], [])
     assert (empty["transport"], empty["education_count"]) == (None, 0)
     assert empty["tech_profile_updated_at"] is None
-    assert (empty["service_areas"], empty["application_id"]) == ([], None)
+    assert (empty["area_ids"], empty["application_id"]) == ([], None)
 
-    # Detalhe: os nomes das ferramentas ativas (ordem alfabética), a formação e cada data.
+    # Detalhe: os nomes das ferramentas e das áreas ativas (ordem alfabética), a formação e cada
+    # data.
     r = await client.get(f"{API}/technicians/{tech}", headers=an)
     assert r.status_code == 200, r.text
     one = r.json()
     assert one["tools"] == [
         {"id": ids["ladder"], "name": "Escada"},
         {"id": ids["meter"], "name": "Multímetro"},
+    ]
+    assert one["areas"] == [
+        {"id": areas["cftv"], "name": "CFTV e câmeras IP"},
+        {"id": areas["redes"], "name": "Redes e cabeamento estruturado"},
     ]
     assert one["education"] == [
         {
@@ -429,41 +445,22 @@ async def test_central_reads_the_tech_profile(
         "transport": "ficha",
         "skills": "ficha",
         "education": "app",
+        "areas": "central",
     }
     assert _when(stamps["tools"]["at"]) == datetime.fromisoformat(NEWEST_AT)
     assert one["skills"] == full["skills"] and one["education_count"] == 1
+    assert one["area_ids"] == full["area_ids"]
     r = await client.get(f"{API}/technicians/{bravo}", headers=an)
     nothing = r.json()
-    assert (nothing["tools"], nothing["education"]) == ([], [])
+    assert (nothing["tools"], nothing["education"], nothing["areas"]) == ([], [], [])
     assert nothing["tech_profile_updated"] == dict.fromkeys(tech_profile.PARTS)
-
-    # A central não edita o perfil técnico: a ficha ignora esses campos.
-    r = await client.patch(
-        f"{API}/technicians/{tech}",
-        json={
-            "skills": [{"name": "Windows", "level": "basico"}],
-            "tool_ids": [],
-            "availability": ["sun:night"],
-            "transport": None,
-            "education": [],
-        },
-        headers=an,
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["skills"] == full["skills"]
-    assert [t["name"] for t in r.json()["tools"]] == ["Escada", "Multímetro"]
-    assert r.json()["availability"] == full["availability"]
     async with engine.connect() as conn:
         stored = (
             await conn.execute(
-                select(User.tool_ids, User.availability, User.skills, User.education).where(
-                    User.id == world.tech.user.id
-                )
+                select(User.skills, User.service_areas).where(User.id == world.tech.user.id)
             )
         ).one()
-    assert len(stored.tool_ids) == 3 and stored.availability == ["mon:morning", "sat:afternoon"]
-    assert [s["name"] for s in stored.skills] == ["Linux", "Cabeamento estruturado"]
-    assert len(stored.education) == 1
+    assert len(stored.skills) == 3 and len(stored.service_areas) == 3  # nada se perdeu
 
     # Técnico novo pela central: o detalhe vem vazio, nunca informado.
     r = await client.post(

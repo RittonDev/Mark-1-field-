@@ -184,6 +184,10 @@ class HomeTeam(BaseModel):
     onsite_median_minutes: int | None = None
     onsite_over: Ratio  # visitas com mais de onsite_limit_hours na loja / visitas com tempo
     onsite_limit_hours: int
+    # Técnicos Ativos (com ou sem acesso ao app) com certificação vencida ou vencendo em até 30
+    # dias: a mesma regra do certification_due da lista (o link da Início abre exatamente esses).
+    # None: sem Técnicos em Visualizar.
+    certifications_due: int | None = None
 
 
 class CustomerPulse(BaseModel):
