@@ -185,6 +185,7 @@ async def test_pulse_without_data(client: AsyncClient, world: World) -> None:
         "onsite_median_minutes": None,
         "onsite_over": ZERO,
         "onsite_limit_hours": 4,
+        "certifications_due": 0,
     }
     assert pulse["customers"] == {"active": 0, "entered": 0, "top": []}
     finance = pulse["finance"]
@@ -702,6 +703,7 @@ async def test_team_block(
         "onsite_median_minutes": 120,
         "onsite_over": {"count": 1, "base": 3},
         "onsite_limit_hours": 4,
+        "certifications_due": 0,
     }
 
 
