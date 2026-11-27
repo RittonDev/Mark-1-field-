@@ -260,7 +260,7 @@ export function AccessMatrix({
                         onPick={() => onChange({ [item.key]: l })}
                       />
                     ) : (
-                      <Dash key={l} title={`${item.label} é só de consulta: não tem ${LEVEL_LABEL[l]}`} />
+                      <Dash key={l} title={missingLevelTitle(item, l)} />
                     ),
                   )}
                 </div>
@@ -271,6 +271,15 @@ export function AccessMatrix({
       })}
     </div>
   );
+}
+
+/**
+ * O title do traço no nível que a tela não tem: a só de consulta não tem Editar; a ação sem tela de consulta (Editar sem
+ * Visualizar, como "Elo: confirmar ocorrências") não tem Visualizar.
+ */
+function missingLevelTitle(item: MatrixItem, level: AccessLevel): string {
+  if (level === "view" && item.levels.includes("edit")) return `${item.label} não tem ${LEVEL_LABEL[level]}`;
+  return `${item.label} é só de consulta: não tem ${LEVEL_LABEL[level]}`;
 }
 
 /** Nome do módulo no padrão do título de grupo do menu; "Misto" quando as telas têm níveis diferentes. */
@@ -287,12 +296,12 @@ function ModuleTitle({ label, mixed }: { label: string; mixed: boolean }) {
   );
 }
 
-/** Ícone do menu, nome da tela, "ajustado" e a dica do catálogo. */
+/** Ícone do menu, nome da tela, "ajustado" e a dica do catálogo. Sem item no menu, o espaço do ícone alinha o nome. */
 function ItemTitle({ item, adjusted }: { item: MatrixItem; adjusted: boolean }) {
   const Icon = NAV_ICONS[item.key];
   return (
     <span className="flex min-w-0 items-start gap-2.5">
-      {Icon ? <Icon className="mt-0.5 size-4 shrink-0 text-ink-subtle" /> : null}
+      {Icon ? <Icon className="mt-0.5 size-4 shrink-0 text-ink-subtle" /> : <span aria-hidden className="mt-0.5 size-4 shrink-0" />}
       <span className="min-w-0">
         <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <span className="font-medium text-ink">{item.label}</span>

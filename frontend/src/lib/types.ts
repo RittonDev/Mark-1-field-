@@ -144,6 +144,7 @@ export type AccessItemKey =
   | "base.customers"
   | "base.locations"
   | "base.technicians"
+  | "base.level_confirm"
   | "base.onboarding"
   | "analysis.dashboard"
   | "analysis.reports"
@@ -3297,6 +3298,82 @@ export interface LevelRefreshResult {
   diamond: number;
   at_risk: number;
 }
+
+// --------------------------------------------------------------------------- elo por pontos: regras (Etapa 1)
+
+/** As regras de Configurações › Elo, na ordem da tela (LEVEL_RULE_ORDER). */
+export type LevelRuleKey =
+  | "count_bands" | "points_bands" | "opening_bonus" | "completion_gain" | "on_time_gain" | "late" | "abandonment_loss"
+  | "rework_loss" | "min_balance" | "arrival_tolerance" | "arrival_time" | "confirmers" | "app_reasons";
+export type LevelRuleState = "pending" | "to_validate" | "approved";
+export type LevelRuleOrigin = "qa" | "default" | "central";
+export type LevelLateMode = "deduct" | "no_gain";
+export type LevelMinBalance = "negative" | "zero";
+export type LevelArrivalTime = "server" | "device";
+
+/** Início de cada categoria pela quantidade (Bronze em 0) e pelo saldo (Diamante sem fim). */
+export interface LevelCountBands { silver: number; gold: number; diamond: number }
+export interface LevelPointsBands { bronze: number; silver: number; gold: number; diamond: number }
+export interface LevelLateRule { mode: LevelLateMode; points: number | null }
+
+/** Os valores (o PUT manda todos, com a versão); null = falta definir. */
+export interface LevelRuleValues {
+  count_bands: LevelCountBands;
+  points_bands: LevelPointsBands;
+  opening_bonus: number;
+  completion_gain: number | null;
+  on_time_gain: number | null;
+  late: LevelLateRule | null;
+  abandonment_loss: number;
+  rework_loss: number;
+  min_balance: LevelMinBalance | null;
+  arrival_tolerance: number | null;
+  arrival_time: LevelArrivalTime | null;
+  app_reasons: boolean;
+}
+
+export interface LevelRuleStamp { at: ISODate; by: Ref | null }
+
+export interface LevelRuleStatus {
+  state: LevelRuleState;
+  origin: LevelRuleOrigin | null;
+  /** null = falta definir. */
+  text: string | null;
+  changed: LevelRuleStamp | null;
+  /** A última aprovação (em "to_validate", o valor mudou depois dela). */
+  approved: (LevelRuleStamp & { text: string }) | null;
+}
+
+/** GET /level-rules (só a central). active falso: vale o elo de 12 meses. */
+export interface LevelRules {
+  version: number;
+  active: boolean;
+  activated_at: ISODate | null;
+  values: LevelRuleValues;
+  items: Record<LevelRuleKey, LevelRuleStatus>;
+  missing: { define: LevelRuleKey[]; approve: LevelRuleKey[] };
+  confirmers: { profiles: Ref[]; people: Ref[] };
+  can_edit: boolean;
+}
+
+export interface LevelRulesIn extends LevelRuleValues { version: number }
+export interface LevelRulesApprove { version: number; keys: LevelRuleKey[] }
+export interface LevelRuleChangeItem { item: LevelRuleKey; from: string | null; to: string | null }
+
+/** GET /level-rules/history, da mais nova para a mais antiga; actor null = Sistema. */
+export interface LevelRuleChange {
+  id: UUID;
+  created_at: ISODate;
+  action: "seed" | "save" | "approve";
+  actor: Ref | null;
+  note: string | null;
+  changes: LevelRuleChangeItem[];
+}
+
+/** Lançamento do livro de pontos (só a central vê pontos). */
+export type LevelEntryKind =
+  | "opening" | "completion" | "on_time" | "late" | "abandonment" | "rework_failure" | "adjustment" | "reversal"
+  | "recategorization";
 
 // --------------------------------------------------------------------------- patente, estatísticas e histórico
 

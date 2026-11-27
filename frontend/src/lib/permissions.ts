@@ -37,6 +37,8 @@ export const LEVEL_RANK: Record<AccessLevel, number> = { none: 0, view: 1, edit:
 
 const FULL: AccessLevel[] = ["none", "view", "edit"];
 const VIEW_ONLY: AccessLevel[] = ["none", "view"];
+// Uma ação, sem tela de consulta: faz (Editar) ou não faz.
+const CONFIRM: AccessLevel[] = ["none", "edit"];
 
 // ------------------------------------------------------------------ catálogo (ordem do menu)
 
@@ -76,6 +78,8 @@ export const ACCESS_ITEMS: AccessItemDef[] = [
   catalogItem("base.customers", "Clientes", "/clientes", FULL),
   catalogItem("base.locations", "Locais", "/locais", FULL),
   catalogItem("base.technicians", "Técnicos", "/tecnicos", FULL, "Editar inclui Liberar acesso"),
+  // A fila das Etapas 3 e 4 (o href já fica reservado); até lá, nenhuma rota usa o item.
+  catalogItem("base.level_confirm", "Elo: confirmar ocorrências", "/pendencias-elo", CONFIRM, "Confirmar ou dispensar abandono e retorno"),
   catalogItem("base.onboarding", "Homologação", "/homologacao", FULL),
   catalogItem("analysis.dashboard", "Dashboard", "/dashboard", VIEW_ONLY),
   catalogItem("analysis.reports", "Relatórios", "/relatorios", VIEW_ONLY),
@@ -125,9 +129,11 @@ function topLevels(): Record<AccessItemKey, AccessLevel> {
 function defaultsFor(role: "supervisor" | "analyst"): Record<AccessItemKey, AccessLevel> {
   const items = topLevels();
   if (role === "analyst") {
-    // O analista lia Usuários sem alterar, e Configurações não estava no menu dele.
+    // O analista lia Usuários sem alterar, e Configurações não estava no menu dele. Confirmar abandono e retorno
+    // fica com a supervisão (o perfil criado na tela parte daqui).
     items["setup.users"] = "view";
     items["setup.settings"] = "none";
+    items["base.level_confirm"] = "none";
   }
   return items;
 }

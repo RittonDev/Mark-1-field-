@@ -15,8 +15,14 @@ import type {
   InvoiceFileKind,
   InvoiceStatus,
   Level,
+  LevelArrivalTime,
+  LevelEntryKind,
+  LevelLateMode,
   LevelMedalKind,
+  LevelMinBalance,
   LevelOccurrenceKind,
+  LevelRuleKey,
+  LevelRuleState,
   LevelTier,
   OfferCancelReason,
   OfferState,
@@ -1246,6 +1252,49 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
   late: "Chegada fora do horário",
   rework: "Retorno",
   unproductive: "Visita perdida",
+};
+
+// --------------------------------------------------------------------------- elo por pontos: regras (Etapa 1)
+
+/** As regras de Configurações › Elo na ordem da tela (= RULE_KEYS no servidor). Sem números: o app recebe este arquivo. */
+export const LEVEL_RULE_ORDER: LevelRuleKey[] = [
+  "count_bands", "points_bands", "opening_bonus", "completion_gain", "on_time_gain", "late", "abandonment_loss",
+  "rework_loss", "min_balance", "arrival_tolerance", "arrival_time", "confirmers", "app_reasons",
+];
+
+/** O nome de cada regra (= RULE_LABELS no servidor). */
+export const LEVEL_RULE_LABEL: Record<LevelRuleKey, string> = {
+  count_bands: "Abertura por atendimentos",
+  points_bands: "Faixas de pontos",
+  opening_bonus: "Bônus de abertura",
+  completion_gain: "Atendimento concluído",
+  on_time_gain: "Chegada dentro do SLA",
+  late: "Chegada fora do SLA",
+  abandonment_loss: "Abandono confirmado",
+  rework_loss: "Retorno com falha confirmada",
+  min_balance: "Saldo mínimo",
+  arrival_tolerance: "Tolerância do SLA de chegada",
+  arrival_time: "Hora da chegada",
+  confirmers: "Quem confirma abandono e retorno",
+  app_reasons: "Motivos no app",
+};
+
+export const LEVEL_RULE_STATE: Record<LevelRuleState, string> = { pending: "Falta definir", to_validate: "A validar", approved: "Aprovado" };
+export const LEVEL_LATE_MODE: Record<LevelLateMode, string> = { deduct: "Desconta pontos", no_gain: "Só deixa de ganhar" };
+export const LEVEL_MIN_BALANCE: Record<LevelMinBalance, string> = { negative: "Pode ficar negativo", zero: "Para em zero" };
+export const LEVEL_ARRIVAL_TIME: Record<LevelArrivalTime, string> = { server: "Hora do servidor", device: "Hora do aparelho" };
+
+/** O tipo do lançamento no livro de pontos (= LEVEL_ENTRY_KIND_LABELS no servidor). */
+export const LEVEL_ENTRY_KIND: Record<LevelEntryKind, string> = {
+  opening: "Abertura",
+  completion: "Atendimento concluído",
+  on_time: "Chegada dentro do SLA",
+  late: "Chegada fora do SLA",
+  abandonment: "Abandono confirmado",
+  rework_failure: "Retorno com falha confirmada",
+  adjustment: "Ajuste excepcional",
+  reversal: "Estorno",
+  recategorization: "Recategorização",
 };
 
 // --------------------------------------------------------------------------- aviso de privacidade (LGPD)
