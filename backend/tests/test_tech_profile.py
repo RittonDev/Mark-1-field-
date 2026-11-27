@@ -2,11 +2,13 @@
 
 Sem banco: os textos curtos (os mesmos casos das sondas de lib/constants.ts), os turnos que uma
 visita toca e o sinal da disponibilidade na sugestão, as mensagens de cada item do PATCH
-/me/profile, a normalização e o "o que conta como mudança" de `wanted`/`apply`, o que a ficha da
-homologação traz na aprovação e a cópia desse mapa na migração f5a7c9e1b3d6.
+/me/profile, a normalização e o "o que conta como mudança" de `wanted`/`apply` (aptidões e áreas
+pelo id do catálogo, com um catálogo de mentira), o carimbo "central", o que a ficha da homologação
+traz na aprovação e a cópia desse mapa na migração f5a7c9e1b3d6 (comparada com o resultado fixo de
+antes: a ficha agora guarda ids).
 
 Com banco (requires_db): um PATCH por parte relido do banco (o PATCH só grava quando o histórico
-muda: "200 sem gravar" aparece aqui), as mensagens 422 com o rótulo, o "desde" pelo nome, o id dos
+muda: "200 sem gravar" aparece aqui), as mensagens 422 com o rótulo, o "desde" pelo id, o id dos
 cursos, a ferramenta desativada, os textos do histórico do cadastro, o aviso profile.changed, os
 caracteres invisíveis, duas gravações ao mesmo tempo e o backfill da migração pelo driver.
 Dados fictícios (Tecnico Alfa, Escola Exemplo, @exemplo.com).
@@ -33,8 +35,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
 from app.core.enums import ApplicationStatus
-from app.models import TechnicianApplication, TechnicianTool, User
-from app.schemas.my_profile import SLOT_MAX, MyProfileUpdate
+from app.models import Skill, TechnicianApplication, TechnicianTool, User
+from app.schemas.my_profile import (
+    PROFESSIONAL_FIELDS,
+    SLOT_MAX,
+    MyProfileUpdate,
+    ProfessionalProfileIn,
+)
 from app.schemas.onboarding import AVAILABILITY, SKILL_LEVELS, VEHICLE_TYPES
 from app.schemas.tech_profile import (
     EducationIn,
@@ -43,9 +50,11 @@ from app.schemas.tech_profile import (
     TechnicianToolUpdate,
     TransportIn,
 )
-from app.services import realtime, validation_messages
+from app.schemas.technician import TechnicianUpdate
+from app.services import realtime, technician_catalogs, validation_messages
 from app.services import tech_profile as tp
-from app.services.errors import WorkflowError
+from app.services.errors import CodedError, WorkflowError
+from app.services.technician_catalogs import CatalogInfo
 from tests.conftest import World, requires_db
 
 TZ = ZoneInfo(settings.TIMEZONE)
@@ -176,8 +185,9 @@ def test_short_texts() -> None:
 
 def test_control_and_format_characters_are_dropped() -> None:
     """Controles (Cc) e formatação (Cf: largura zero, BOM, direção) saem antes de contar e de
-    comparar; tab, LF, VT, FF e CR viram espaço. Nome só de invisíveis cai na mensagem do tamanho,
-    e a mesma aptidão com um espaço de largura zero repete."""
+    comparar; tab, LF, VT, FF e CR viram espaço. Nome só de invisíveis cai na mensagem do tamanho
+    (a aptidão pelo nome) ou fica vazio para o serviço recusar (o nome do catálogo), e a mesma
+    aptidão com um espaço de largura zero chega igual ao serviço (que recusa a repetida)."""
     assert tp.clean("Lin\u200bux") == "Linux"
     assert tp.clean("\ufeff\u202eRedes\u202c ") == "Redes"
     assert tp.clean("Curso\u0000 Exemplo\u0007") == "Curso Exemplo"
@@ -235,6 +245,15 @@ def test_skill_item_is_cleaned_and_checked() -> None:
     # O "desde" é do servidor.
     sent = {"name": "Linux", "level": "basico", "since": "2026-01-01"}
     assert _problems(TechnicianSkillIn, sent) == [(("since",), "campo não aceito")]
+    # Pelo catálogo (o app novo e a central): o id; um e só um dos dois.
+    skill_id = uuid.uuid4()
+    item = TechnicianSkillIn.model_validate({"skill_id": str(skill_id), "level": "basico"})
+    assert (item.skill_id, item.name) == (skill_id, None)
+    both = {"skill_id": str(skill_id), "name": "Linux", "level": "basico"}
+    assert _problems(TechnicianSkillIn, both) == [((), "Escolha a aptidão")]
+    assert _problems(TechnicianSkillIn, {"level": "basico"}) == [((), "Escolha a aptidão")]
+    [(loc, text)] = _problems(TechnicianSkillIn, {"skill_id": "x", "level": "basico"})
+    assert loc == ("skill_id",) and text
 
 
 def test_education_item_is_cleaned_and_checked() -> None:
