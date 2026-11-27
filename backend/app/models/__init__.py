@@ -19,6 +19,7 @@ from app.models.expense import SystemSetting, TicketExpense
 from app.models.forms import FormTemplate, TicketForm
 from app.models.invoice import TechnicianInvoice
 from app.models.legacy import LegacyRef
+from app.models.level_points import LevelRuleChange, TechnicianLevelEntry
 from app.models.offer import TicketOffer
 from app.models.onboarding import OnboardingInvite, TechnicianApplication
 from app.models.part_request import TicketPartRequest
@@ -53,6 +54,7 @@ __all__ = [
     "EmailOutbox",
     "FormTemplate",
     "LegacyRef",
+    "LevelRuleChange",
     "Location",
     "OnboardingInvite",
     "Project",
@@ -82,6 +84,7 @@ __all__ = [
     "TechnicianFavorite",
     "TechnicianInvoice",
     "TechnicianLevel",
+    "TechnicianLevelEntry",
     "TechnicianLevelWaiver",
     "TechnicianPayoutMethod",
     "TechnicianRating",
