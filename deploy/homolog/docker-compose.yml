@@ -59,13 +59,15 @@ services:
       # cabeçalho forjado por quem acessa de fora não engana o limite de tentativas (login, CEP, ficha, senha).
       FORWARDED_ALLOW_IPS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
     # Migrações, dados de exemplo (o seed recusa ENVIRONMENT=production, por isso só ele roda como
-    # development) e a API. Uma instância só: a migração no start vale aqui.
+    # development) e a API. Uma instância só: a migração no start vale aqui. O "--catalogo" (tipos de serviço e
+    # motivos de violação, idempotente) roda à parte: se o seed parar no meio, o catálogo entra assim mesmo.
     command:
       - sh
       - -c
       - >-
         alembic upgrade head &&
         (ENVIRONMENT=development python -m app.seed || echo "seed: falhou; a API sobe assim mesmo") &&
+        (ENVIRONMENT=development python -m app.seed --catalogo || echo "seed --catalogo: falhou") &&
         exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
     volumes:
       - media:/data/media
