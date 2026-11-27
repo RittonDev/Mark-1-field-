@@ -8,6 +8,7 @@ from pydantic_core import PydanticCustomError
 from app.core.enums import OperationalStatus
 from app.schemas import personal
 from app.schemas.common import Ref
+from app.schemas.my_profile import ProfessionalProfileIn
 from app.schemas.records import WorkSchedule, WorkScheduleOut
 from app.schemas.tech_profile import (
     EducationOut,
@@ -15,6 +16,7 @@ from app.schemas.tech_profile import (
     TechProfileStamps,
     TransportOut,
 )
+from app.schemas.technician_document import CertificationDueOut
 from app.schemas.technician_level import LevelSummary
 from app.schemas.user import UnavailabilityPeriodOut
 
@@ -41,16 +43,24 @@ class TechnicianOut(BaseModel):
     avatar_url: str | None = None
     on_shift: bool = False
     open_tickets: int = 0
-    # Perfil da homologação (quando o técnico entrou pela ficha): áreas e o link da ficha.
-    service_areas: list[str] = []
-    # Aptidões do perfil técnico (users.skills; as da ficha aprovada foram copiadas na migração),
-    # com o "desde".
+    # Aptidões do perfil técnico (users.skills): só as ativas do catálogo, com o id e o nome atual
+    # dele, o "desde" mais novo primeiro.
     skills: list[TechnicianSkillOut] = []
+    # Áreas de atuação (users.service_areas): as ativas do catálogo, na ordem do nome. Lista e
+    # detalhe; `areas` (com o nome) só no detalhe, null na lista.
+    area_ids: list[uuid.UUID] = []
+    areas: list[Ref] | None = None
+    # A certificação atual mais urgente: vencida ou vencendo em até 30 dias (null: nenhuma).
+    certification_due: CertificationDueOut | None = None
+    # Avaliações do cliente (só a central): a média com 1 casa (null sem avaliação) e quantas.
+    rating_average: float | None = None
+    rating_count: int = 0
+    # A ficha da homologação aprovada (quando o técnico entrou por ela).
     application_id: uuid.UUID | None = None
-    # Perfil técnico: o técnico mantém no app; a central só vê (services/tech_profile.py). Na
-    # lista e no detalhe: as ferramentas ativas (ordem do nome; a web dá o nome pelo catálogo), os
-    # turnos (ordem da grade), o transporte (null: nunca informou), quantos cursos e a data da
-    # parte mudada por último.
+    # Perfil técnico: o técnico mantém no app e a central também edita (Técnicos em Editar;
+    # services/tech_profile.py). Na lista e no detalhe: as ferramentas ativas (ordem do nome; a web
+    # dá o nome pelo catálogo), os turnos (ordem da grade), o transporte (null: nunca informou),
+    # quantos cursos e a data da parte mudada por último.
     tool_ids: list[uuid.UUID] = []
     availability: list[str] = []
     transport: TransportOut | None = None
@@ -126,11 +136,13 @@ class TechnicianCreate(BaseModel):
         return v.strip().lower()
 
 
-class TechnicianUpdate(BaseModel):
+class TechnicianUpdate(ProfessionalProfileIn):
     """PATCH /technicians/{id}: só os campos enviados mudam (a web manda só o que mudou; null ou
     vazio limpa). Os dados pessoais e da empresa a central muda sem senha; o CPF ela muda e limpa
     (único entre os usuários). RG e empresa são conferidos em grupo com o que está gravado
-    (services/technicians.update). Veículo e perfil profissional: só o técnico, no app."""
+    (services/technicians.update). O perfil profissional (ProfessionalProfileIn: veículo,
+    indisponibilidade e as partes do perfil técnico) com as regras e as mensagens do app, carimbo
+    "central" por parte. Campo desconhecido é ignorado (sem extra="forbid")."""
 
     name: str | None = Field(default=None, min_length=3, max_length=160)
     email: EmailStr | None = None

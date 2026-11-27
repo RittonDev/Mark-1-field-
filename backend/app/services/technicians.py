@@ -1,12 +1,15 @@
 """Base técnica: analistas e gestores cuidam do cadastro e do acesso dos técnicos ao app.
 
-Só mexe em usuários técnicos (analistas e clientes do portal ficam em Usuários). O perfil técnico
-(ferramental, disponibilidade, transporte, aptidões e formação) e o veículo o técnico mantém no
-app: aqui a central só lê (to_out) e filtra a base por ferramenta e por dia/turno
-(list_technicians); o PATCH da ficha não mexe neles. Dados pessoais, endereço em partes e empresa a
-central muda (sem senha); o CPF ela muda e limpa. Trocar o e-mail troca o login na hora e manda o
-link de validação (services/account.central_email_changed). As formas de recebimento ficam com
-Pagamentos (services/payout_methods.py): aqui só a contagem.
+Só mexe em usuários técnicos (analistas e clientes do portal ficam em Usuários). Dados pessoais,
+endereço em partes e empresa a central muda (sem senha); o CPF ela muda e limpa. Trocar o e-mail
+troca o login na hora e manda o link de validação (services/account.central_email_changed). O
+perfil profissional (veículo, indisponibilidade e o perfil técnico: ferramental, disponibilidade,
+transporte, aptidões, formação e áreas de atuação) o técnico mantém no app e a central também edita
+no mesmo PATCH, com as regras e as mensagens do app e o carimbo "central" (services/tech_profile.py;
+o app recebe me.profile_changed e relê o cadastro). Uma gravação por vez por técnico
+(`lock_technician`, a mesma trava do app). A lista filtra a base por ferramenta e por dia/turno
+(list_technicians) e traz a certificação vencendo e a média das avaliações do cliente. As formas de
+recebimento ficam com Pagamentos (services/payout_methods.py): aqui só a contagem.
 """
 
 import asyncio
@@ -35,6 +38,7 @@ from app.models.user_change import VIA_CENTRAL
 from app.schemas import personal
 from app.schemas.account import EmailLogOut, EmailQueuedStatus
 from app.schemas.common import Ref
+from app.schemas.my_profile import PROFESSIONAL_FIELDS
 from app.schemas.tech_profile import DayPeriod, Weekday
 from app.schemas.technician import (
     Credential,
@@ -52,6 +56,7 @@ from app.services import (
     search,
     storage,
     tech_profile,
+    technician_catalogs,
     technician_levels,
     technician_regions,
     unavailability,
@@ -148,6 +153,19 @@ async def get_technician(db: AsyncSession, user_id: uuid.UUID) -> User:
     return user
 
 
+async def lock_technician(db: AsyncSession, user: User) -> None:
+    """Trava a linha do técnico até o fim da transação e relê o cadastro do banco: uma gravação
+    por vez (a segunda espera a primeira e trabalha sobre o que ela gravou). O app (Meu cadastro)
+    e a central (o PATCH da ficha) usam a mesma trava: os dois mexem no perfil profissional e no
+    carimbo dele."""
+    await db.execute(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+
+
 async def _email_in_use(db: AsyncSession, email: str, exclude: uuid.UUID | None = None) -> bool:
     stmt = select(User.id).where(func.lower(User.email) == email.lower())
     if exclude is not None:
@@ -191,9 +209,13 @@ async def to_out(
     db: AsyncSession, users: list[User], *, detail: bool = False
 ) -> list[TechnicianOut]:
     """A ficha dos técnicos para a central. `detail` (um técnico: GET /technicians/{id} e as
-    respostas do cadastro) traz também os nomes das ferramentas, a formação, a data de cada parte
-    do perfil técnico, os dados pessoais, a empresa e o veículo; na lista esses vão null."""
-    from app.services import tracking  # import tardio, como nas sugestões (tracking puxa tickets)
+    respostas do cadastro) traz também os nomes das ferramentas e das áreas, a formação, a data de
+    cada parte do perfil técnico, os dados pessoais, a empresa e o veículo; na lista esses vão
+    null. Leitura a mais por página: os catálogos (inteiros, só quando alguém tem o item), a
+    certificação vencendo e a média das avaliações."""
+    # Imports tardios, como nas sugestões: tracking puxa tickets; documentos e avaliações puxam o
+    # histórico do cadastro e as OS.
+    from app.services import technician_documents, technician_ratings, tracking
 
     ids = [u.id for u in users]
     if not ids:
@@ -210,23 +232,28 @@ async def to_out(
             )
         ).all()
     )
-    # Da ficha aprovada, o link e as áreas de reserva: as áreas são do cadastro (copiadas da ficha
-    # na aprovação e pela migração); a da ficha só vale com o cadastro vazio.
-    profiles = {
-        user_id: (application_id, areas)
-        for user_id, application_id, areas in await db.execute(
-            select(
-                TechnicianApplication.user_id,
-                TechnicianApplication.id,
-                TechnicianApplication.service_areas,
-            ).where(
+    # O link da ficha aprovada (as áreas são do cadastro: a aprovação e a migração copiaram).
+    applications = {
+        user_id: application_id
+        for user_id, application_id in await db.execute(
+            select(TechnicianApplication.user_id, TechnicianApplication.id).where(
                 TechnicianApplication.user_id.in_(ids),
                 TechnicianApplication.status == ApplicationStatus.APPROVED,
             )
         )
     }
-    # Ferramental: o catálogo (ativas e desativadas; ≤ 200 linhas), só se alguém marcou alguma.
+    # Ferramental, Aptidões e Áreas de atuação: o catálogo inteiro (ativos e desativados; ≤ 300
+    # linhas cada), só se alguém tem algum item dele.
     catalog = await tech_profile.tool_catalog(db) if any(u.tool_ids for u in users) else {}
+    skills = (
+        await technician_catalogs.catalog(db, "skill") if any(u.skills for u in users) else {}
+    )
+    areas = (
+        await technician_catalogs.catalog(db, "area") if any(u.service_areas for u in users) else {}
+    )
+    # A certificação vencendo (ou vencida) e as avaliações do cliente: uma consulta cada.
+    due = await technician_documents.due_map(db, ids)
+    ratings = await technician_ratings.summaries(db, ids)
     # Serviços que faz (ids gravados na ficha), com o nome atual do tipo de serviço.
     wanted = {sid for u in users for sid in (u.service_type_ids or [])}
     service_names: dict[str, str] = {}
@@ -255,10 +282,10 @@ async def to_out(
     today = personal.local_today()
     out = []
     for u in users:
-        application_id, areas = profiles.get(u.id, (None, None))
         education = tech_profile.education_of(u)
         changer = u.operational_changed_by_id
         methods, payout_changed_at = payouts.get(u.id, (0, None))
+        rating_average, rating_count = ratings.get(u.id, (None, 0))
         out.append(
             TechnicianOut(
                 id=u.id,
@@ -278,9 +305,13 @@ async def to_out(
                 avatar_url=avatar_url(u),
                 on_shift=u.id in on_shift,
                 open_tickets=open_counts.get(u.id, 0),
-                service_areas=list(u.service_areas or areas or []),
-                skills=tech_profile.skills_of(u),
-                application_id=application_id,
+                skills=tech_profile.skills_of(u, skills),
+                area_ids=tech_profile.active_area_ids(u, areas),
+                areas=tech_profile.areas_of(u, areas) if detail else None,
+                certification_due=due.get(u.id),
+                rating_average=rating_average,
+                rating_count=rating_count,
+                application_id=applications.get(u.id),
                 base_city=u.base_city,
                 base_state=u.base_state,
                 base_source=u.base_source,  # type: ignore[arg-type]

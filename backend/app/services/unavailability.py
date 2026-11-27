@@ -1,10 +1,11 @@
 """Indisponibilidade do técnico: períodos de/até, sem motivo (LGPD).
 
 users.unavailability guarda [{"id", "start", "end"}] com as datas locais "AAAA-MM-DD" (os dois dias
-inclusive). O app (PATCH /me/profile) manda a lista inteira dos períodos que não terminaram;
-`normalize` confere, tira os que já acabaram, mantém o id gravado e dá id novo ao resto. A leitura
-(`current`) mostra só os de fim >= hoje, pelo início. No período o técnico sai da sugestão e das
-ofertas (`days_of`, `on_day`); a atribuição manual só avisa.
+inclusive). O app (PATCH /me/profile) e a central (PATCH /technicians/{id}, Técnicos em Editar)
+mandam a lista inteira dos períodos que não terminaram; `wanted` diz se mudou e `normalize` confere,
+tira os que já acabaram, mantém o id gravado e dá id novo ao resto. A leitura (`current`) mostra só
+os de fim >= hoje, pelo início. No período o técnico sai da sugestão e das ofertas (`days_of`,
+`on_day`); a atribuição manual só avisa.
 
 Puro, sem banco. Os textos são os de lib/constants.ts (periodText, periodShort) e as mensagens as de
 lib/unavailability.ts (PERIOD_MSG), sem o ponto final.
@@ -17,6 +18,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
+from app.services.errors import WorkflowError
 
 PERIODS_MAX = 10
 HORIZON_DAYS = 365
@@ -110,6 +112,26 @@ def current(stored: Iterable[Any] | None, today: date) -> list[dict[str, str]]:
     """Os períodos que não acabaram (fim >= hoje), pelo início."""
     day = today.isoformat()
     return [p for p in _stored(stored) if p["end"] >= day]
+
+
+def _days(periods: Iterable[Mapping[str, Any]]) -> list[tuple[str, str]]:
+    return sorted((str(p["start"]), str(p["end"])) for p in periods)
+
+
+def wanted(
+    sent: Iterable[Any] | None, stored: Iterable[Any] | None, today: date
+) -> list[dict[str, str]] | None:
+    """A regra do PATCH (app e central): a lista inteira dos períodos que não acabaram vira a lista
+    a gravar (`normalize`), ou None quando as datas são as mesmas dos vigentes (os ids gravados
+    ficam; reenviar igual não é mudança). WorkflowError (422) com a mensagem da tela quando um
+    período não vale."""
+    try:
+        periods = normalize(sent or [], stored, today)
+    except ValueError as exc:
+        raise WorkflowError(str(exc)) from None
+    if _days(periods) == _days(current(stored, today)):
+        return None
+    return periods
 
 
 def on_day(stored: Iterable[Any] | None, day: date) -> dict[str, str] | None:
