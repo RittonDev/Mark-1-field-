@@ -78,6 +78,17 @@ e as fotos ficam nos volumes `pgdata` e `media`. A migração roda no start da A
 **Desligar:** parar o recurso no Coolify e apagar os dois registros DNS. Apagar o recurso ou os volumes apaga o
 banco de teste (ação sem volta).
 
+## Guia de instalação para os técnicos (PDF)
+
+[guia/guia-instalacao-maxx-field.pdf](guia/guia-instalacao-maxx-field.pdf): duas páginas para mandar no grupo de
+WhatsApp, com o link e o QR code de `https://tecnico-homolog.maxxsystem.net`, a instalação no Android (Chrome) e no
+iPhone (Safari), o primeiro acesso, as permissões, o que muda na versão de teste e como tirar o app do celular.
+
+Endereço novo pede PDF novo: troque `APP_URL` e `APP_HOST` em [guia/gerar_guia.py](guia/gerar_guia.py) e rode num
+contêiner Python com `reportlab`, numa pasta com o script, o ícone (`mobile/public/icons/icon-512.png` como
+`icon.png`) e as fontes Manrope 400/600/700/800 (as de `@expo-google-fonts/manrope`, em `mobile/node_modules`):
+`python gerar_guia.py <pasta>`.
+
 ## Testar no computador (antes de publicar)
 
 Na raiz do repositório, com um arquivo de variáveis **fora do repositório** (senhas aleatórias, `http` e os nomes
