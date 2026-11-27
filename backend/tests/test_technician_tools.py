@@ -120,9 +120,9 @@ async def test_central_keeps_the_tool_catalog(
     async with engine.connect() as conn:
         row = (
             await conn.execute(
-                select(TechnicianTool.name, TechnicianTool.name_key, TechnicianTool.is_active).where(
-                    TechnicianTool.id == uuid.UUID(meter["id"])
-                )
+                select(
+                    TechnicianTool.name, TechnicianTool.name_key, TechnicianTool.is_active
+                ).where(TechnicianTool.id == uuid.UUID(meter["id"]))
             )
         ).one()
     assert tuple(row) == ("Multímetro", "multimetro", False)

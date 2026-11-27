@@ -334,7 +334,9 @@ async def test_approval_passes_the_ficha_documents_to_the_technician(
     received = await submit(client, token, full_ficha())
     assert set(received) == {"protocol", "email_verification", "upload_token", "upload_expires_at"}
     app_id = await application_id(client, world, "tecnico.alfa@exemplo.com")
-    doc_id, path = await _ficha_document(engine, tmp_path, app_id, "NR10 Exemplo", date(2027, 1, 31))
+    doc_id, path = await _ficha_document(
+        engine, tmp_path, app_id, "NR10 Exemplo", date(2027, 1, 31)
+    )
     # A Homologação lista o arquivo da ficha (com o link).
     detail = (await client.get(f"{APPS}/{app_id}", headers=an)).json()
     assert [(d["id"], d["kind"], d["title"]) for d in detail["documents"]] == [

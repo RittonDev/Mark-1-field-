@@ -387,7 +387,10 @@ async def test_ficha_areas_and_skills_come_from_the_catalog(
     )
     assert r.status_code == 200, r.text
     await client.patch(f"{API}/technician-skills/{rack}", json={"is_active": False}, headers=sup)
-    listed = {a["email"]: a for a in (await client.get(f"{API}/onboarding/applications", headers=an)).json()}
+    listed = {
+        a["email"]: a
+        for a in (await client.get(f"{API}/onboarding/applications", headers=an)).json()
+    }
     new = listed["nova@exemplo.com"]
     assert new["areas"] == [
         {"id": areas["redes"], "name": "Redes e cabeamento estruturado"},
@@ -411,7 +414,9 @@ async def test_ficha_catalog_rules(client: AsyncClient, world: World, engine: As
     url = f"{API}/public/onboarding/{token}"
     areas, skills = world.area_ids, world.skill_ids
     sup = world.supervisor.headers
-    await client.patch(f"{API}/technician-areas/{areas['energia']}", json={"is_active": False}, headers=sup)
+    await client.patch(
+        f"{API}/technician-areas/{areas['energia']}", json={"is_active": False}, headers=sup
+    )
     linux = {"skill_id": skills["Linux"], "level": "basico"}
 
     def coded(detail: str, code: str) -> dict:

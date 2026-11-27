@@ -395,13 +395,11 @@ async def test_public_catalog_lists_active_areas_and_skills(
 
     # Desativada some; a nova entra; renomeada sai com o nome novo.
     cftv, linux = world.area_ids["cftv"], world.skill_ids["Linux"]
-    await client.patch(
-        f"{CATALOGS['area'][0]}/{cftv}", json={"is_active": False}, headers=sup
-    )
+    await client.patch(f"{CATALOGS['area'][0]}/{cftv}", json={"is_active": False}, headers=sup)
     await client.patch(
         f"{CATALOGS['skill'][0]}/{linux}", json={"name": "Linux (servidores)"}, headers=sup
     )
-    new = (await client.post(CATALOGS["area"][0], json={"name": "Fibra óptica"}, headers=sup))
+    new = await client.post(CATALOGS["area"][0], json={"name": "Fibra óptica"}, headers=sup)
     catalog = (await client.get(url)).json()
     keys = [item["key"] for item in catalog["service_areas"]]
     assert cftv not in keys and new.json()["id"] in keys
