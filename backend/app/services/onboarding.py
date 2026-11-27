@@ -1,12 +1,16 @@
 """Homologação de técnicos: convites, ficha pública e análise (aprovar, reprovar, reabrir).
 
 - Ficha: ao enviar, o link de validação do e-mail vai para a fila (reason "signup"); a gestão
-  reenvia enquanto ela está em análise.
+  reenvia enquanto ela está em análise. As áreas de atuação e as aptidões vêm dos catálogos de
+  Configurações › Técnicos (services/technician_catalogs.py): a ficha guarda os ids (a aberta antes
+  da Entrega 2 manda os códigos e os nomes, trocados pelos ids no envio) e o envio marca o 1º uso.
+  Os arquivos (certificações, documentos pessoais e currículo) vão depois do envio, com o token de
+  2 h da resposta (services/technician_documents.py).
 - Aprovar é um passo só: cria o técnico com tudo o que a ficha coletou (dados pessoais, endereço em
-  partes, empresa, veículo, áreas, a validação do e-mail e o perfil técnico), grava a linha
-  "Aprovado na homologação" no histórico do cadastro (via ficha) e põe a boas-vindas na fila. A
-  ficha de antes (endereço numa linha, sem o número) tem o endereço separado com a regra da
-  migração (personal.split_address_line).
+  partes, empresa, veículo, a validação do e-mail e o perfil técnico com as áreas), passa os
+  arquivos da ficha para ele, grava a linha "Aprovado na homologação" no histórico do cadastro (via
+  ficha, um item por arquivo) e põe a boas-vindas na fila. A ficha de antes (endereço numa linha,
+  sem o número) tem o endereço separado com a regra da migração (personal.split_address_line).
 - Reprovar guarda o motivo e apaga a senha da ficha. A reprovada pode ser reaberta (com motivo) e
   analisada de novo. Aprovada sem senha: com o e-mail validado, a boas-vindas leva o link para
   criar a senha; sem a validação, não (o link entregaria a conta a quem tem o endereço digitado
@@ -15,14 +19,15 @@
 
 LGPD: a ficha reprovada (ou pendente sem análise) não fica guardada para sempre. Depois de
 ONBOARDING_RETENTION_DAYS contados da última análise (a pendente, do envio ou da reabertura) a
-rotina periódica apaga a ficha e a foto, com os links e os e-mails dela (`purge_expired`), e a
-gestão apaga na hora quando o próprio técnico pede (`delete_application`).
+rotina periódica apaga a ficha, a foto e os arquivos, com os links e os e-mails dela
+(`purge_expired`), e a gestão apaga na hora quando o próprio técnico pede (`delete_application`).
 """
 
 import hashlib
 import re
 import secrets
 import uuid
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -35,6 +40,7 @@ from app.core.config import settings
 from app.core.documents import is_valid_cnpj, is_valid_cpf, normalize_document
 from app.core.enums import ApplicationStatus, EmailTemplate, OperationalStatus, UserRole
 from app.core.security import hash_password_async
+from app.core.text import fold
 from app.db.base import utcnow
 from app.models import EmailOutbox, OnboardingInvite, Team, TechnicianApplication, User
 from app.models.user_change import VIA_FICHA
@@ -44,12 +50,23 @@ from app.schemas.onboarding import (
     PRIVACY_VERSION,
     ApplicationApprove,
     ApplicationIn,
+    ApplicationSkillOut,
+    ApplicationSummary,
     InviteCreate,
     InviteState,
 )
-from app.services import cities, mail, storage, tech_profile, user_history
+from app.services import (
+    cities,
+    mail,
+    storage,
+    tech_profile,
+    technician_catalogs,
+    technician_documents,
+    user_history,
+)
 from app.services.errors import CodedError, NotFound, WorkflowError
 from app.services.realtime import bus
+from app.services.technician_catalogs import CatalogInfo
 
 MAX_PHOTO_BYTES = 2 * 1024 * 1024
 LINK_KIND = "onboarding"
@@ -258,6 +275,10 @@ def _add_review(
 async def submit(
     db: AsyncSession, invite: OnboardingInvite, data: ApplicationIn
 ) -> TechnicianApplication:
+    """Grava a ficha (o commit é da rota). As áreas e as aptidões pelo catálogo: o id ou, na ficha
+    aberta antes da Entrega 2, o código e o nome (technician_catalogs.resolve_areas e
+    resolve_skills: desconhecida ou desativada recusa, e a área é obrigatória com o catálogo tendo
+    alguma ativa); depois, o 1º uso delas fica marcado."""
     if company_email(data.email):
         raise WorkflowError(COMPANY_EMAIL)
     if await email_taken(db, data.email):
@@ -268,6 +289,8 @@ async def submit(
         raise WorkflowError(
             "Já existe um cadastro com este CPF. Se você já enviou a ficha, aguarde a análise."
         )
+    areas = await technician_catalogs.resolve_areas(db, data.service_areas, [], ficha=True)
+    skills = await technician_catalogs.resolve_skills(db, data.skills, [], today=None)
     # Valida a foto antes do bcrypt e de gravar qualquer arquivo.
     photo = _decode_photo(data.photo) if data.photo else None
     password_hash = await hash_password_async(data.password)
@@ -298,8 +321,8 @@ async def submit(
         company_name=data.company_name,
         company_trade_name=data.company_trade_name,
         years_experience=data.years_experience,
-        service_areas=data.service_areas,
-        skills=[s.model_dump() for s in data.skills],
+        service_areas=areas,
+        skills=skills,
         certifications=(data.certifications or "").strip() or None,
         tools=(data.tools or "").strip() or None,
         has_vehicle=data.has_vehicle,
@@ -319,7 +342,56 @@ async def submit(
     db.add(application)
     invite.use_count += 1
     await db.flush()
+    await _mark_used(db, areas, skills)
     return application
+
+
+def _skill_ids(items: Any) -> list[Any]:
+    """Os `skill_id` de uma lista de aptidões guardada (o item estragado fica de fora)."""
+    if not isinstance(items, list):
+        return []
+    return [item.get("skill_id") for item in items if isinstance(item, Mapping)]
+
+
+async def _mark_used(db: AsyncSession, areas: Any, skills: Any) -> None:
+    """O 1º uso das áreas e das aptidões que a ficha (ou o técnico aprovado) gravou: com ele, o
+    item não sai mais do catálogo (desativa)."""
+    await technician_catalogs.mark_used(db, "area", areas if isinstance(areas, list) else [])
+    await technician_catalogs.mark_used(db, "skill", _skill_ids(skills))
+
+
+def summary(application: TechnicianApplication, areas: Mapping[str, CatalogInfo]) -> ApplicationSummary:
+    """A ficha na lista da Homologação, com as áreas gravadas (também as desativadas) pelo nome
+    atual do catálogo (`areas`: technician_catalogs.catalog ou picked)."""
+    out = ApplicationSummary.model_validate(application)
+    out.areas = technician_catalogs.refs(application.service_areas, areas, inactive=True)
+    return out
+
+
+def application_skills(raw: Any, info: Mapping[str, CatalogInfo]) -> list[ApplicationSkillOut]:
+    """As aptidões da ficha ([{skill_id, level}]) com o nome atual do catálogo, também as
+    desativadas (é o que o candidato escolheu), sem repetir, em ordem alfabética. Item estragado
+    ou sem a aptidão no catálogo não sai."""
+    seen: set[str] = set()
+    out: list[ApplicationSkillOut] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            key = str(uuid.UUID(str(item.get("skill_id"))))
+        except ValueError:
+            continue
+        found, level = info.get(key), item.get("level")
+        if found is None or key in seen or not isinstance(level, str):
+            continue
+        seen.add(key)
+        out.append(ApplicationSkillOut(skill_id=uuid.UUID(key), name=found.name, level=level))
+    return sorted(out, key=lambda skill: (fold(skill.name), skill.name, str(skill.skill_id)))
+
+
+def application_skill_ids(applications: Iterable[TechnicianApplication]) -> list[Any]:
+    """Os `skill_id` das fichas (para technician_catalogs.picked)."""
+    return [key for application in applications for key in _skill_ids(application.skills)]
 
 
 async def queue_verification(

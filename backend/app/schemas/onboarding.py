@@ -20,7 +20,10 @@ from app.schemas import personal
 from app.schemas.account import EmailQueued, EmailQueuedStatus
 from app.schemas.common import ORMModel, Ref
 from app.schemas.records import format_phone
+from app.schemas.tech_profile import AreaValue, TechnicianSkillIn
+from app.schemas.technician_document import TechDocumentOut
 from app.schemas.user import UserOut
+from app.services.technician_catalogs import MAX_AREAS
 
 # ----------------------------------------------------------------- catálogo
 # Fonte única dos rótulos: o formulário público e a tela de análise leem daqui. As áreas de atuação
@@ -383,6 +386,11 @@ class ApplicationReceived(BaseModel):
     # O link de validação do e-mail que vai no envio: na fila, envio desligado (nada sai) ou o
     # endereço não recebe mensagens.
     email_verification: EmailQueuedStatus
+    # Os arquivos da ficha (certificações, documentos pessoais e currículo) vão depois do envio,
+    # com este token, só desta ficha, até `upload_expires_at` (2 h): POST
+    # /public/onboarding-documents (services/technician_documents.ficha_upload_token).
+    upload_token: str
+    upload_expires_at: dt.datetime
 
 
 # ---------------------------------------------------------------- análise
@@ -396,6 +404,8 @@ class ApplicationSummary(ORMModel):
     phone: str
     city: str
     state: str
+    # Os ids (texto) das áreas do catálogo, também as desativadas depois do envio (a ficha de
+    # antes da Entrega 2 mandava os códigos; o envio e a migração trocaram pelos ids).
     service_areas: list[str]
     years_experience: int | None
     has_vehicle: bool
@@ -406,9 +416,16 @@ class ApplicationSummary(ORMModel):
     email_verified_at: dt.datetime | None = None
     # Reprovada que voltou para análise (a retenção da pendente conta daqui).
     reopened_at: dt.datetime | None = None
+    # As áreas gravadas (também as desativadas) pelo nome atual, em ordem alfabética: a rota
+    # preenche pelo catálogo (technician_catalogs.refs).
+    areas: list[Ref] = []
 
 
-class SkillOut(BaseModel):
+class ApplicationSkillOut(BaseModel):
+    """Uma aptidão da ficha com o nome atual do catálogo (também a desativada: é o que o candidato
+    escolheu)."""
+
+    skill_id: uuid.UUID
     name: str
     level: str
 
@@ -440,7 +457,10 @@ class ApplicationDetail(ApplicationSummary):
     company_document: str | None
     company_name: str | None = None
     company_trade_name: str | None = None
-    skills: list[SkillOut]
+    # A coluna guarda [{skill_id, level}], sem o nome: a rota preenche pelo catálogo
+    # (services/onboarding.application_skills).
+    skills: list[ApplicationSkillOut] = []
+    # Fichas de antes da Entrega 2: o texto livre (as novas mandam os arquivos em `documents`).
     certifications: str | None
     tools: str | None
     vehicle_type: str | None
@@ -463,6 +483,19 @@ class ApplicationDetail(ApplicationSummary):
     reopened_by: Ref | None = None
     # Reprovada: quando a rotina apaga a ficha (180 dias da última análise).
     purge_at: dt.datetime | None = None
+    # Os arquivos que o candidato mandou depois do envio (certificações, documentos pessoais e
+    # currículo), com o link de 30 min; aprovada, são os do técnico (a rota preenche:
+    # technician_documents.application_documents).
+    documents: list[TechDocumentOut] = []
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _skills_from_the_catalog(cls, value: object) -> object:
+        """A coluna lida do modelo ({skill_id, level}, sem o nome) fica de fora: a rota põe a
+        lista do catálogo. Só a lista já montada passa."""
+        if isinstance(value, list) and all(isinstance(i, ApplicationSkillOut) for i in value):
+            return value
+        return []
 
 
 class ApplicationApprove(BaseModel):
