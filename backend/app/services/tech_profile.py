@@ -1,44 +1,49 @@
-"""Perfil técnico: o que o técnico mantém no app e a central só vê.
+"""Perfil técnico (o perfil profissional): o que o técnico mantém no app e a central também edita.
 
-Cinco partes (PARTS), em colunas JSONB do usuário (models/user.py): tools (Ferramental: ids do
-catálogo tool_catalog), availability (Disponibilidade: turnos "dia:turno", 7 dias × 4 turnos),
-transport (meios de transporte e CNH), skills (Aptidões: nome, nível e "desde") e education
-(Formação). tech_profile_stamps guarda, por parte informada, quando mudou e por onde
-({parte: {at, via}}; via "app" ou "ficha"); parte sem carimbo nunca foi informada.
+Seis partes (PARTS), em colunas JSONB do usuário (models/user.py): tools (Ferramental: ids do
+tool_catalog), availability (Disponibilidade: turnos "dia:turno", 7 dias × 4 turnos), transport
+(meios de transporte e CNH), skills (Aptidões: [{skill_id, level, since}], do skill_catalog),
+education (Formação) e areas (Áreas de atuação: ids do area_catalog em users.service_areas).
+tech_profile_stamps guarda, por parte informada, quando mudou e por onde ({parte: {at, via}}; via
+"app", "ficha" ou "central"); parte sem carimbo nunca foi informada. Os catálogos (Ferramental,
+Aptidões e Áreas de atuação) são de services/technician_catalogs.py: o item desativado some das
+telas e fica guardado com quem tinha; reativado, volta.
 
-- PATCH /me/profile (services/my_profile.py): `wanted` normaliza e devolve só as partes que mudam de
-  verdade, com as mesmas comparações do histórico do cadastro (services/user_history.snapshot: a
-  rota só grava quando o histórico tem mudança); `apply` grava objetos novos (mudar a lista no lugar
-  não grava) e carimba.
+- PATCH /me/profile (services/my_profile.py, via "app") e PATCH /technicians/{id}
+  (services/technicians.py, via "central", Técnicos em Editar): `wanted` normaliza e devolve só as
+  partes que mudam de verdade, com as mesmas comparações do histórico do cadastro
+  (services/user_history.snapshot: a rota só grava quando o histórico tem mudança); `apply` grava
+  objetos novos (mudar a lista no lugar não grava) e carimba; `mark_used` grava o 1º uso dos itens
+  do catálogo.
 - Aprovação da ficha da homologação (services/onboarding.approve): `from_ficha` traz a
-  disponibilidade, o transporte e as aptidões da ficha, via "ficha". A migração f5a7c9e1b3d6 fez o
-  mesmo para os técnicos já aprovados, com uma cópia do mapa (tests/test_tech_profile.py confere).
-- Central e sugestão de técnicos: leitura (`*_of`, `active_tool_ids`, `tool_refs`), textos curtos
-  (`slots_text`, `transport_text`, ...) e o sinal da disponibilidade (`visit_slots`,
-  `availability_signal`).
+  disponibilidade, o transporte, as aptidões e as áreas da ficha, via "ficha". A migração
+  f5a7c9e1b3d6 fez o mesmo (sem as áreas) para os técnicos já aprovados, com uma cópia do mapa.
+- Central, app e sugestão de técnicos: leitura (`*_of`, `active_tool_ids`, `tool_refs`,
+  `active_area_ids`, `areas_of`), textos curtos (`slots_text`, `transport_text`, ...) e o sinal da
+  disponibilidade (`visit_slots`, `availability_signal`).
 
 Os rótulos e os textos são os mesmos de lib/constants.ts (web e app): "sáb · tarde", "Carro, Moto ·
 com CNH", "02/2022 a 12/2023".
 """
 
 import re
-import unicodedata
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import String, column, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.enums import UserRole
+
+# fold e clean moram em core/text.py; ficam aqui também (schemas/personal, payout_methods e a
+# rota do catálogo usam tech_profile.fold/clean).
+from app.core.text import clean, fold
 from app.db.base import utcnow
-from app.models import TechnicianApplication, TechnicianTool, User
+from app.models import TechnicianApplication, User
 from app.schemas.common import Ref
 from app.schemas.onboarding import SKILL_LEVELS
 from app.schemas.tech_profile import (
@@ -48,10 +53,12 @@ from app.schemas.tech_profile import (
     TechProfileStamps,
     TransportOut,
 )
+from app.services import technician_catalogs
 from app.services.errors import WorkflowError
+from app.services.technician_catalogs import CatalogInfo
 
 if TYPE_CHECKING:
-    from app.schemas.my_profile import MyProfileUpdate
+    from app.schemas.my_profile import ProfessionalProfileIn
 
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")  # datetime.weekday(): 0 = mon
 DAY_SHORT = {
@@ -87,8 +94,10 @@ EDUCATION_LEVELS = {
 }
 # Níveis da aptidão: schemas.onboarding.SKILL_LEVELS (basico/intermediario/avancado →
 # Básico/Intermediário/Avançado).
-PARTS = ("tools", "availability", "transport", "skills", "education")
+PARTS = ("tools", "availability", "transport", "skills", "education", "areas")
 MAX_TOOLS, MAX_SLOTS, MAX_MODES, MAX_SKILLS, MAX_EDUCATION = 200, 28, 6, 30, 20
+# Áreas por técnico (a lista final, com as desativadas guardadas): technician_catalogs.MAX_AREAS.
+MAX_AREAS = technician_catalogs.MAX_AREAS
 TOOL_NAME_MAX = SKILL_NAME_MAX = 80
 COURSE_MAX = INSTITUTION_MAX = 120
 TEXT_MIN = 2
@@ -97,7 +106,8 @@ MONTH_TOLERANCE = 1  # o servidor aceita até o mês atual + 1 (fuso do aparelho
 HISTORY_ITEMS = 10  # textos do histórico: 10 itens + " e mais N"
 AVAILABILITY_INSIDE_POINTS = 2  # dentro da disponibilidade declarada
 AVAILABILITY_OUTSIDE_POINTS = -6  # fora (bem menor que os −40 de "Ocupado" e que a distância)
-VIA_APP, VIA_FICHA = "app", "ficha"
+# Por onde a parte mudou (o carimbo): o técnico no app, a ficha aprovada ou a central (Técnicos).
+VIA_APP, VIA_FICHA, VIA_CENTRAL = "app", "ficha", "central"
 
 # Lista inicial do ferramental (nossa, TI de campo), na ordem em que a migração grava.
 DEFAULT_TOOLS = (
@@ -142,40 +152,21 @@ _MONTH_TEXT = re.compile(r"([0-9]{4})-([0-9]{2})(?:-[0-9]{2})?")
 
 # ------------------------------------------------------------------------- texto
 
-# Os únicos controles que viram espaço (os outros saem do texto).
-_SPACE_CONTROLS = frozenset("\t\n\v\f\r")
-
-
-def _visible(text: str) -> str:
-    """Sem os caracteres das categorias Cc (controles: U+0000, ...) e Cf (formatação: espaço de
-    largura zero, BOM, marcas de direção como U+202E); tab, LF, VT, FF e CR viram espaço. O mesmo
-    do app (cleanText e foldName em lib/techProfileForm.ts)."""
-    return "".join(
-        " " if ch in _SPACE_CONTROLS else ch
-        for ch in text
-        if ch in _SPACE_CONTROLS or unicodedata.category(ch) not in ("Cc", "Cf")
-    )
-
-
-def fold(text: str) -> str:
-    """Sem controles nem formatação (`_visible`), NFKD sem marcas, casefold, espaços colapsados
-    (comparar nomes sem acento e sem maiúsculas)."""
-    decomposed = unicodedata.normalize("NFKD", _visible(text or ""))
-    plain = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return " ".join(plain.casefold().split())
-
-
-def clean(text: str) -> str:
-    """Sem controles nem formatação (`_visible`, antes do NFC: o acento separado da letra por um
-    invisível volta a ser uma letra só), NFC e espaços colapsados nas pontas e no meio (o que se
-    grava)."""
-    return " ".join(unicodedata.normalize("NFC", _visible(text or "")).split())
-
 
 @lru_cache(maxsize=4096)
 def _name_key(name: str) -> tuple[str, str]:
     """Ordem alfabética dos nomes (sem acento e sem maiúsculas; empate pela grafia)."""
     return fold(name), name
+
+
+def _id_text(raw: Any) -> str | None:
+    """O id de catálogo como se grava (str(UUID), minúsculo); None quando não é um id."""
+    if raw is None:
+        return None
+    try:
+        return str(raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw).strip()))
+    except ValueError:
+        return None
 
 
 # ------------------------------------------------------------------ disponibilidade
@@ -301,7 +292,7 @@ def education_period_text(start: str, end: str | None) -> str:
 
 
 def skill_label(item: Mapping[str, Any]) -> str:
-    """A aptidão no histórico: "Linux (Básico)"."""
+    """A aptidão no histórico, com o nome do catálogo: "Linux (Básico)"."""
     level = str(item.get("level") or "")
     return f"{item.get('name') or ''} ({SKILL_LEVELS.get(level, level)})"
 
@@ -331,82 +322,73 @@ def items_text(labels: list[str], sep: str = ", ") -> str | None:
     return f"{sep.join(labels[:HISTORY_ITEMS])} e mais {len(labels) - HISTORY_ITEMS}"
 
 
-# ------------------------------------------------------------------ ferramental
+# --------------------------------------------------------------- os catálogos
+# Ferramental, Aptidões e Áreas de atuação: services/technician_catalogs.py. Os nomes de antes
+# (tool_catalog, user_tools, tool_counts, ToolInfo) ficam para quem já usa.
+
+ToolInfo = CatalogInfo
 
 
-@dataclass(frozen=True)
-class ToolInfo:
-    name: str
-    is_active: bool
+async def tool_catalog(db: AsyncSession) -> dict[str, CatalogInfo]:
+    """O Ferramental inteiro (ativas e desativadas), pela chave str(id): 1 consulta (≤ 200)."""
+    return await technician_catalogs.catalog(db, "tool")
 
 
-async def tool_catalog(db: AsyncSession) -> dict[str, ToolInfo]:
-    """O catálogo inteiro (ativas e desativadas), pela chave str(id): 1 consulta (≤ 200 linhas)."""
-    rows = await db.execute(
-        select(TechnicianTool.id, TechnicianTool.name, TechnicianTool.is_active)
-    )
-    return {str(tool_id): ToolInfo(name, bool(active)) for tool_id, name, active in rows.all()}
-
-
-async def user_tools(db: AsyncSession, user: User) -> dict[str, ToolInfo]:
-    """Só as ferramentas que o técnico marcou (ativas ou não), pela chave str(id): 1 consulta
-    pequena, nenhuma sem ferramenta marcada (GET /me/profile e o histórico do cadastro)."""
-    ids: list[uuid.UUID] = []
-    for raw in user.tool_ids or []:
-        try:
-            ids.append(uuid.UUID(str(raw)))
-        except ValueError:
-            continue
-    if not ids:
-        return {}
-    rows = await db.execute(
-        select(TechnicianTool.id, TechnicianTool.name, TechnicianTool.is_active).where(
-            TechnicianTool.id.in_(ids)
-        )
-    )
-    return {str(tool_id): ToolInfo(name, bool(active)) for tool_id, name, active in rows.all()}
+async def user_tools(db: AsyncSession, user: User) -> dict[str, CatalogInfo]:
+    """Só as ferramentas que o técnico marcou (ativas ou não): nenhuma consulta sem ferramenta."""
+    return await technician_catalogs.picked(db, "tool", user.tool_ids or [])
 
 
 async def tool_counts(db: AsyncSession) -> dict[str, int]:
     """Quantos técnicos (papel technician, ativos ou não) marcaram cada id, a mesma regra do
     filtro `tool_id` da lista de técnicos."""
-    marked = (
-        func.jsonb_array_elements_text(User.tool_ids)
-        .table_valued(column("value", String), joins_implicitly=True)
-        .alias("marked")
-    )
-    rows = await db.execute(
-        select(marked.c.value, func.count(distinct(User.id)))
-        .select_from(User)
-        .where(User.role == UserRole.TECHNICIAN)
-        .group_by(marked.c.value)
-    )
-    return {str(tool_id): int(total) for tool_id, total in rows.all()}
+    usage = await technician_catalogs.usage(db, "tool")
+    return {key: technicians for key, (technicians, _) in usage.items()}
 
 
-def _active_tools(user: User, catalog: Mapping[str, ToolInfo]) -> list[tuple[str, ToolInfo]]:
-    """As ferramentas ativas do técnico, sem repetir, em ordem alfabética."""
-    seen: set[str] = set()
-    out: list[tuple[str, ToolInfo]] = []
-    for raw in user.tool_ids or []:
-        key = str(raw)
-        info = catalog.get(key)
-        if info is None or not info.is_active or key in seen:
-            continue
-        seen.add(key)
-        out.append((key, info))
-    out.sort(key=lambda item: (*_name_key(item[1].name), item[0]))
+def skill_ids_of(user: User) -> list[str]:
+    """Os ids das aptidões guardadas (também as desativadas), na ordem gravada."""
+    out: list[str] = []
+    for item in user.skills or []:
+        key = _id_text(item.get("skill_id")) if isinstance(item, Mapping) else None
+        if key is not None and key not in out:
+            out.append(key)
     return out
 
 
-def active_tool_ids(user: User, catalog: Mapping[str, ToolInfo]) -> list[uuid.UUID]:
+async def user_skills(db: AsyncSession, user: User) -> dict[str, CatalogInfo]:
+    """Só as aptidões que o técnico tem (ativas ou não): nenhuma consulta sem aptidão."""
+    return await technician_catalogs.picked(db, "skill", skill_ids_of(user))
+
+
+async def user_areas(db: AsyncSession, user: User) -> dict[str, CatalogInfo]:
+    """Só as áreas que o técnico tem (ativas ou não): nenhuma consulta sem área."""
+    return await technician_catalogs.picked(db, "area", user.service_areas or [])
+
+
+def active_tool_ids(user: User, catalog: Mapping[str, CatalogInfo]) -> list[uuid.UUID]:
     """As ferramentas ativas do técnico, pela ordem fold(nome) (as desativadas ficam guardadas)."""
-    return [uuid.UUID(key) for key, _ in _active_tools(user, catalog)]
+    return technician_catalogs.active_ids(user.tool_ids, catalog)
 
 
-def tool_refs(user: User, catalog: Mapping[str, ToolInfo]) -> list[Ref]:
+def tool_refs(user: User, catalog: Mapping[str, CatalogInfo]) -> list[Ref]:
     """O mesmo de `active_tool_ids`, como {id, name}."""
-    return [Ref(id=uuid.UUID(key), name=info.name) for key, info in _active_tools(user, catalog)]
+    return technician_catalogs.refs(user.tool_ids, catalog)
+
+
+def active_area_ids(user: User, catalog: Mapping[str, CatalogInfo]) -> list[uuid.UUID]:
+    """As áreas ativas do técnico, pela ordem do nome (as desativadas ficam guardadas)."""
+    return technician_catalogs.active_ids(user.service_areas, catalog)
+
+
+def areas_of(user: User, catalog: Mapping[str, CatalogInfo]) -> list[Ref]:
+    """O mesmo de `active_area_ids`, como {id, name} (o detalhe da central)."""
+    return technician_catalogs.refs(user.service_areas, catalog)
+
+
+def skills_of(user: User, catalog: Mapping[str, CatalogInfo]) -> list[TechnicianSkillOut]:
+    """As aptidões ativas, com o nome do catálogo: o "desde" mais novo primeiro, depois o nome."""
+    return technician_catalogs.skills_out(user.skills, catalog)
 
 
 # --------------------------------------------------------------------- leitura
@@ -463,11 +445,6 @@ def latest_stamp(user: User) -> datetime | None:
     return max(times) if times else None
 
 
-def skills_of(user: User) -> list[TechnicianSkillOut]:
-    """As aptidões na ordem gravada (já ordenada: "desde" mais novo primeiro, depois o nome)."""
-    return _valid(TechnicianSkillOut, user.skills or [])
-
-
 def education_of(user: User) -> list[EducationOut]:
     """A formação na ordem gravada (já ordenada: em andamento primeiro, depois o fim mais novo)."""
     return _valid(EducationOut, user.education or [])
@@ -487,12 +464,6 @@ def _local_day(at: datetime) -> str:
 
 def _stamp(at: datetime, via: str) -> dict[str, str]:
     return {"at": _utc(at).isoformat(), "via": via}
-
-
-def _sorted_skills(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """O "desde" mais novo primeiro, depois o nome (sem acento e sem maiúsculas)."""
-    ordered = sorted(items, key=lambda item: _name_key(item["name"]))
-    return sorted(ordered, key=lambda item: item["since"], reverse=True)
 
 
 def _sorted_education(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -527,12 +498,19 @@ def transport_key(user: User) -> tuple[tuple[str, ...], bool] | None:
     return tuple(_modes(user.transport_modes or [])), bool(user.has_driver_license)
 
 
-def skill_set(items: Iterable[Any]) -> frozenset[tuple[Any, Any]]:
-    """Aptidões: (nome gravado, nível) de cada uma ("linux" → "Linux" é mudança; o "desde" não
-    conta)."""
+def skill_set(items: Iterable[Any]) -> frozenset[tuple[str | None, Any]]:
+    """Aptidões: (skill_id, nível) de cada uma, também as desativadas guardadas (o "desde" não
+    conta; renomear no catálogo não é mudança do técnico)."""
     return frozenset(
-        (item.get("name"), item.get("level")) for item in items if isinstance(item, Mapping)
+        (_id_text(item.get("skill_id")), item.get("level"))
+        for item in items
+        if isinstance(item, Mapping)
     )
+
+
+def area_set(values: Iterable[Any] | None) -> frozenset[str]:
+    """Áreas de atuação: os ids gravados, também os desativados (reordenar não é mudança)."""
+    return frozenset(_id_text(raw) or str(raw) for raw in values or [])
 
 
 # A formação no histórico: (id, *EDUCATION_KEYS).
@@ -566,26 +544,6 @@ async def _wanted_tools(
     kept = {key for key in stored if not (key in catalog and catalog[key].is_active)}
     final = chosen | kept
     return None if final == stored else sorted(final)
-
-
-def _wanted_skills(user: User, sent: Iterable[Any]) -> list[dict[str, Any]]:
-    """As aptidões a gravar: o "desde" de uma gravada com o mesmo nome (sem acento e sem
-    maiúsculas) fica; a nova ganha hoje."""
-    since: dict[str, str] = {}
-    for item in user.skills or []:
-        if isinstance(item, Mapping) and isinstance(item.get("name"), str) and item.get("since"):
-            since.setdefault(fold(item["name"]), str(item["since"]))
-    today = _today()
-    seen: set[str] = set()
-    out: list[dict[str, Any]] = []
-    for item in sent:
-        name = clean(item.name)
-        key = fold(name)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append({"name": name, "level": item.level, "since": since.get(key, today)})
-    return _sorted_skills(out)
 
 
 def _wanted_education(user: User, sent: Iterable[Any]) -> list[dict[str, Any]]:
@@ -623,19 +581,23 @@ def _wanted_education(user: User, sent: Iterable[Any]) -> list[dict[str, Any]]:
     return _sorted_education(out)
 
 
-async def wanted(db: AsyncSession, user: User, data: "MyProfileUpdate") -> dict[str, Any]:
-    """As partes do perfil técnico que mudam de verdade, já normalizadas (contrato §6.1). Levanta
-    WorkflowError na ferramenta que não existe. Chamado por my_profile._wanted.
+async def wanted(db: AsyncSession, user: User, data: "ProfessionalProfileIn") -> dict[str, Any]:
+    """As partes do perfil técnico que mudam de verdade, já normalizadas (contrato da Entrega 2
+    §6.2). `data` é o corpo do PATCH do app (MyProfileUpdate) ou da central (TechnicianUpdate): os
+    dois herdam schemas.my_profile.ProfessionalProfileIn. Levanta WorkflowError na ferramenta que
+    não existe e CodedError (422) na área ou aptidão fora do catálogo, repetida ou além do limite
+    (technician_catalogs.resolve_areas / resolve_skills).
 
     Só conta o que veio no corpo (`model_fields_set`), e a parte vem inteira. A resposta tem só as
     partes mudadas, prontas para `apply`: "tools" (ids em texto, ordenados), "availability" (turnos
-    na ordem da grade), "transport" ({"modes", "driver_license"}), "skills" ([{name, level, since}])
-    e "education" ([{id, course, level, institution, start, end}]). As comparações são as do
-    histórico (tool_set, slot_set, transport_key, skill_set e education_set, que
-    user_history.snapshot também usa), senão a rota responderia 200 sem gravar: conjuntos de ids,
-    de turnos, de (nome, nível) e de (id, curso, nível, instituição, início, fim); o transporte
-    muda na 1ª vez (mesmo "Nenhum · sem CNH") ou quando (meios, CNH) muda. Reordenar não muda nada.
-    """
+    na ordem da grade), "transport" ({"modes", "driver_license"}), "skills" ([{skill_id, level,
+    since}]), "education" ([{id, course, level, institution, start, end}]) e "areas" (ids em
+    texto, ordenados; vem de `area_ids`). As comparações são as do histórico (tool_set, slot_set,
+    transport_key, skill_set, education_set e area_set, que user_history.snapshot também usa),
+    senão a rota responderia 200 sem gravar: conjuntos de ids, de turnos, de (skill_id, nível), de
+    (id, curso, nível, instituição, início, fim) e de ids; o transporte muda na 1ª vez (mesmo
+    "Nenhum · sem CNH") ou quando (meios, CNH) muda. Reordenar não muda nada; a desativada enviada é
+    ignorada e as guardadas desativadas ficam."""
     sent = data.model_fields_set
     new: dict[str, Any] = {}
     if "tool_ids" in sent:
@@ -652,13 +614,21 @@ async def wanted(db: AsyncSession, user: User, data: "MyProfileUpdate") -> dict[
         if transport_key(user) != (tuple(modes), driver_license):
             new["transport"] = {"modes": modes, "driver_license": driver_license}
     if "skills" in sent:
-        skills = _wanted_skills(user, data.skills or [])
+        skills = await technician_catalogs.resolve_skills(
+            db, data.skills or [], user.skills or [], today=_today()
+        )
         if skill_set(skills) != skill_set(user.skills or []):
             new["skills"] = skills
     if "education" in sent:
         education = _wanted_education(user, data.education or [])
         if education_set(education) != education_set(user.education or []):
             new["education"] = education
+    if "area_ids" in sent:
+        areas = await technician_catalogs.resolve_areas(
+            db, data.area_ids or [], user.service_areas or []
+        )
+        if area_set(areas) != area_set(user.service_areas):
+            new["areas"] = areas
     return new
 
 
@@ -680,37 +650,57 @@ def apply(user: User, new: Mapping[str, Any], *, via: str, at: datetime) -> None
             user.has_driver_license = bool(value["driver_license"])
         elif part == "skills":
             user.skills = [dict(item) for item in value]
-        else:
+        elif part == "education":
             user.education = [dict(item) for item in value]
+        else:
+            user.service_areas = [str(area_id) for area_id in value]
     stamp = _stamp(at, via)
     user.tech_profile_stamps = {**_stamps_raw(user), **{part: dict(stamp) for part in parts}}
 
 
+async def mark_used(db: AsyncSession, new: Mapping[str, Any]) -> None:
+    """Depois de `apply`: o 1º uso (`used_at`) dos itens do catálogo que entraram no perfil
+    (Ferramental, Aptidões e Áreas de atuação; com o uso, o item não se exclui mais, só desativa).
+    Nenhuma consulta sem essas partes."""
+    if "tools" in new:
+        await technician_catalogs.mark_used(db, "tool", new["tools"])
+    if "skills" in new:
+        ids = [item.get("skill_id") for item in new["skills"] if isinstance(item, Mapping)]
+        await technician_catalogs.mark_used(db, "skill", ids)
+    if "areas" in new:
+        await technician_catalogs.mark_used(db, "area", new["areas"])
+
+
 def _ficha_skills(raw: Any, since: str) -> list[dict[str, Any]]:
-    """As aptidões da ficha: nível válido, nome limpo (2 a 80), sem repetir o nome (fica a
-    primeira), até MAX_SKILLS."""
+    """As aptidões da ficha ([{skill_id, level}], conferidas no envio pelo catálogo): id e nível
+    válidos, sem repetir o id (fica a primeira), até MAX_SKILLS, com o "desde" = o dia do envio."""
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     for item in raw if isinstance(raw, list) else []:
         if not isinstance(item, Mapping):
             continue
-        name, level = item.get("name"), item.get("level")
-        if not isinstance(name, str) or not isinstance(level, str) or level not in SKILL_LEVELS:
-            continue
-        name = clean(name)
-        key = fold(name)
-        if not TEXT_MIN <= len(name) <= SKILL_NAME_MAX or key in seen:
+        key, level = _id_text(item.get("skill_id")), item.get("level")
+        if key is None or not isinstance(level, str) or level not in SKILL_LEVELS or key in seen:
             continue
         seen.add(key)
-        out.append({"name": name, "level": level, "since": since})
-    return _sorted_skills(out[:MAX_SKILLS])
+        out.append({"skill_id": key, "level": level, "since": since})
+    return out[:MAX_SKILLS]
+
+
+def _ficha_areas(raw: Any) -> list[str]:
+    """As áreas da ficha (ids do catálogo em texto, conferidos no envio; também as desativadas
+    depois dele, que ficam guardadas): sem repetir, ordenadas, até MAX_AREAS."""
+    ids = {key for value in (raw if isinstance(raw, list) else []) if (key := _id_text(value))}
+    return sorted(ids)[:MAX_AREAS]
 
 
 def from_ficha(application: TechnicianApplication) -> dict[str, Any]:
-    """Os kwargs de User(...) com a disponibilidade, o transporte, as aptidões e os carimbos
-    "ficha" (`at` = quando a ficha chegou). Parte vazia fica sem carimbo (não informada): o
-    transporte só conta com algum meio ou com CNH. As ferramentas e as certificações da ficha são
-    texto livre e ficam só na ficha."""
+    """Os kwargs de User(...) com a disponibilidade, o transporte, as aptidões ({skill_id, level,
+    since}), as áreas de atuação (service_areas) e os carimbos "ficha" (`at` = quando a ficha
+    chegou; o "desde" das aptidões é o dia local dela). Parte vazia fica sem carimbo (não
+    informada): o transporte só conta com algum meio ou com CNH. As ferramentas e as certificações
+    da ficha são texto livre e ficam só na ficha. O 1º uso dos itens do catálogo já foi gravado no
+    envio da ficha."""
     at = application.created_at or utcnow()
     codes = application.availability if isinstance(application.availability, list) else []
     availability = sort_slots(
@@ -720,10 +710,12 @@ def from_ficha(application: TechnicianApplication) -> dict[str, Any]:
     modes = [vehicle] if application.has_vehicle and vehicle else []
     driver_license = bool(application.has_driver_license)
     skills = _ficha_skills(application.skills, _local_day(at))
+    areas = _ficha_areas(application.service_areas)
     filled = {
         "availability": bool(availability),
         "transport": bool(modes) or driver_license,
         "skills": bool(skills),
+        "areas": bool(areas),
     }
     stamp = _stamp(at, VIA_FICHA)
     return {
@@ -731,5 +723,6 @@ def from_ficha(application: TechnicianApplication) -> dict[str, Any]:
         "transport_modes": modes,
         "has_driver_license": driver_license,
         "skills": skills,
+        "service_areas": areas,
         "tech_profile_stamps": {part: dict(stamp) for part, ok in filled.items() if ok},
     }

@@ -360,11 +360,18 @@ async def _mark_used(db: AsyncSession, areas: Any, skills: Any) -> None:
     await technician_catalogs.mark_used(db, "skill", _skill_ids(skills))
 
 
-def summary(application: TechnicianApplication, areas: Mapping[str, CatalogInfo]) -> ApplicationSummary:
+def _area_ids(application: TechnicianApplication) -> list[Any]:
+    areas = application.service_areas
+    return list(areas) if isinstance(areas, list) else []
+
+
+def summary(
+    application: TechnicianApplication, areas: Mapping[str, CatalogInfo]
+) -> ApplicationSummary:
     """A ficha na lista da Homologação, com as áreas gravadas (também as desativadas) pelo nome
-    atual do catálogo (`areas`: technician_catalogs.catalog ou picked)."""
+    atual do catálogo (`areas`: technician_catalogs.catalog, uma leitura para a lista toda)."""
     out = ApplicationSummary.model_validate(application)
-    out.areas = technician_catalogs.refs(application.service_areas, areas, inactive=True)
+    out.areas = technician_catalogs.refs(_area_ids(application), areas, inactive=True)
     return out
 
 
@@ -389,9 +396,17 @@ def application_skills(raw: Any, info: Mapping[str, CatalogInfo]) -> list[Applic
     return sorted(out, key=lambda skill: (fold(skill.name), skill.name, str(skill.skill_id)))
 
 
-def application_skill_ids(applications: Iterable[TechnicianApplication]) -> list[Any]:
-    """Os `skill_id` das fichas (para technician_catalogs.picked)."""
-    return [key for application in applications for key in _skill_ids(application.skills)]
+async def catalog_parts(
+    db: AsyncSession, application: TechnicianApplication
+) -> tuple[list[Ref], list[ApplicationSkillOut]]:
+    """As áreas (Ref, também as desativadas) e as aptidões da ficha pelo nome atual do catálogo:
+    o detalhe da Homologação (duas leituras, só dos ids da ficha)."""
+    areas = await technician_catalogs.picked(db, "area", _area_ids(application))
+    skills = await technician_catalogs.picked(db, "skill", _skill_ids(application.skills))
+    return (
+        technician_catalogs.refs(_area_ids(application), areas, inactive=True),
+        application_skills(application.skills, skills),
+    )
 
 
 async def queue_verification(
@@ -483,11 +498,13 @@ async def approve(
     tudo o que a ficha coletou: contato, a senha (sem ela, uma aleatória e a troca obrigatória: com
     o e-mail validado, a boas-vindas leva o link para criar a dele; sem a validação, a central
     manda a provisória), a foto, a cidade na grafia padrão, o endereço em partes (ficha_address),
-    CPF, nascimento, RG, empresa, veículo, mini biografia, as áreas, a validação do e-mail e o
-    perfil técnico (disponibilidade, transporte e CNH, aptidões; tech_profile.from_ficha, via
-    "ficha"). Ferramentas e certificações (texto livre) ficam só na ficha. O histórico do cadastro
-    começa com "Aprovado na homologação (HOM-…)" (via ficha, ator = quem aprovou) e a boas-vindas
-    vai para a fila (o commit, o `deliver_soon` e os avisos são da rota)."""
+    CPF, nascimento, RG, empresa, veículo, mini biografia, a validação do e-mail e o perfil técnico
+    (disponibilidade, transporte e CNH, aptidões e áreas de atuação, pelos ids do catálogo;
+    tech_profile.from_ficha, via "ficha"). Os arquivos da ficha passam a ser do técnico, sem copiar
+    (technician_documents.attach_to_user). Ferramentas e certificações (texto livre) ficam só na
+    ficha. O histórico do cadastro começa com "Aprovado na homologação (HOM-…)", com um item por
+    arquivo (via ficha, ator = quem aprovou), e a boas-vindas vai para a fila (o commit, o
+    `deliver_soon` e os avisos são da rota)."""
     _ensure_pending(application)
     if await db.scalar(select(User.id).where(func.lower(User.email) == application.email)):
         raise WorkflowError(USER_EMAIL_TAKEN)
@@ -536,7 +553,6 @@ async def approve(
         company_trade_name=application.company_trade_name if company_document else None,
         vehicle_model=application.vehicle_model,
         vehicle_plate=application.vehicle_plate,
-        service_areas=list(application.service_areas or []),
         email_verified_at=application.email_verified_at,
         operational_status=OperationalStatus.ACTIVE,
         **tech_profile.from_ficha(application),
@@ -551,12 +567,15 @@ async def approve(
     application.password_hash = None  # a senha passa a existir só no usuário
     _add_review(application, "approved", actor, note, now)
     await db.flush()
+    documents = await technician_documents.attach_to_user(db, application, user)
+    await _mark_used(db, user.service_areas, user.skills)
     changes = [
         {
             "field": "application",
             "from": None,
             "to": APPROVED_LINE.format(protocol=protocol(application)),
-        }
+        },
+        *documents,
     ]
     user_history.record(db, user, changes, via=VIA_FICHA, actor=actor)
     welcome, status = await mail.enqueue(
@@ -630,29 +649,24 @@ async def reopen(
 # ------------------------------------------------------------------- LGPD
 
 
-async def _drop(db: AsyncSession, application: TechnicianApplication) -> str | None:
-    """Apaga a ficha. Devolve a foto a tirar do disco depois do commit (None quando não há foto
-    ou ela é a de algum usuário, ex.: ficha aprovada)."""
-    key = application.photo_key
+async def _drop(db: AsyncSession, application: TechnicianApplication) -> list[str]:
+    """Apaga a ficha com os documentos só dela (antes da ficha: a FK SET NULL os deixaria sem
+    dono). Devolve as chaves a tirar do disco depois do commit (technician_documents.remove_files):
+    os arquivos dos documentos e a foto, menos a que é de algum usuário (ex.: ficha aprovada)."""
+    keys = list(await technician_documents.drop_for_application(db, application.id))
+    photo = application.photo_key
     await db.delete(application)
     await db.flush()
-    if key and await db.scalar(select(User.id).where(User.avatar_key == key)) is None:
-        return key
-    return None
+    if photo and await db.scalar(select(User.id).where(User.avatar_key == photo)) is None:
+        keys.append(photo)
+    return keys
 
 
-def remove_photos(keys: list[str | None]) -> None:
-    """Depois do commit: as fotos das fichas apagadas saem do disco (se a gravação falhar, a
-    ficha e a foto ficam juntas)."""
-    for key in keys:
-        if key:
-            storage.delete(key)
-
-
-async def delete_application(db: AsyncSession, application: TechnicianApplication) -> str | None:
-    """Pedido do titular (LGPD, art. 18): apaga a ficha pendente ou reprovada. Devolve a foto a
-    tirar do disco depois do commit (`remove_photos`). A aprovada virou o cadastro do técnico e
-    sai pela ficha dele, não por aqui."""
+async def delete_application(db: AsyncSession, application: TechnicianApplication) -> list[str]:
+    """Pedido do titular (LGPD, art. 18): apaga a ficha pendente ou reprovada, com a foto e os
+    arquivos. Devolve as chaves a tirar do disco depois do commit
+    (technician_documents.remove_files). A aprovada virou o cadastro do técnico e sai pela ficha
+    dele, não por aqui."""
     if application.status == ApplicationStatus.APPROVED:
         raise WorkflowError("Ficha aprovada faz parte do cadastro do técnico e não é apagada aqui")
     return await _drop(db, application)
@@ -661,8 +675,9 @@ async def delete_application(db: AsyncSession, application: TechnicianApplicatio
 async def purge_expired(db: AsyncSession) -> int:
     """Rotina periódica: ficha pendente sem análise além do prazo (contado do envio ou da
     reabertura) vira reprovada ("Expirada sem análise", sem a senha, anotada em `reviews`);
-    reprovada além do prazo (contado da última análise) é apagada com a foto, os links e os
-    e-mails dela. Grava (a foto só sai do disco com a exclusão gravada) e devolve quantas mudaram.
+    reprovada além do prazo (contado da última análise) é apagada com a foto, os arquivos, os
+    links e os e-mails dela. Grava (os arquivos só saem do disco com a exclusão gravada) e devolve
+    quantas mudaram.
     """
     cutoff = utcnow() - timedelta(days=settings.ONBOARDING_RETENTION_DAYS)
     since = func.coalesce(TechnicianApplication.reopened_at, TechnicianApplication.created_at)
@@ -693,7 +708,9 @@ async def purge_expired(db: AsyncSession) -> int:
             )
         )
     )
-    keys = [await _drop(db, application) for application in old]
+    keys: list[str] = []
+    for application in old:
+        keys.extend(await _drop(db, application))
     await db.commit()
-    remove_photos(keys)
+    technician_documents.remove_files(keys)
     return len(stale) + len(old)
