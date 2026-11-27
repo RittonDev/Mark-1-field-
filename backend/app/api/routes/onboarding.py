@@ -222,8 +222,9 @@ async def application_photo(application_id: uuid.UUID, token: str, db: DB) -> Fi
 @router.delete("/applications/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_application(application_id: uuid.UUID, db: DB, _: OnboardingDelete) -> Response:
     """Pedido de exclusão do titular (LGPD): apaga a ficha pendente ou reprovada, a foto e os
-    arquivos."""
-    application = await svc.get_application(db, application_id)
+    arquivos. A ficha fica travada: um arquivo chegando pelo upload_token ao mesmo tempo termina
+    antes e sai junto."""
+    application = await svc.get_application(db, application_id, lock=True)
     keys = await svc.delete_application(db, application)
     await db.commit()
     technician_documents.remove_files(keys)  # só depois da exclusão gravada

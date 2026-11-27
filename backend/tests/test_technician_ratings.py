@@ -105,11 +105,17 @@ async def test_central_rates_a_concluded_os(
     }
 
     published.clear()
-    body = {"score": 4, "comment": "  Atendimento   rápido\n\n ", "rater_name": " Gerente da Loja Exemplo "}
+    body = {
+        "score": 4,
+        "comment": "  Atendimento   rápido\n\n ",
+        "rater_name": " Gerente da Loja Exemplo ",
+    }
     r = await client.put(url(t, world.tech), json=body, headers=an)
     assert r.status_code == 200, r.text
     saved = r.json()
-    assert {k: saved[k] for k in saved if k not in ("id", "created_at", "updated_at", "ticket")} == {
+    assert {
+        k: saved[k] for k in saved if k not in ("id", "created_at", "updated_at", "ticket")
+    } == {
         "technician": tech_ref,
         "score": 4,
         "comment": "Atendimento rápido",
@@ -142,11 +148,16 @@ async def test_central_rates_a_concluded_os(
         "Atendimento rápido",
     )
     assert event["data"] == {"technician_id": str(world.tech.user.id), "technician_name": "Tecnico"}
-    assert await history(client, world, world.tech.user.id) == [("central", f"registrou {code}: 4 de 5")]
+    assert await history(client, world, world.tech.user.id) == [
+        ("central", f"registrou {code}: 4 de 5")
+    ]
 
     # Tempo real: a OS para a gestão (nada ao técnico, sem push) e o aviso do cadastro.
     [ticket_event] = [e for e in published if e.get("ticket_id") == t["id"]]
-    assert (ticket_event["type"], ticket_event["data"]) == ("ticket.updated", {"fields": ["ratings"]})
+    assert (ticket_event["type"], ticket_event["data"]) == (
+        "ticket.updated",
+        {"fields": ["ratings"]},
+    )
     assert ticket_event["audience"]["managers_only"] is True
     tech_id = str(world.tech.user.id)
     assert not realtime.should_deliver(
@@ -193,7 +204,9 @@ async def test_correction_records_who_corrected(
     assert corrected["updated_by"] == {"id": str(world.supervisor.user.id), "name": "Super"}
     # Só o comentário e quem avaliou (vazio vira null).
     r = await client.put(
-        url(t, world.tech), json={"score": 5, "comment": "Muito bom", "rater_name": "  "}, headers=an
+        url(t, world.tech),
+        json={"score": 5, "comment": "Muito bom", "rater_name": "  "},
+        headers=an,
     )
     assert (r.json()["comment"], r.json()["rater_name"], r.json()["updated_by"]["name"]) == (
         "Muito bom",
@@ -202,7 +215,12 @@ async def test_correction_records_who_corrected(
     )
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         [row] = list(await db.scalars(select(TechnicianRating)))
-        assert (row.score, row.comment, row.rater_name, row.source) == (5, "Muito bom", None, "central")
+        assert (row.score, row.comment, row.rater_name, row.source) == (
+            5,
+            "Muito bom",
+            None,
+            "central",
+        )
         assert (row.created_by_id, row.updated_by_id) == (
             world.analyst.user.id,
             world.analyst.user.id,
@@ -271,7 +289,10 @@ async def test_rating_rules(client: AsyncClient, world: World, engine: AsyncEngi
     # O auxiliar também é avaliado.
     r = await client.put(url(t, world.tech_other), json={"score": 5}, headers=an)
     assert r.status_code == 200, r.text
-    roles = [(x["technician"]["name"], x["role"], x["rating"]["score"]) for x in (await client.get(url(t), headers=an)).json()["technicians"]]
+    roles = [
+        (x["technician"]["name"], x["role"], x["rating"]["score"])
+        for x in (await client.get(url(t), headers=an)).json()["technicians"]
+    ]
     assert roles == [("Tecnico", "assignee", 3), ("Redes", "helper", 5)]
 
     # Quem saiu da OS e tem avaliação corrige e exclui; sem avaliação, não volta a ser avaliado.
@@ -282,7 +303,10 @@ async def test_rating_rules(client: AsyncClient, world: World, engine: AsyncEngi
         headers=an,
     )
     assert r.status_code == 200, r.text
-    roles = [(x["technician"]["name"], x["role"]) for x in (await client.get(url(t), headers=an)).json()["technicians"]]
+    roles = [
+        (x["technician"]["name"], x["role"])
+        for x in (await client.get(url(t), headers=an)).json()["technicians"]
+    ]
     assert roles == [("Tecnico", "assignee"), ("Redes", "former")]
     r = await client.put(url(t, world.tech_other), json={"score": 4}, headers=an)
     assert (r.status_code, r.json()["score"]) == (200, 4)
@@ -350,7 +374,11 @@ async def test_rating_follows_the_queue_and_the_screens(
     # Gestão de outra fila: 403 QUEUE_FORBIDDEN (a OS não é dele).
     await set_access(client, world.admin.headers, world.analyst.user.id, scope="own", unowned=False)
     an = world.analyst.headers
-    for method, target in (("GET", url(t)), ("PUT", url(t, world.tech)), ("DELETE", url(t, world.tech))):
+    for method, target in (
+        ("GET", url(t)),
+        ("PUT", url(t, world.tech)),
+        ("DELETE", url(t, world.tech)),
+    ):
         kwargs = {"json": {"score": 3}} if method == "PUT" else {}
         r = await client.request(method, target, headers=an, **kwargs)
         assert (r.status_code, r.json()["code"]) == (403, "QUEUE_FORBIDDEN"), (method, r.text)

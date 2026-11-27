@@ -374,7 +374,8 @@ def test_patch_limits_are_the_service_ones() -> None:
     for model in (MyProfileUpdate, TechnicianUpdate):
         assert issubclass(model, ProfessionalProfileIn)
         for field in PROFESSIONAL_FIELDS:
-            assert model.model_fields[field] == ProfessionalProfileIn.model_fields[field]
+            mine, base = model.model_fields[field], ProfessionalProfileIn.model_fields[field]
+            assert repr(mine) == repr(base), (model, field)
 
 
 def test_patch_lists_are_checked_whole() -> None:

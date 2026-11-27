@@ -208,7 +208,11 @@ def test_form_rules() -> None:
     assert docs.read_title("  NR10​   Exemplo ", cert) == "NR10 Exemplo"
     assert docs.read_title("qualquer", resume) == "Currículo"
     assert docs.read_title("x" * 80, cert) == "x" * 80
-    for raw, message in ((None, docs.NO_TITLE), (" a ", docs.NO_TITLE), ("x" * 81, docs.LONG_TITLE)):
+    for raw, message in (
+        (None, docs.NO_TITLE),
+        (" a ", docs.NO_TITLE),
+        ("x" * 81, docs.LONG_TITLE),
+    ):
         with pytest.raises(docs.WorkflowError, match=message):
             docs.read_title(raw, cert)
     assert docs.read_expiry("", cert, today) is None
@@ -241,7 +245,9 @@ async def test_technician_sends_lists_replaces_edits_and_deletes(
     tech, tech_id = world.tech, str(world.tech.user.id)
     due = _today() + timedelta(days=400)
 
-    r = await send_mine(client, tech, expires_on=due.isoformat(), client_upload_id=str(uuid.uuid4()))
+    r = await send_mine(
+        client, tech, expires_on=due.isoformat(), client_upload_id=str(uuid.uuid4())
+    )
     assert r.status_code == 200, r.text
     [cert] = r.json()["documents"]
     assert {k: cert[k] for k in cert if k not in ("id", "uploaded_at")} == {
@@ -287,7 +293,9 @@ async def test_technician_sends_lists_replaces_edits_and_deletes(
     got = await client.get(link["url"])
     assert got.status_code == 200 and got.content == PDF
     assert got.headers["content-disposition"].startswith("attachment")
-    photo = await client.get((await client.get(f"{MINE}/{rg['id']}/link", headers=tech.headers)).json()["url"])
+    photo = await client.get(
+        (await client.get(f"{MINE}/{rg['id']}/link", headers=tech.headers)).json()["url"]
+    )
     assert photo.headers["content-disposition"].startswith("inline")
     assert photo.headers["content-type"] == "image/png"
 
@@ -403,12 +411,18 @@ async def test_document_validation(
         ({"title": ""}, "Informe o título"),
         ({"title": " x "}, "Informe o título"),
         ({"title": "x" * 81}, "O título tem no máximo 80 caracteres"),
-        ({"kind": "personal", "title": "RG", "expires_on": "2030-01-01"}, docs.EXPIRY_ONLY_CERTIFICATION),
+        (
+            {"kind": "personal", "title": "RG", "expires_on": "2030-01-01"},
+            docs.EXPIRY_ONLY_CERTIFICATION,
+        ),
         ({"kind": "resume", "expires_on": "2030-01-01"}, docs.EXPIRY_ONLY_CERTIFICATION),
         ({"expires_on": "2026-02-30"}, "Confira a validade"),
         ({"expires_on": "1999-12-31"}, "Confira a validade"),
         ({"expires_on": "31/12/2030"}, "Confira a validade"),
-        ({"expires_on": (docs.last_expiry_day(_today()) + timedelta(days=1)).isoformat()}, "Confira a validade"),
+        (
+            {"expires_on": (docs.last_expiry_day(_today()) + timedelta(days=1)).isoformat()},
+            "Confira a validade",
+        ),
         ({"kind": "internal"}, "Escolha o tipo do documento"),
         ({"kind": ""}, "Escolha o tipo do documento"),
         ({"kind": "rg"}, "Escolha o tipo do documento"),
@@ -486,9 +500,7 @@ async def test_resume_is_one_and_versions_keep_the_three_newest(
 
     # Enviar outro currículo substitui o arquivo do atual (o mesmo id).
     for n in range(2, 6):
-        r = await send_mine(
-            client, tech, PDF_NEW + bytes([n]), kind="resume", name=f"cv-{n}.pdf"
-        )
+        r = await send_mine(client, tech, PDF_NEW + bytes([n]), kind="resume", name=f"cv-{n}.pdf")
         assert r.status_code == 200, r.text
         assert [(d["id"], d["file_name"]) for d in r.json()["documents"]] == [
             (resume["id"], f"cv-{n}.pdf")
@@ -525,14 +537,28 @@ async def test_central_attaches_replaces_edits_and_deletes(
     soon = _today() + timedelta(days=10)
     sent = [
         await send_central(client, adm, tech_id, kind="internal", title="Contrato de parceria"),
-        await send_central(client, adm, tech_id, PNG, name="cnh.png", mime="image/png", kind="personal", title="CNH"),
+        await send_central(
+            client,
+            adm,
+            tech_id,
+            PNG,
+            name="cnh.png",
+            mime="image/png",
+            kind="personal",
+            title="CNH",
+        ),
         await send_central(client, adm, tech_id, kind="certification", title="NR35 Exemplo"),
         await send_central(client, adm, tech_id, kind="resume", title=""),
         await send_central(client, adm, tech_id, title="NR10 Exemplo", expires_on=soon.isoformat()),
     ]
     assert [r.status_code for r in sent] == [201] * 5, [r.text for r in sent]
     first = sent[0].json()
-    assert (first["kind"], first["file"]["via"], first["file"]["uploaded_by"], first["previous"]) == (
+    assert (
+        first["kind"],
+        first["file"]["via"],
+        first["file"]["uploaded_by"],
+        first["previous"],
+    ) == (
         "internal",
         "central",
         {"id": str(world.admin.user.id), "name": "Admin"},
@@ -551,16 +577,27 @@ async def test_central_attaches_replaces_edits_and_deletes(
     ]
     internal_id = first["id"]
     # O anexo interno não tem validade e nunca chega ao técnico.
-    r = await send_central(client, adm, tech_id, kind="internal", title="Ocorrência", expires_on="2030-01-01")
+    r = await send_central(
+        client, adm, tech_id, kind="internal", title="Ocorrência", expires_on="2030-01-01"
+    )
     assert (r.status_code, detail(r)) == (422, docs.EXPIRY_ONLY_CERTIFICATION)
     me = (await client.get(f"{API}/me/profile", headers=world.tech.headers)).json()
-    assert [d["kind"] for d in me["documents"]] == ["certification", "certification", "personal", "resume"]
+    assert [d["kind"] for d in me["documents"]] == [
+        "certification",
+        "certification",
+        "personal",
+        "resume",
+    ]
     th = world.tech.headers
     for method, url, kwargs in (
         ("GET", f"{MINE}/{internal_id}/link", {}),
         ("PATCH", f"{MINE}/{internal_id}", {"json": {"title": "Outro"}}),
         ("DELETE", f"{MINE}/{internal_id}", {}),
-        ("POST", f"{MINE}/{internal_id}/replace", {"files": {"file": ("x.pdf", PDF, "application/pdf")}}),
+        (
+            "POST",
+            f"{MINE}/{internal_id}/replace",
+            {"files": {"file": ("x.pdf", PDF, "application/pdf")}},
+        ),
     ):
         r = await client.request(method, url, headers=th, **kwargs)
         assert (r.status_code, r.json()) == (404, NOT_FOUND), (method, url)
@@ -587,7 +624,9 @@ async def test_central_attaches_replaces_edits_and_deletes(
     ]
     # Editar: só o que vem; expires_on null tira a validade.
     r = await client.patch(
-        f"{API}/technicians/{tech_id}/documents/{nr35['id']}", json={"expires_on": None}, headers=sup
+        f"{API}/technicians/{tech_id}/documents/{nr35['id']}",
+        json={"expires_on": None},
+        headers=sup,
     )
     assert r.status_code == 200, r.text
     assert (r.json()["title"], r.json()["expires_on"]) == ("NR35 Atualizada", None)
@@ -605,9 +644,17 @@ async def test_central_attaches_replaces_edits_and_deletes(
     rows = await history(client, world, tech_id)
     assert phrases(rows, "documents", "internal_attachments") == [
         ("central", "internal_attachments", "excluiu Anexo interno Contrato de parceria"),
-        ("central", "documents", "mudou a validade de Certificação NR35 Atualizada: 01/05/2030 → sem validade"),
+        (
+            "central",
+            "documents",
+            "mudou a validade de Certificação NR35 Atualizada: 01/05/2030 → sem validade",
+        ),
         ("central", "documents", "renomeou Certificação NR35 Exemplo → NR35 Atualizada"),
-        ("central", "documents", "substituiu o arquivo de Certificação NR35 Atualizada (vence 01/05/2030)"),
+        (
+            "central",
+            "documents",
+            "substituiu o arquivo de Certificação NR35 Atualizada (vence 01/05/2030)",
+        ),
         ("central", "documents", f"incluiu Certificação NR10 Exemplo (vence {_br(soon)})"),
         ("central", "documents", "incluiu Currículo"),
         ("central", "documents", "incluiu Certificação NR35 Exemplo"),
@@ -619,7 +666,9 @@ async def test_central_attaches_replaces_edits_and_deletes(
     assert mine and all(e["audience"] == {"user_ids": [str(tech_id)]} for e in mine)
     changed = [e for e in published if e["type"] == "profile.changed"]
     assert len(mine) == len([e for e in changed if "documents" in e["data"]["fields"]])
-    assert [e["data"]["fields"] for e in changed if "internal_attachments" in e["data"]["fields"]] == [
+    assert [
+        e["data"]["fields"] for e in changed if "internal_attachments" in e["data"]["fields"]
+    ] == [
         ["internal_attachments"],
         ["internal_attachments"],
     ]
@@ -639,8 +688,19 @@ async def test_internal_attachments_need_edit(
     assert [d["id"] for d in listed] == [cert["id"]]
     base = f"{API}/technicians/{tech_id}/documents"
     for method, url, kwargs in (
-        ("POST", base, {"data": {"kind": "personal", "title": "RG"}, "files": {"file": ("rg.pdf", PDF, "application/pdf")}}),
-        ("POST", f"{base}/{cert['id']}/replace", {"files": {"file": ("x.pdf", PDF, "application/pdf")}}),
+        (
+            "POST",
+            base,
+            {
+                "data": {"kind": "personal", "title": "RG"},
+                "files": {"file": ("rg.pdf", PDF, "application/pdf")},
+            },
+        ),
+        (
+            "POST",
+            f"{base}/{cert['id']}/replace",
+            {"files": {"file": ("x.pdf", PDF, "application/pdf")}},
+        ),
         ("PATCH", f"{base}/{cert['id']}", {"json": {"title": "Outro"}}),
         ("DELETE", f"{base}/{internal['id']}", {}),
     ):
@@ -649,7 +709,10 @@ async def test_internal_attachments_need_edit(
         assert r.json()["code"] == "MODULE_FORBIDDEN"
     # Editar: vê e mexe nos quatro tipos.
     await restrict_analyst(client, world, **{"base.technicians": "edit"})
-    assert {d["id"] for d in await central_list(client, an, tech_id)} == {cert["id"], internal["id"]}
+    assert {d["id"] for d in await central_list(client, an, tech_id)} == {
+        cert["id"],
+        internal["id"],
+    }
     r = await client.patch(f"{base}/{internal['id']}", json={"title": "Contrato 2026"}, headers=an)
     assert r.status_code == 200, r.text
     # Sem Técnicos: nada.
@@ -662,7 +725,18 @@ async def test_download_link_is_signed_and_safe(
     client: AsyncClient, world: World, engine: AsyncEngine, media: Path
 ) -> None:
     adm, tech_id = world.admin.headers, world.tech.user.id
-    photo = (await send_central(client, adm, tech_id, JPEG, name="rg.jpg", mime="image/jpeg", kind="personal", title="RG")).json()
+    photo = (
+        await send_central(
+            client,
+            adm,
+            tech_id,
+            JPEG,
+            name="rg.jpg",
+            mime="image/jpeg",
+            kind="personal",
+            title="RG",
+        )
+    ).json()
     cert = (await send_central(client, adm, tech_id, title="NR10 Exemplo")).json()
 
     r = await client.get(photo["file"]["url"])
@@ -721,7 +795,11 @@ async def test_documents_of_another_technician_are_not_found(
         ("GET", f"{MINE}/{other['id']}/link", {}),
         ("PATCH", f"{MINE}/{other['id']}", {"json": {"title": "Meu"}}),
         ("DELETE", f"{MINE}/{other['id']}", {}),
-        ("POST", f"{MINE}/{other['id']}/replace", {"files": {"file": ("x.pdf", PDF, "application/pdf")}}),
+        (
+            "POST",
+            f"{MINE}/{other['id']}/replace",
+            {"files": {"file": ("x.pdf", PDF, "application/pdf")}},
+        ),
         ("GET", f"{MINE}/{uuid.uuid4()}/link", {}),
     ):
         r = await client.request(method, url, headers=th, **kwargs)
@@ -793,7 +871,11 @@ async def test_ficha_uploads_and_approval_moves_them_to_the_technician(
     }
     again = await send_ficha(client, token, expires_on=due.isoformat(), client_upload_id=upload_id)
     assert (again.status_code, again.json()) == (200, cert)
-    rg = (await send_ficha(client, token, PNG, name="rg.png", mime="image/png", kind="personal", title="RG")).json()
+    rg = (
+        await send_ficha(
+            client, token, PNG, name="rg.png", mime="image/png", kind="personal", title="RG"
+        )
+    ).json()
     resume = await send_ficha(client, token, kind="resume", title="", name="cv.pdf")
     assert resume.status_code == 201, resume.text
     # O segundo currículo troca o arquivo do primeiro (o mesmo id).
@@ -804,9 +886,7 @@ async def test_ficha_uploads_and_approval_moves_them_to_the_technician(
 
     rows = await rows_of(engine, application_id=uuid.UUID(app_id))
     assert len(rows) == 4  # três atuais e a versão do currículo
-    assert all(
-        (d.user_id, d.uploaded_by_id, d.uploaded_via) == (None, None, "ficha") for d in rows
-    )
+    assert all((d.user_id, d.uploaded_by_id, d.uploaded_via) == (None, None, "ficha") for d in rows)
     assert all(d.storage_key.startswith(f"documents/fichas/{app_id}/") for d in rows)
 
     # A Homologação lista os arquivos (com os links).
@@ -830,12 +910,17 @@ async def test_ficha_uploads_and_approval_moves_them_to_the_technician(
     assert r.status_code == 200, r.text
     tech_id = r.json()["technician"]["id"]
     listed = await central_list(client, world.admin.headers, tech_id)
-    assert [(d["kind"], d["title"], d["file"]["via"], d["file"]["uploaded_by"]) for d in listed] == [
+    assert [
+        (d["kind"], d["title"], d["file"]["via"], d["file"]["uploaded_by"]) for d in listed
+    ] == [
         ("certification", "NR10 Exemplo", "ficha", None),
         ("resume", "Currículo", "ficha", None),
     ]
     assert [v["file_name"] for v in listed[1]["previous"]] == ["cv.pdf"]
-    assert all(d.user_id == uuid.UUID(tech_id) for d in await rows_of(engine, application_id=uuid.UUID(app_id)))
+    assert all(
+        d.user_id == uuid.UUID(tech_id)
+        for d in await rows_of(engine, application_id=uuid.UUID(app_id))
+    )
     approved = (await history(client, world, tech_id))[-1]
     assert approved["via"] == "ficha"
     assert [(i["field"], i["to"]) for i in approved["changes"] if i["field"] == "documents"] == [
@@ -875,7 +960,11 @@ async def test_ficha_upload_token_rules(
     ):
         r = await send_ficha(client, bad)
         assert (r.status_code, r.json()) == (410, gone)
-    r = await client.post(FICHA, data={"kind": "certification", "title": "NR10"}, files={"file": ("a.pdf", PDF, "application/pdf")})
+    r = await client.post(
+        FICHA,
+        data={"kind": "certification", "title": "NR10"},
+        files={"file": ("a.pdf", PDF, "application/pdf")},
+    )
     assert (r.status_code, r.json()) == (410, gone)
 
     # Até 10 arquivos por ficha.
@@ -894,7 +983,9 @@ async def test_ficha_upload_token_rules(
 
     # Reprovada: 409.
     monkeypatch.setattr(docs, "UPLOADS_PER_HOUR", 1000)
-    r = await client.post(f"{APPS}/{app_id}/reject", json={"reason": "Fora da região"}, headers=world.analyst.headers)
+    r = await client.post(
+        f"{APPS}/{app_id}/reject", json={"reason": "Fora da região"}, headers=world.analyst.headers
+    )
     assert r.status_code == 200, r.text
     r = await send_ficha(client, token, title="Curso 13")
     assert (r.status_code, r.json()["code"]) == (409, "APPLICATION_NOT_PENDING")
@@ -908,8 +999,14 @@ async def test_deleted_ficha_takes_its_documents(
     as versões, do banco e do disco."""
     first_id, first_token = await _ficha(client, world, "tecnico.gama@exemplo.com")
     assert (await send_ficha(client, first_token, kind="resume", name="cv.pdf")).status_code == 201
-    assert (await send_ficha(client, first_token, PDF_NEW, kind="resume", name="cv-2.pdf")).status_code == 200
-    assert (await send_ficha(client, first_token, PNG, name="rg.png", mime="image/png", kind="personal", title="RG")).status_code == 201
+    assert (
+        await send_ficha(client, first_token, PDF_NEW, kind="resume", name="cv-2.pdf")
+    ).status_code == 200
+    assert (
+        await send_ficha(
+            client, first_token, PNG, name="rg.png", mime="image/png", kind="personal", title="RG"
+        )
+    ).status_code == 201
     second_id, second_token = await _ficha(
         client, world, "tecnico.delta@exemplo.com", cpf("123456780")
     )
@@ -918,7 +1015,9 @@ async def test_deleted_ficha_takes_its_documents(
 
     an = world.analyst.headers
     for app_id in (first_id, second_id):
-        r = await client.post(f"{APPS}/{app_id}/reject", json={"reason": "Fora da região"}, headers=an)
+        r = await client.post(
+            f"{APPS}/{app_id}/reject", json={"reason": "Fora da região"}, headers=an
+        )
         assert r.status_code == 200, r.text
     r = await client.delete(f"{APPS}/{first_id}", headers=world.supervisor.headers)
     assert r.status_code == 204, r.text
@@ -962,7 +1061,9 @@ async def test_due_map_and_count_at_the_boundaries(
         assert r.status_code == 201, r.text
     await send_central(client, adm, tech_id, kind="personal", title="RG")
     # A versão substituída com validade vencida não conta.
-    old = (await send_central(client, adm, other_id, title="NR20 Exemplo", expires_on="2026-11-01")).json()
+    old = (
+        await send_central(client, adm, other_id, title="NR20 Exemplo", expires_on="2026-11-01")
+    ).json()
     r = await client.post(
         f"{API}/technicians/{other_id}/documents/{old['id']}/replace",
         data={"expires_on": "2026-12-27"},
@@ -974,7 +1075,9 @@ async def test_due_map_and_count_at_the_boundaries(
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         due = await docs.due_map(db, [tech_id, other_id, world.admin.user.id], today=today)
         assert set(due) == {tech_id}
-        nr10 = next(d for d in await central_list(client, adm, tech_id) if d["title"] == "NR10 Exemplo")
+        nr10 = next(
+            d for d in await central_list(client, adm, tech_id) if d["title"] == "NR10 Exemplo"
+        )
         assert due[tech_id].model_dump() == {
             "document_id": uuid.UUID(nr10["id"]),
             "title": "NR10 Exemplo",
@@ -989,7 +1092,9 @@ async def test_due_map_and_count_at_the_boundaries(
         # Com o outro técnico vencendo também: Ativo conta; Inativo, não.
         assert (await docs.due_count(db, today=date(2026, 11, 28))) == 2
         await db.execute(
-            update(User).where(User.id == other_id).values(operational_status=OperationalStatus.INACTIVE)
+            update(User)
+            .where(User.id == other_id)
+            .values(operational_status=OperationalStatus.INACTIVE)
         )
         await db.commit()
         assert (await docs.due_count(db, today=date(2026, 11, 28))) == 1
@@ -1007,7 +1112,9 @@ async def test_home_counts_technicians_with_certification_due(
     soon = (_today() + timedelta(days=5)).isoformat()
     later = (_today() + timedelta(days=60)).isoformat()
     assert (await send_central(client, adm, world.tech.user.id, expires_on=soon)).status_code == 201
-    assert (await send_central(client, adm, world.tech_other.user.id, expires_on=later)).status_code == 201
+    assert (
+        await send_central(client, adm, world.tech_other.user.id, expires_on=later)
+    ).status_code == 201
     r = await client.get(f"{API}/home/overview", headers=world.supervisor.headers)
     assert r.status_code == 200, r.text
     assert r.json()["pulse"]["team"]["certifications_due"] == 1
