@@ -905,10 +905,11 @@ disponibilidade é um sinal pequeno na sugestão de técnicos). Não pede senha.
 de cada formação e de cada período e as listas na ordem dele. A ficha aprovada na homologação já entra com a
 disponibilidade, o veículo, a CNH, as aptidões e as áreas de atuação. Desde 26/11/2026, a central também muda cada
 parte (na ficha do técnico): quando foi ela que mudou a parte por último, a tela mostra "Atualizado pela central em
-20/11/2026" logo abaixo dos avisos do topo ([src/components/settings/CentralStamp.tsx](src/components/settings/CentralStamp.tsx),
-`centralStampText`; pelo app ou pela ficha, nada aparece). As telas não têm texto de explicação no topo: só os vazios,
-os limites e os avisos de rede. Código: `src/app/configuracoes/`, [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts)
-(o estado das telas e os catálogos), [src/lib/autoSave.ts](src/lib/autoSave.ts) e as regras puras de
+20/11/2026" logo abaixo dos avisos do topo
+([src/components/settings/CentralStamp.tsx](src/components/settings/CentralStamp.tsx), `centralStampText`; pelo app
+ou pela ficha, nada aparece). As telas não têm texto de explicação no topo: só os vazios, os limites e os avisos de
+rede. Código: `src/app/configuracoes/`, [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts) (o estado das telas
+e os catálogos), [src/lib/autoSave.ts](src/lib/autoSave.ts) e as regras puras de
 [src/lib/techProfileForm.ts](src/lib/techProfileForm.ts) e [src/lib/unavailability.ts](src/lib/unavailability.ts).
 
 - **Dias e horários** (`/configuracoes/disponibilidade`), em duas seções:
@@ -948,9 +949,9 @@ os limites e os avisos de rede. Código: `src/app/configuracoes/`, [src/lib/tech
   caixa de marcar; com mais de 15 ferramentas, aparece a busca. Ferramenta desativada pela central some da lista e do
   cadastro (fica guardada no servidor e volta se for reativada). Como nas Áreas, a lista é relida uma vez quando há
   ferramenta gravada que ela não tem (a central criou e marcou).
-- **Salvar ao tocar** (os turnos, os meios e a CNH, as Áreas de atuação e o Ferramental): sem botão. O toque muda a tela na hora, e os
-  toques de perto vão juntos num envio só, 0,6 s depois do último (uma linha no histórico da central), com "Salvando…"
-  e "Salvo" no cabeçalho (o TalkBack fala; o VoiceOver não). Um envio por vez: o que mudar durante o envio vai logo
+- **Salvar ao tocar** (os turnos, os meios e a CNH, as Áreas de atuação e o Ferramental): sem botão. O toque muda a
+  tela na hora, e os toques de perto vão juntos num envio só, 0,6 s depois do último (uma linha no histórico da
+  central), com "Salvando…" e "Salvo" no cabeçalho (o TalkBack fala; o VoiceOver não). Um envio por vez: o que mudar durante o envio vai logo
   depois, com o valor final. Sem rede, vibra, avisa "Sem internet" e não muda nada; se o envio falhar, a tela volta ao
   que está gravado e mostra o erro. Sair da tela com o envio agendado manda na hora (o pedido continua com a tela
   fechada); o Sair ou outro técnico descarta o pendente em silêncio.
