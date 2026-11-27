@@ -387,9 +387,9 @@ um técnico trazem também o detalhe (ferramentas, formação e a data de cada p
 [Perfil técnico](#perfil-técnico-2026-11-19). `TechnicianOut.level` (o selo do elo) e as rotas
 `/technicians/{id}/level` e `/technicians/{id}/stats`: ver [Elo dos técnicos](#elo-dos-técnicos-2026-11-18) e
 [Perfil do técnico: estatísticas e histórico](#perfil-do-técnico-estatísticas-e-histórico-2026-11-19). Desde 26/11/2026:
-os documentos (`GET|POST /technicians/{id}/documents`, `POST …/{document_id}/replace`, `PATCH|DELETE
-…/{document_id}`), as avaliações do cliente (`GET /technicians/{id}/ratings`) e os campos `area_ids`, `areas` (só no
-detalhe), `certification_due`, `rating_average` e `rating_count` de `TechnicianOut` (sai `service_areas`): ver
+os documentos (`GET|POST /technicians/{id}/documents`, `POST …/{document_id}/replace`, `PATCH`/`DELETE …/{document_id}`),
+as avaliações do cliente (`GET /technicians/{id}/ratings`) e os campos `area_ids`, `areas` (só no detalhe),
+`certification_due`, `rating_average` e `rating_count` de `TechnicianOut` (sai `service_areas`): ver
 [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26).
 
 ### Importação de locais
@@ -3407,13 +3407,16 @@ rótulos curtos como "Atende CFTV, redes"). Saiu a reserva das áreas da ficha a
   ids), `dia` (`seg` a `dom`), `turno` (`manha`, `tarde`, `noite`, `madrugada`), `favorito=sim`,
   `certificacao=vencendo`, `incompleto`, `elo` e `ordem`; valor desconhecido vira vazio. Na linha, a estrela "Favorito
   em {cidades}" e o selo da certificação.
-- **Planilha** (gerada na tela), com o cabeçalho `nome;email;celular;grupo;cidade;uf;regiao_atuacao;situacao;
-  situacao_motivo;acesso_app;email_validado;forma_recebimento;ultimo_acesso;ultima_os;os_abertas;elo;elo_em_risco;
-  ferramental;disponibilidade;transporte;cnh;aptidoes;areas_atuacao;favorito_em;certificacao_vencendo;avaliacao_media;
-  avaliacoes;perfil_tecnico_atualizado_em` (numa linha só, sem espaços): as áreas pelo nome, em ordem alfabética, com
-  "; "; `favorito_em` "Cidade-UF; …"; `certificacao_vencendo` "{título} vencida em dd/mm/aaaa" ou "{título} vence em
-  dd/mm/aaaa" (vencer hoje conta como "vence"); `avaliacao_media` com uma casa e vírgula (vazia sem avaliação). O
-  Exportar espera o ferramental, as áreas e os favoritos. Sem CPF, RG, nascimento nem dados de recebimento.
+- **Planilha** (gerada na tela; `TECH_CSV_HEADER` em `lib/techListFilter.ts`), com o cabeçalho:
+
+  ```
+  nome;email;celular;grupo;cidade;uf;regiao_atuacao;situacao;situacao_motivo;acesso_app;email_validado;forma_recebimento;ultimo_acesso;ultima_os;os_abertas;elo;elo_em_risco;ferramental;disponibilidade;transporte;cnh;aptidoes;areas_atuacao;favorito_em;certificacao_vencendo;avaliacao_media;avaliacoes;perfil_tecnico_atualizado_em
+  ```
+
+  As áreas pelo nome, em ordem alfabética, com "; "; `favorito_em` "Cidade-UF; …"; `certificacao_vencendo` "{título}
+  vencida em dd/mm/aaaa" ou "{título} vence em dd/mm/aaaa" (vencer hoje conta como "vence"); `avaliacao_media` com uma
+  casa e vírgula (vazia sem avaliação). O Exportar espera o ferramental, as áreas e os favoritos. Sem CPF, RG,
+  nascimento nem dados de recebimento.
 - **Início**: no cartão Equipe, "1 técnico com certificação vencendo" ou "{n} técnicos com certificação vencendo", com o
   link para `/tecnicos?certificacao=vencendo&situacao=ativo` (só com Técnicos V e n > 0).
 - **OS**: o cartão **Avaliação do cliente** (aba Geral, no painel e na página, abaixo do formulário), com a OS concluída
