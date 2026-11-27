@@ -9,7 +9,9 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 Os erros em que a tela reage por um código trazem também `code` (`{"detail", "code"}`): os do acesso
 (`MODULE_FORBIDDEN`...), das ofertas (`OFFER_*`), do conflito de agenda e, desde 25/11/2026, os de `CodedError`
 (`services/errors.py`, com o status dele: `LINK_GONE`, `MAIL_DISABLED`, `CEP_NOT_FOUND`, `PAYOUT_METHOD_DUPLICATE`...;
-ver [Cadastro V2](#cadastro-v2-2026-11-25)).
+ver [Cadastro V2](#cadastro-v2-2026-11-25); desde 26/11/2026, também `CATALOG_IN_USE`, `AREA_NOT_FOUND`,
+`SKILL_NOT_FOUND`, `DOCUMENT_NOT_FOUND`, `RATING_NOT_CONCLUDED`...: ver
+[Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)).
 
 Valor que o banco recusa (SQLSTATE da classe 22, "data exception": texto maior que a coluna, U+0000 num texto que vai
 ao banco como está) responde 422 em qualquer rota, com um aviso no log (o SQLSTATE, sem traceback):
@@ -46,10 +48,12 @@ quem fala com a loja é a central), reincidência e dados migrados (`services/ti
 lançou custos também sai. Anexos: só fotos, fotos dos formulários, assinatura e o que ele mesmo enviou
 (documentos do escritório ficam fora). Horas: não aponta (só a gestão) e vê só as dele. Comentários: nem lê nem escreve (403; no sync, `comments` vem vazio e a
 operação `comment` é recusada). Rotas de cadastro, usuários, grupos, painel, relatórios de SLA,
-atividades do dia, catálogo (exceto motivos de violação e de visita improdutiva e o ferramental,
-`GET /technician-tools`, que ele recebe só com as ferramentas ativas), listagem de OS e histórico da OS respondem 403
-para ele (`NoTechnicianUser` / `TicketManagerUser`). No WebSocket ele
-recebe só que a OS mudou (tipo, OS, status, versão e, na equipe da visita, `added_ids`).
+atividades do dia, catálogo (exceto motivos de violação e de visita improdutiva e os catálogos do perfil técnico,
+`GET /technician-tools`, `/technician-areas` e `/technician-skills`, que ele recebe só com os itens ativos), listagem de
+OS e histórico da OS respondem 403 para ele (`NoTechnicianUser` / `TicketManagerUser`). A avaliação do cliente e os
+anexos internos (desde 26/11/2026) também não chegam a ele. No WebSocket ele
+recebe só que a OS mudou (tipo, OS, status, versão e, na equipe da visita, `added_ids`) e, desde 26/11/2026, o
+`me.profile_changed` (a central mudou o cadastro dele: ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)).
 
 ## Status da OS
 
@@ -3356,9 +3360,10 @@ rótulos curtos como "Atende CFTV, redes"). Saiu a reserva das áreas da ficha a
   favoritos por cidade e as sugestões; documentos: o Início). A avaliação (`ticket.updated` com `ratings`) relê a OS.
 - Com a API de antes (a prévia ao vivo, até a publicação): Áreas e Aptidões de Configurações e as seções Documentos,
   Currículo, Anexos internos e Avaliações mostram "Indisponível no momento. Tente de novo mais tarde." com "Tentar de
-  novo"; o Ferramental fica sem Excluir; o perfil profissional fica só de leitura (`isPreGestao`, o detalhe sem
-  `area_ids`), com "Indisponível no momento." para quem tem Técnicos E; na lista, Área, Aptidão e o chip da certificação
-  somem; o cartão da avaliação na OS some (404).
+  novo"; o Ferramental fica sem Excluir; pelo `isPreGestao` (`lib/techProfileEdit.ts`: o detalhe sem `area_ids`), Áreas
+  de atuação diz "Indisponível no momento" e as outras cinco seções do perfil profissional ficam só de leitura, com
+  "Indisponível no momento." para quem tem Técnicos E; na lista, Área, Aptidão e o chip da certificação somem; o cartão
+  da avaliação na OS some (404).
 
 **No app** (detalhes em `mobile/README.md`, Configurações): as telas Documentos, Documento e Currículo (Dados pessoais e
 cadastrais e Perfil profissional) e Áreas de atuação; as Aptidões pelo catálogo (`{skill_id, level}`; "Adicionar
