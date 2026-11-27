@@ -661,11 +661,12 @@ O elo do técnico aparece como uma medalha, a patente ([src/components/LevelBadg
 **Perfil › Configurações** ([src/app/configuracoes/index.tsx](src/app/configuracoes/index.tsx)): o cadastro do técnico
 nos três grupos de seções que a central usa na ficha do técnico, com os mesmos nomes (`TECH_SECTION_GROUPS` em
 `lib/constants.ts`, cópia da web; só as seções das entregas no ar, `CADASTRO_DELIVERY`, hoje 2: desde 26/11/2026, com
-Documentos, Currículo e Áreas de atuação; "Credenciais" aqui é a linha "Senha"), mais o grupo App. Cada linha tem o resumo à direita (o rótulo fica com a largura dele, até metade da linha,
-quebrando entre palavras, e o resumo fica com o resto, cortado com "…"; com a fonte do aparelho a partir de 1,3×, o
-resumo desce para baixo do rótulo; [src/components/MenuRow.tsx](src/components/MenuRow.tsx), o mesmo da lista do
-Perfil). Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do técnico", "Perfil técnico", "Cadastro V2
-(2026-11-25)" e "Gestão dos técnicos (2026-11-26)". O antigo Meu cadastro foi dividido nas telas abaixo; `/meu-cadastro` só redireciona para
+Documentos, Currículo e Áreas de atuação; "Credenciais" aqui é a linha "Senha"), mais o grupo App. Cada linha tem o
+resumo à direita (o rótulo fica com a largura dele, até metade da linha, quebrando entre palavras, e o resumo fica com o
+resto, cortado com "…"; com a fonte do aparelho a partir de 1,3×, o resumo desce para baixo do rótulo;
+[src/components/MenuRow.tsx](src/components/MenuRow.tsx), o mesmo da lista do Perfil). Contratos em
+[docs/API.md](../docs/API.md), "Meu cadastro do técnico", "Perfil técnico", "Cadastro V2 (2026-11-25)" e "Gestão dos
+técnicos (2026-11-26)". O antigo Meu cadastro foi dividido nas telas abaixo; `/meu-cadastro` só redireciona para
 `/configuracoes`, e `/configuracoes/pix` (a antiga Chave PIX), para `/configuracoes/recebimento` (links antigos).
 
 - **Dados pessoais e cadastrais**: Foto do perfil (a foto à direita; enviando ou removendo, o andamento), Dados
