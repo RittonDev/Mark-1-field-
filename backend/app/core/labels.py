@@ -5,6 +5,7 @@ from enum import StrEnum
 from app.core.enums import (
     AssetType,
     Impact,
+    LevelEntryKind,
     LevelTier,
     Responsibility,
     TicketSource,
@@ -67,6 +68,20 @@ LEVEL_TIER_LABELS = {
     LevelTier.SILVER: "Prata",
     LevelTier.GOLD: "Ouro",
     LevelTier.DIAMOND: "Diamante",
+}
+
+# Tipo do lançamento no livro de pontos do elo (= LEVEL_ENTRY_KIND em lib/constants.ts). Só a
+# central: fora do /meta, que o app também lê.
+LEVEL_ENTRY_KIND_LABELS = {
+    LevelEntryKind.OPENING: "Abertura",
+    LevelEntryKind.COMPLETION: "Atendimento concluído",
+    LevelEntryKind.ON_TIME: "Chegada dentro do SLA",
+    LevelEntryKind.LATE: "Chegada fora do SLA",
+    LevelEntryKind.ABANDONMENT: "Abandono confirmado",
+    LevelEntryKind.REWORK_FAILURE: "Retorno com falha confirmada",
+    LevelEntryKind.ADJUSTMENT: "Ajuste excepcional",
+    LevelEntryKind.REVERSAL: "Estorno",
+    LevelEntryKind.RECATEGORIZATION: "Recategorização",
 }
 
 VIOLATION_SCOPE_LABELS = {

@@ -189,6 +189,21 @@ class LevelOccurrenceKind(StrEnum):
     UNPRODUCTIVE = "unproductive"  # visita improdutiva com motivo de responsabilidade do técnico
 
 
+class LevelEntryKind(StrEnum):
+    """Tipo do lançamento no livro de pontos do elo (models/level_points.py; só a central vê
+    pontos). O sinal dos pontos de cada tipo fica no check ck_technician_level_entries_sign."""
+
+    OPENING = "opening"  # abertura pelo histórico de atendimentos (>= 0)
+    COMPLETION = "completion"  # atendimento concluído (> 0)
+    ON_TIME = "on_time"  # chegada dentro do SLA (> 0)
+    LATE = "late"  # chegada fora do SLA (<= 0)
+    ABANDONMENT = "abandonment"  # abandono confirmado pela operação (<= 0)
+    REWORK_FAILURE = "rework_failure"  # retorno com falha confirmada (<= 0)
+    ADJUSTMENT = "adjustment"  # ajuste excepcional, com motivo e autor (!= 0)
+    REVERSAL = "reversal"  # estorno de outro lançamento (qualquer sinal)
+    RECATEGORIZATION = "recategorization"  # faixas novas aprovadas com o elo ativo (= 0)
+
+
 class ApplicationStatus(StrEnum):
     """Ficha de homologação de técnico."""
 

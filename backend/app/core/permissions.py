@@ -39,6 +39,8 @@ QueueScope = Literal["own", "all"]
 RANK: dict[str, int] = {"none": 0, "view": 1, "edit": 2}
 FULL: tuple[Level, ...] = ("none", "view", "edit")
 VIEW_ONLY: tuple[Level, ...] = ("none", "view")
+# Ação sem tela de leitura (confirmar ou não): Sem acesso ou Editar.
+CONFIRM: tuple[Level, ...] = ("none", "edit")
 QUEUE_SCOPES: tuple[QueueScope, ...] = ("own", "all")
 
 LEVEL_LABELS: dict[str, str] = {"none": "Sem acesso", "view": "Visualizar", "edit": "Editar"}
@@ -96,6 +98,15 @@ ITEMS: tuple[Item, ...] = (
     Item("base.customers", "Clientes", "/clientes", FULL),
     Item("base.locations", "Locais", "/locais", FULL),
     Item("base.technicians", "Técnicos", "/tecnicos", FULL, "Editar inclui Liberar acesso"),
+    # Elo por pontos: quem confirma abandono e retorno (as rotas e a fila /pendencias-elo vêm nas
+    # Etapas 3 e 4; Configurações › Elo mostra quem tem o item em Editar).
+    Item(
+        "base.level_confirm",
+        "Elo: confirmar ocorrências",
+        "/pendencias-elo",
+        CONFIRM,
+        "Confirmar ou dispensar abandono e retorno",
+    ),
     Item("base.onboarding", "Homologação", "/homologacao", FULL),
     Item("analysis.dashboard", "Dashboard", "/dashboard", VIEW_ONLY),
     Item("analysis.reports", "Relatórios", "/relatorios", VIEW_ONLY),
@@ -128,10 +139,14 @@ def _defaults(overrides: Mapping[str, Level] | None = None) -> dict[str, Level]:
 
 
 # Reproduzem o acesso de antes dos perfis. O analista via Usuários só para ler e não tinha
-# Configurações no menu (as leituras que a OS usa continuam abertas a ele).
+# Configurações no menu (as leituras que a OS usa continuam abertas a ele). "Elo: confirmar
+# ocorrências" nasce com o supervisor (e o administrador, sempre); o analista e o perfil criado na
+# tela começam sem ele.
 ROLE_DEFAULTS: dict[str, dict[str, Level]] = {
     UserRole.SUPERVISOR.value: _defaults(),
-    UserRole.ANALYST.value: _defaults({"setup.users": "view", "setup.settings": "none"}),
+    UserRole.ANALYST.value: _defaults(
+        {"setup.users": "view", "setup.settings": "none", "base.level_confirm": "none"}
+    ),
 }
 # Perfil criado na tela começa (e completa as chaves ausentes) pelo padrão do analista.
 CUSTOM_BASE = UserRole.ANALYST.value
