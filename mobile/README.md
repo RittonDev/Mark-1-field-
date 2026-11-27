@@ -935,20 +935,36 @@ os limites e os avisos de rede. Código: `src/app/configuracoes/`, [src/lib/tech
     ([src/components/settings/VehicleSheet.tsx](src/components/settings/VehicleSheet.tsx)), opcionais e gravados
     juntos; vazio limpa. Placa antiga ou Mercosul ("Placa inválida: confira as letras e os números."). São campos
     próprios, à parte dos meios: gravar os meios não apaga o veículo. Só com a API do cadastro V2.
+- **Áreas de atuação** (`/configuracoes/areas`, desde 26/11/2026): as áreas em que o técnico atende, do catálogo que a
+  central mantém (Configurações › Técnicos, na central), em ordem alfabética, com caixa de marcar; com mais de 15
+  áreas, aparece a busca "Buscar área". É o que leva às sugestões de técnico para cada OS. Até 20: no limite, "Limite
+  de 20 áreas de atuação. Desmarque uma para marcar outra." e as desmarcadas ficam desligadas. A lista é relida quando
+  o servidor ignora uma área marcada (a central a desativou com a tela aberta: ela some), quando ele recusa com 422 e,
+  uma vez, quando há área gravada que a lista da memória não tem (a central criou e marcou). Catálogo vazio: "Lista
+  vazia" / "A central ainda não cadastrou as áreas de atuação."; sem rede: "Sem internet" / "Conecte o aparelho para ver
+  as áreas de atuação."; sem a rota (404): "O servidor ainda não tem as áreas de atuação. Tente de novo mais tarde.".
 - **Ferramental**: o catálogo que a central mantém (Configurações › Técnicos, na central), em ordem alfabética, com
   caixa de marcar; com mais de 15 ferramentas, aparece a busca. Ferramenta desativada pela central some da lista e do
-  cadastro (fica guardada no servidor e volta se for reativada).
-- **Salvar ao tocar** (os turnos, os meios e a CNH e o Ferramental): sem botão. O toque muda a tela na hora, e os
+  cadastro (fica guardada no servidor e volta se for reativada). Como nas Áreas, a lista é relida uma vez quando há
+  ferramenta gravada que ela não tem (a central criou e marcou).
+- **Salvar ao tocar** (os turnos, os meios e a CNH, as Áreas de atuação e o Ferramental): sem botão. O toque muda a tela na hora, e os
   toques de perto vão juntos num envio só, 0,6 s depois do último (uma linha no histórico da central), com "Salvando…"
   e "Salvo" no cabeçalho (o TalkBack fala; o VoiceOver não). Um envio por vez: o que mudar durante o envio vai logo
   depois, com o valor final. Sem rede, vibra, avisa "Sem internet" e não muda nada; se o envio falhar, a tela volta ao
   que está gravado e mostra o erro. Sair da tela com o envio agendado manda na hora (o pedido continua com a tela
   fechada); o Sair ou outro técnico descarta o pendente em silêncio.
 - **Aptidões**: até 30, a mais nova primeiro, com o nível e o "desde" ("Avançado · desde 11/2026", o mês em que entrou
-  no perfil; quem guarda é o servidor). **Adicionar aptidão** abre a folha com o nome (texto livre ou uma das sugestões
-  da ficha da homologação: até 12, sem as que ele já tem) e o nível (Básico, Intermediário ou Avançado). Tocar numa
-  aptidão muda só o nível, que mantém o "desde" (para trocar o nome, exclui e inclui de novo); a lixeira exclui, com
-  confirmação.
+  no perfil; quem guarda é o servidor). Desde 26/11/2026, vêm do catálogo que a central mantém: **Adicionar aptidão**
+  abre a folha ([src/components/settings/SkillCatalogSheet.tsx](src/components/settings/SkillCatalogSheet.tsx)) com o
+  nível (Básico, Intermediário ou Avançado, um para todas), a busca "Buscar aptidão", quantas estão escolhidas ("1
+  escolhida", "3 escolhidas") e as aptidões da lista que ele ainda não tem; marca várias e toca "Adicionar" ("Adicionar
+  3"); para no limite de 30 ("Limite de 30 aptidões."). A que não está na lista, ele pede à central ("Peça a inclusão de
+  outra à central pelo WhatsApp."): o texto livre e as sugestões da ficha saíram. Tocar numa aptidão abre "Editar
+  aptidão" ([src/components/settings/SkillSheet.tsx](src/components/settings/SkillSheet.tsx)), só com o nível, que
+  mantém o "desde" (para trocar de aptidão, exclui e inclui outra); a lixeira exclui, com confirmação. O corpo vai com
+  `{skill_id, level}` (`skillsBody`); se o servidor deixa alguma escolhida de fora (a central a desativou), o aviso "Nem
+  todas foram incluídas"; com 422, a lista é relida. Folha sem itens: "Lista vazia" / "A central ainda não cadastrou as
+  aptidões." ou "Você já tem todas as aptidões da lista".
 - **Formação**: até 20, as em andamento primeiro e depois as mais recentes, com o curso, o nível (Ensino médio, Técnico,
   Graduação, Pós-graduação, Certificação ou Curso livre), a instituição e o período ("02/2022 a 12/2023", "desde 02/2024
   (em andamento)"). **Adicionar formação** e o lápis abrem a folha; o início e o fim saem de uma folha de meses (de
@@ -963,37 +979,57 @@ os limites e os avisos de rede. Código: `src/app/configuracoes/`, [src/lib/tech
   tela para atualizar.") na folha, sem enviar nada. A folha mostra o erro do servidor no fim, não fecha enquanto salva
   e pergunta antes de descartar o que foi digitado; sem rede, avisa e fica preenchida. No limite, "Limite de 30
   aptidões. Exclua uma para incluir outra." (e o mesmo com 20 formações).
-- **Textos** (nome da aptidão, curso e instituição): conferidos como o servidor grava (`cleanText` e `foldName`): saem
-  os caracteres de controle e os invisíveis (espaço de largura zero, BOM, marcas de direção), tab, LF, VT, FF e CR
-  viram espaço, e os espaços se juntam. Nome só de invisíveis conta como vazio, e "Lin<U+200B>ux" repete "Linux".
-- **Catálogos**: o ferramental de `GET /technician-tools` (o técnico recebe só as ativas) e as sugestões de aptidão de
-  `GET /public/onboarding/catalog`, só na memória: valem 10 min (abrir a tela depois disso relê), puxar a tela relê na
-  hora, e a troca de sessão apaga.
-- **Servidor antigo** (o cadastro vem sem o perfil técnico): as cinco telas mostram "Indisponível no momento" / "O
-  servidor ainda não tem esta parte do cadastro. Tente de novo mais tarde." e as linhas de Configurações,
-  "Indisponível". Com o perfil técnico, mas sem a rota do ferramental (404): "O servidor ainda não tem o ferramental.
-  Tente de novo mais tarde.".
+- **Textos** (curso, instituição e o título dos documentos; o nome da aptidão vem do catálogo): conferidos como o
+  servidor grava (`cleanText` e `foldName`): saem os caracteres de controle e os invisíveis (espaço de largura zero,
+  BOM, marcas de direção), tab, LF, VT, FF e CR viram espaço, e os espaços se juntam. Texto só de invisíveis conta como
+  vazio, e "Lin<U+200B>ux" repete "Linux".
+- **Catálogos**: o ferramental, as aptidões e as áreas de atuação de `GET /technician-tools`, `/technician-skills` e
+  `/technician-areas` (o técnico recebe só os ativos; o app usa o id e o nome), só na memória: valem 10 min (abrir a
+  tela depois disso relê), puxar a tela relê na hora, e a troca de sessão apaga. As sugestões de aptidão de
+  `GET /public/onboarding/catalog` saíram do app.
+- **Servidor antigo** (o cadastro vem sem o perfil técnico): as telas do perfil profissional mostram "Indisponível no
+  momento" / "O servidor ainda não tem esta parte do cadastro. Tente de novo mais tarde." e as linhas de
+  Configurações, "Indisponível". Com o perfil técnico, mas sem a rota do ferramental (404): "O servidor ainda não tem o
+  ferramental. Tente de novo mais tarde.". Com o perfil técnico, mas sem a gestão (`hasCadastroE2` falso): Áreas de
+  atuação, Documentos e Currículo mostram "Indisponível no momento"; as Aptidões vêm só com o nome, mudar o nível e
+  excluir vão pelo nome (`{name, level}`) e a folha de incluir diz "O servidor ainda não tem a lista de aptidões. Tente
+  de novo mais tarde.".
 
 ### Sem internet e o que fica no aparelho
 
 - **Tudo pede internet**: ler o cadastro do servidor, salvar, marcar, trocar a foto, mexer nas formas de recebimento,
-  pedir o link do e-mail e buscar o CEP. Nada entra na fila offline: a senha não fica guardada e o aviso à central tem
-  de sair na hora. Sem rede e sem o cadastro na memória, as telas dizem "Sem internet" / "Conecte o aparelho para abrir
+  pedir o link do e-mail, buscar o CEP e enviar, trocar, editar, abrir ou excluir os documentos e o currículo. Nada
+  entra na fila offline: a senha não fica guardada, o aviso à central tem de sair na hora e documento é dado pessoal
+  (o servidor confere o tipo e o limite na hora). Sem rede e sem o cadastro na memória, as telas dizem "Sem internet" / "Conecte o aparelho para abrir
   e salvar seu cadastro."; com ele na memória, mostram os dados com "Sem internet: conecte o aparelho para salvar.". Se
   a releitura falhar por erro do servidor: "Não foi possível atualizar agora. Os dados podem estar desatualizados.".
 - **No aparelho**: nome, e-mail e celular no usuário da sessão (`mc_user`, SecureStore). CPF, RG, nascimento, endereço,
-  dados da empresa, veículo, chaves PIX, contas e o documento do titular, o perfil técnico (com a indisponibilidade), os
-  CEPs buscados e os catálogos ficam só na memória ([src/lib/profile.ts](src/lib/profile.ts),
-  [src/lib/cep.ts](src/lib/cep.ts) e [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts)), nunca no SQLite, no
-  kv ou no SecureStore, e somem ao sair da conta. O cadastro é lido ao entrar (sem aviso se falhar), ao abrir cada tela
+  dados da empresa, veículo, chaves PIX, contas e o documento do titular, o perfil técnico (com a indisponibilidade e
+  as áreas de atuação), a lista de documentos (sem link: o link de cada arquivo é pedido na hora e vale 30 min), os CEPs
+  buscados e os catálogos (ferramental, aptidões e áreas de atuação) ficam só na memória
+  ([src/lib/profile.ts](src/lib/profile.ts), [src/lib/cep.ts](src/lib/cep.ts) e
+  [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts)), nunca no SQLite, no kv ou no SecureStore, e somem ao sair
+  da conta. O arquivo escolhido para subir fica numa cópia no cache do app (`cache/documentos/<uuid>/`) só enquanto o
+  formulário está aberto ou o envio corre. O cadastro é lido ao entrar (sem aviso se falhar), ao abrir cada tela
   de Configurações, ao puxar essas telas e o Faturamento, ao voltar ao app com uma delas aberta e, na tela inicial e no
   Faturamento, quando falta ou passou de 6 h (o link da foto vale 12 h).
 - **Gravações em fila** ([src/lib/profile.ts](src/lib/profile.ts), `writeProfile`): salvar, enviar a foto e removê-la,
-  as formas de recebimento e o link do e-mail (enviar e cancelar a troca) saem uma por vez, e cada uma guarda o
-  `MyProfile` que voltou (a seguinte espera a anterior responder, e não sai se a sessão mudou na espera). Uma leitura
-  durante a qual uma gravação saiu, voltou ou ficou no ar não desfaz a tela (fica o que a gravação devolveu). O servidor
-  também grava uma por vez por técnico: a gravação seguinte que a fila solta quando a anterior passou dos 20 s sem
-  resposta (ou a de outro aparelho) espera a anterior terminar no servidor e não apaga o que ela gravou.
+  as formas de recebimento, o link do e-mail (enviar e cancelar a troca) e os documentos (enviar, substituir, editar e
+  excluir) saem uma por vez, e cada uma guarda o `MyProfile` que voltou (a seguinte espera a anterior responder, e não
+  sai se a sessão mudou na espera; a resposta sem corpo faz a fila reler o cadastro). Uma leitura durante a qual uma
+  gravação saiu, voltou ou ficou no ar não desfaz a tela (fica o que a gravação devolveu). O servidor também grava uma
+  por vez por técnico, também quando a central grava junto: a gravação seguinte que a fila solta quando a anterior
+  passou dos 20 s sem resposta (ou a de outro aparelho, ou a da central) espera a anterior terminar no servidor e não
+  apaga o que ela gravou; central e app mudando a mesma parte quase juntos, vale a última gravação.
+- **A central mudou o cadastro** (desde 26/11/2026: o perfil profissional, os documentos e os outros dados que a ficha
+  da central edita): o tempo real manda só a este técnico o `me.profile_changed`, sem dados
+  ([src/lib/realtime.ts](src/lib/realtime.ts) repassa o evento, e [src/lib/sync.ts](src/lib/sync.ts) o trata antes da
+  regra das OS, sem rodada de sincronização e sem aviso: o técnico pode estar numa OS). Com o cadastro na memória, o
+  app relê `GET /me/profile` 0,4 s depois do último aviso (`profileChangedElsewhere`, em
+  [src/lib/profile.ts](src/lib/profile.ts)); a leitura que já estava no ar quando o aviso chegou pode ser de antes da
+  mudança, então a releitura espera ela e lê de novo. Sem erro na tela (fica o da memória) e nada depois do Sair. Sem o
+  cadastro na memória, nada: ele é lido ao abrir Configurações. As telas abertas seguem o cadastro novo, e a parte que a
+  central mudou por último ganha o carimbo "Atualizado pela central em …".
 
 ## Histórico de atendimentos
 
