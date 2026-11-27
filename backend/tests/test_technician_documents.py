@@ -26,6 +26,7 @@ from app.services import realtime
 from app.services import technician_documents as docs
 from tests.conftest import Actor, World, requires_db
 from tests.test_access import restrict_analyst
+from tests.test_b2_onboarding import cpf
 from tests.test_onboarding import ficha, new_invite
 
 API = settings.API_PREFIX
@@ -742,12 +743,14 @@ async def test_documents_of_another_technician_are_not_found(
 # =========================================================================== ficha da homologação
 
 
-async def _ficha(client: AsyncClient, world: World, email: str) -> tuple[str, str]:
+async def _ficha(
+    client: AsyncClient, world: World, email: str, document: str = "123.456.789-09"
+) -> tuple[str, str]:
     """Uma ficha enviada: (id, upload_token da resposta)."""
     invite = await new_invite(client, world, reusable=True, days_valid=30)
     r = await client.post(
         f"{API}/public/onboarding/{invite}",
-        json=ficha(email=email, document="123.456.789-09", photo=None),
+        json=ficha(email=email, document=document, photo=None),
     )
     assert r.status_code == 201, r.text
     received = r.json()
@@ -765,16 +768,10 @@ async def send_ficha(
     *,
     name: str = "nr10.pdf",
     mime: str = "application/pdf",
-    ip: str | None = None,
     **fields: str,
 ) -> Response:
     body = {"token": token, "kind": "certification", "title": "NR10 Exemplo", **fields}
-    return await client.post(
-        FICHA,
-        data=body,
-        files={"file": (name, data, mime)},
-        headers={"X-Forwarded-For": ip} if ip else None,
-    )
+    return await client.post(FICHA, data=body, files={"file": (name, data, mime)})
 
 
 @requires_db
@@ -913,7 +910,9 @@ async def test_deleted_ficha_takes_its_documents(
     assert (await send_ficha(client, first_token, kind="resume", name="cv.pdf")).status_code == 201
     assert (await send_ficha(client, first_token, PDF_NEW, kind="resume", name="cv-2.pdf")).status_code == 200
     assert (await send_ficha(client, first_token, PNG, name="rg.png", mime="image/png", kind="personal", title="RG")).status_code == 201
-    second_id, second_token = await _ficha(client, world, "tecnico.delta@exemplo.com")
+    second_id, second_token = await _ficha(
+        client, world, "tecnico.delta@exemplo.com", cpf("123456780")
+    )
     assert (await send_ficha(client, second_token, title="NR10 Exemplo")).status_code == 201
     assert len(_files(media)) == 4
 

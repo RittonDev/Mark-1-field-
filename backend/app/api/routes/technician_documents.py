@@ -96,6 +96,14 @@ def _sees_internal(viewer: User) -> bool:
     return permissions.of(viewer).can("base.technicians", "edit")
 
 
+async def _as_sent(request: Request, name: str) -> str | None:
+    """O campo de texto do multipart como veio: None quando não veio, "" quando veio vazio (o
+    FastAPI entrega "" como ausente, e no substituir "" tira a validade). O formulário já foi lido
+    pelo FastAPI: aqui sai da memória."""
+    value = (await request.form()).get(name)
+    return value if isinstance(value, str) else None
+
+
 # ------------------------------------------------------------------ app do técnico
 
 
@@ -141,6 +149,7 @@ async def send_my_document(
 @router.post("/me/profile/documents/{document_id}/replace", response_model=MyProfile)
 async def replace_my_document(
     document_id: uuid.UUID,
+    request: Request,
     db: DB,
     user: TechnicianUser,
     file: UploadField = None,
@@ -157,8 +166,8 @@ async def replace_my_document(
         svc.Owner(user=user),
         document_id,
         file,
-        title=title,
-        expires_on=expires_on,
+        title=await _as_sent(request, "title"),
+        expires_on=await _as_sent(request, "expires_on"),
         client_upload_id=client_upload_id,
         kinds=svc.TECHNICIAN_KINDS,
         actor=user,
@@ -277,6 +286,7 @@ async def add_technician_document(
 async def replace_technician_document(
     user_id: uuid.UUID,
     document_id: uuid.UUID,
+    request: Request,
     db: DB,
     actor: TechniciansEdit,
     file: UploadField = None,
@@ -292,8 +302,8 @@ async def replace_technician_document(
         svc.Owner(user=technician),
         document_id,
         file,
-        title=title,
-        expires_on=expires_on,
+        title=await _as_sent(request, "title"),
+        expires_on=await _as_sent(request, "expires_on"),
         client_upload_id=client_upload_id,
         kinds=svc.ALL_KINDS,
         actor=actor,

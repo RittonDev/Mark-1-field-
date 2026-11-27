@@ -854,43 +854,104 @@ def test_migration_copies_the_service_rules() -> None:
         assert migration._fold(sample) == tp.fold(sample), repr(sample)
 
 
+SINCE = CREATED.astimezone(TZ).date().isoformat()  # o dia local do envio da ficha
+ZERO_WIDTH, RTL = chr(0x200B), chr(0x202E)
+
+
+def _before(**parts: Any) -> dict[str, Any]:
+    """O perfil que a aprovação gravava antes da Entrega 2 (o from_ficha de antes: sem as áreas e
+    com as aptidões pelo nome), o resultado fixo que a cópia da migração f5a7c9e1b3d6 tem de dar
+    (a migração já rodou; a aprovação de hoje guarda ids)."""
+    return {
+        "availability": [],
+        "transport_modes": [],
+        "has_driver_license": False,
+        "skills": [],
+        "tech_profile_stamps": {},
+        **parts,
+    }
+
+
+WEEKDAY_MORNINGS = [f"{d}:morning" for d in WORKDAYS]
+SATURDAY = ["sat:morning", "sat:afternoon", "sat:evening"]
+
+
 @pytest.mark.parametrize(
-    "fields",
+    ("fields", "expected"),
     [
-        {},
-        {
-            "availability": ["dias_uteis_manha", "sabado"],
-            "has_vehicle": True,
-            "vehicle_type": "moto",
-        },
-        {"availability": ["plantao", "x"], "has_driver_license": True},
-        {"has_vehicle": True, "vehicle_type": "outro"},
-        {
-            "skills": [
-                {"name": "DVR/NVR  Intelbras", "level": "avancado"},
-                {"name": "dvr/nvr intelbras", "level": "basico"},
-                {"name": "Fibra óptica (fusão)", "level": "nenhum"},
-                {"name": "Windows 10/11", "level": "intermediario"},
-            ]
-        },
+        ({}, _before()),
+        (
+            {
+                "availability": ["dias_uteis_manha", "sabado"],
+                "has_vehicle": True,
+                "vehicle_type": "moto",
+            },
+            _before(
+                availability=[*WEEKDAY_MORNINGS, *SATURDAY],
+                transport_modes=["motorcycle"],
+                tech_profile_stamps={"availability": FICHA_STAMP, "transport": FICHA_STAMP},
+            ),
+        ),
+        (
+            {"availability": ["plantao", "x"], "has_driver_license": True},
+            _before(
+                availability=list(tp.ALL_SLOTS),
+                has_driver_license=True,
+                tech_profile_stamps={"availability": FICHA_STAMP, "transport": FICHA_STAMP},
+            ),
+        ),
+        ({"has_vehicle": True, "vehicle_type": "outro"}, _before()),
+        (
+            {
+                "skills": [
+                    {"name": "DVR/NVR  Intelbras", "level": "avancado"},
+                    {"name": "dvr/nvr intelbras", "level": "basico"},
+                    {"name": "Fibra óptica (fusão)", "level": "nenhum"},
+                    {"name": "Windows 10/11", "level": "intermediario"},
+                ]
+            },
+            _before(
+                skills=[
+                    {"name": "DVR/NVR Intelbras", "level": "avancado", "since": SINCE},
+                    {"name": "Windows 10/11", "level": "intermediario", "since": SINCE},
+                ],
+                tech_profile_stamps={"skills": FICHA_STAMP},
+            ),
+        ),
         # O que não é lista não traz nada: texto JSON no topo (só com SQL feito à mão; a API grava
         # listas), texto com uma lista dentro, objeto e null.
-        {"availability": "plantao", "skills": "Redes"},
-        {"availability": '["sabado"]', "skills": '[{"name": "Linux", "level": "basico"}]'},
-        {"availability": {"plantao": True}, "skills": None, "has_driver_license": True},
+        ({"availability": "plantao", "skills": "Redes"}, _before()),
+        (
+            {"availability": '["sabado"]', "skills": '[{"name": "Linux", "level": "basico"}]'},
+            _before(),
+        ),
+        (
+            {"availability": {"plantao": True}, "skills": None, "has_driver_license": True},
+            _before(has_driver_license=True, tech_profile_stamps={"transport": FICHA_STAMP}),
+        ),
         # Nomes com controles e formatação: a mesma limpeza do serviço.
-        {
-            "skills": [
-                {"name": "Lin\u200bux", "level": "basico"},
-                {"name": "linux", "level": "avancado"},
-                {"name": "\u200b\u202e", "level": "basico"},
-            ]
-        },
+        (
+            {
+                "skills": [
+                    {"name": f"Lin{ZERO_WIDTH}ux", "level": "basico"},
+                    {"name": "linux", "level": "avancado"},
+                    {"name": f"{ZERO_WIDTH}{RTL}", "level": "basico"},
+                ]
+            },
+            _before(
+                skills=[{"name": "Linux", "level": "basico", "since": SINCE}],
+                tech_profile_stamps={"skills": FICHA_STAMP},
+            ),
+        ),
     ],
 )
-def test_migration_backfill_is_the_same_as_the_approval(fields: dict[str, Any]) -> None:
+def test_migration_backfill_keeps_the_result_of_before(
+    fields: dict[str, Any], expected: dict[str, Any]
+) -> None:
     """A migração lê availability e skills como texto (o ::text de APPROVED; o json.loads é dela)
-    e chega no mesmo perfil que a aprovação da ficha, também quando o JSONB não é lista."""
+    e chega no perfil que a aprovação gravava antes da Entrega 2, também quando o JSONB não é
+    lista. A aprovação de hoje traz o mesmo nas partes que não mudaram (disponibilidade e
+    transporte)."""
     application = _ficha(**fields)
     row = {
         "user_id": uuid.uuid4(),
@@ -901,7 +962,12 @@ def test_migration_backfill_is_the_same_as_the_approval(fields: dict[str, Any]) 
         "skills": json.dumps(application.skills),
         "created_at": application.created_at,
     }
-    assert _migration()._ficha_profile(row) == tp.from_ficha(application)
+    assert _migration()._ficha_profile(row) == expected
+    today = tp.from_ficha(application)
+    same = ("availability", "transport_modes", "has_driver_license")
+    assert {key: today[key] for key in same} == {key: expected[key] for key in same}
+    for part in ("availability", "transport"):
+        assert today["tech_profile_stamps"].get(part) == expected["tech_profile_stamps"].get(part)
 
 
 def _approved(user_id: uuid.UUID, **fields: Any) -> TechnicianApplication:
@@ -923,8 +989,8 @@ def _approved(user_id: uuid.UUID, **fields: Any) -> TechnicianApplication:
 async def test_migration_backfill_runs_on_the_driver(world: World, engine: AsyncEngine) -> None:
     """O _backfill de verdade, com o driver do alembic (asyncpg, que já entrega o JSONB
     decodificado: daí o ::text). A ficha com availability e skills em texto JSON no topo não
-    derruba o upgrade e não traz nada (perfil vazio, como na aprovação); a ficha com listas traz o
-    mesmo perfil da aprovação; rodar de novo não muda nada."""
+    derruba o upgrade e não traz nada (perfil vazio, como a aprovação de antes); a ficha com listas
+    traz o perfil que a aprovação gravava antes da Entrega 2; rodar de novo não muda nada."""
     migration = _migration()
     lists = {
         "availability": ["sabado"],
@@ -951,30 +1017,27 @@ async def test_migration_backfill_runs_on_the_driver(world: World, engine: Async
         with Operations.context(MigrationContext.configure(sync_conn)):
             migration._backfill()
 
-    empty = {
-        "availability": [],
-        "transport_modes": [],
-        "has_driver_license": False,
-        "skills": [],
-        "tech_profile_stamps": {},
+    expected = {
+        world.tech.user.id: _before(),
+        world.tech_other.user.id: _before(
+            availability=SATURDAY,
+            transport_modes=["motorcycle"],
+            skills=[{"name": "Redes", "level": "basico", "since": SINCE}],
+            tech_profile_stamps={
+                "availability": FICHA_STAMP,
+                "transport": FICHA_STAMP,
+                "skills": FICHA_STAMP,
+            },
+        ),
     }
     for _ in range(2):
         async with engine.begin() as conn:
             await conn.run_sync(backfill)
         async with maker() as db:
-            for application in (await db.scalars(select(TechnicianApplication))).all():
-                user = await db.get(User, application.user_id)
+            for user_id, profile in expected.items():
+                user = await db.get(User, user_id)
                 assert user is not None
-                expected = tp.from_ficha(application)
-                assert {key: getattr(user, key) for key in expected} == expected
-                if user.id == world.tech.user.id:
-                    assert expected == empty
-                else:
-                    assert set(expected["tech_profile_stamps"]) == {
-                        "availability",
-                        "transport",
-                        "skills",
-                    }
+                assert {key: getattr(user, key) for key in profile} == profile
 
 
 # ------------------------------------------------- PATCH /me/profile (com banco)
@@ -1063,10 +1126,12 @@ async def test_each_part_is_saved_and_read_back(
     client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Um PATCH por parte: a resposta volta normalizada, com a data e "app" na parte, e o banco
-    guardou de verdade. O mesmo PATCH de novo (reordenado, escrito de outro jeito): 200, sem
-    histórico nem aviso."""
+    guardou de verdade (aptidões e áreas pelo id do catálogo). O mesmo PATCH de novo (reordenado,
+    escrito de outro jeito, a aptidão pelo nome): 200, sem histórico nem aviso."""
     events = _profile_events(monkeypatch)
     trena, escada = await _new_tools(engine, "Trena", "Escada")
+    linux, cameras = world.skill_ids["Linux"], world.skill_ids["Câmeras Hikvision"]
+    redes, wifi = world.area_ids["redes"], world.area_ids["wifi"]
     today = datetime.now(TZ).date().isoformat()
     done = {**COURSE, "course": " Técnico  em redes ", "start": "2022-02", "end": "2023-12"}
     ongoing = {**COURSE, "course": "Graduação em TI", "level": "undergraduate"}
@@ -1076,11 +1141,12 @@ async def test_each_part_is_saved_and_read_back(
         "transport": {"transport": {"modes": ["motorcycle", "car"], "driver_license": True}},
         "skills": {
             "skills": [
-                {"name": " linux ", "level": "basico"},
-                {"name": "Câmeras  Hikvision", "level": "avancado"},
+                {"skill_id": linux, "level": "basico"},
+                {"name": "câmeras  HIKVISION", "level": "avancado"},  # o app de antes
             ]
         },
         "education": {"education": [done, ongoing]},
+        "areas": {"area_ids": [wifi, redes, wifi]},
     }
     for part, body in bodies.items():
         r = await _patch(client, world, **body)
@@ -1093,9 +1159,10 @@ async def test_each_part_is_saved_and_read_back(
     assert me["availability"] == ["mon:morning", "sat:afternoon"]
     assert me["transport"] == {"modes": ["car", "motorcycle"], "driver_license": True}
     assert me["skills"] == [
-        {"name": "Câmeras Hikvision", "level": "avancado", "since": today},
-        {"name": "linux", "level": "basico", "since": today},
+        {"skill_id": cameras, "name": "Câmeras Hikvision", "level": "avancado", "since": today},
+        {"skill_id": linux, "name": "Linux", "level": "basico", "since": today},
     ]
+    assert me["area_ids"] == [redes, wifi]  # pelo nome
     first, second = me["education"]  # em andamento primeiro
     assert (first["course"], first["end"]) == ("Graduação em TI", None)
     assert (second["course"], second["start"], second["end"]) == (
@@ -1110,8 +1177,13 @@ async def test_each_part_is_saved_and_read_back(
     assert user.tool_ids == sorted([trena, escada])
     assert user.availability == ["mon:morning", "sat:afternoon"]
     assert (user.transport_modes, user.has_driver_license) == (["car", "motorcycle"], True)
-    assert user.skills == me["skills"]
+    # Gravadas sem o nome (renomear no catálogo vale para todos).
+    assert user.skills == [
+        {"skill_id": cameras, "level": "avancado", "since": today},
+        {"skill_id": linux, "level": "basico", "since": today},
+    ]
     assert user.education == me["education"]
+    assert user.service_areas == sorted([redes, wifi])
     stamps = {part: stamp["via"] for part, stamp in user.tech_profile_stamps.items()}
     assert stamps == dict.fromkeys(tp.PARTS, "app")
     assert await _me(client, world) == me
@@ -1128,11 +1200,12 @@ async def test_each_part_is_saved_and_read_back(
         {"transport": {"modes": ["car", "motorcycle", "car"], "driver_license": True}},
         {
             "skills": [
-                {"name": "Câmeras Hikvision", "level": "avancado"},
-                {"name": "linux", "level": "basico"},
+                {"skill_id": cameras, "level": "avancado"},
+                {"name": "LINUX", "level": "basico"},
             ]
         },
         {"education": [ongoing, done]},
+        {"area_ids": [redes, wifi]},
     ]
     for body in again:
         r = await _patch(client, world, **body)
