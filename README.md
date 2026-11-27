@@ -364,7 +364,7 @@ deslocamento" anda até o cliente, quem está "em atendimento" fica parado. Não
 - SLA em horário comercial e feriados (hoje 24x7), SLA por contrato e escalonamento automático.
 - Envio de e-mail ligado em produção: falta o provedor SMTP e o remetente que não recebe resposta (com SPF e DKIM do domínio). Até lá, o envio fica desligado: o "Esqueci minha senha" manda falar com a central, e a central usa o WhatsApp e a senha provisória.
 - Cadastro do técnico, Entrega 3: Elo por pontos e Desempenho (a seção aparece na ficha quando a entrega subir).
-- Formulário de avaliação do cliente na OS (hoje a central registra a nota que o cliente deu; a avaliação vinda dele terá `source` `client`) e o aviso de vencimento de certificação por push ou e-mail ao técnico (hoje ele vê a validade no app).
+- Formulário de avaliação do cliente na OS (hoje a central registra a nota que o cliente deu; a que vier dele terá `source` `client`).
 - Mapa base contratado para produção (`NEXT_PUBLIC_MAP_TILES_URL`; o padrão OpenStreetMap é para uso moderado).
 - Armazenamento de anexos em S3/R2 (hoje em disco, no volume `media`).
 - Abertura de OS por e-mail/WhatsApp, base de conhecimento, pesquisa de satisfação e relatórios exportáveis.

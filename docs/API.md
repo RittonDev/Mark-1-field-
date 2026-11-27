@@ -357,8 +357,8 @@ Analistas e gestores, e só sobre usuários técnicos: `GET /technicians?q=&team
 (com jornada, OS abertas, foto, as áreas de atuação, do cadastro desde 25/11/2026 (antes, da ficha aprovada; desde
 26/11/2026, `area_ids`, os ids do catálogo, no lugar de `service_areas`), o resumo do perfil técnico e, desde
 26/11/2026, a certificação vencendo e a média das avaliações; a web pede só `q` e `limit=5000` e filtra na tela; `q`
-busca por palavras em nome, e-mail e telefone; `on_shift` é a jornada aberta e dentro do limite de 14 h, a mesma regra do mapa: a esquecida
-aberta não fica "em jornada"; `tool_id`, `day` e `period` filtram pelo perfil técnico, ver
+busca por palavras em nome, e-mail e telefone; `on_shift` é a jornada aberta e dentro do limite de 14 h, a mesma
+regra do mapa: a esquecida aberta não fica "em jornada"; `tool_id`, `day` e `period` filtram pelo perfil técnico, ver
 [Perfil técnico](#perfil-técnico-2026-11-19); paginada por `limit`, 1 a 5000, padrão 2000, e `offset`, com o total
 do filtro no cabeçalho `X-Total-Count`) · `POST /technicians` →
 `{technician, temporary_password}` · `PATCH /technicians/{id}` (nome, e-mail, telefone, grupo, cargo, `is_active`;
@@ -2048,9 +2048,9 @@ das Áreas de atuação e das Aptidões, em `services/technician_catalogs.py`).
   únicos (`uq_tool_catalog_name` e, desde 26/11/2026, `uq_tool_catalog_name_key`) ficam de reserva, com a mesma
   mensagem.
 - Sem ordem manual. Até 25/11/2026, sem excluir; desde 26/11/2026, exclui só a ferramenta nunca usada (`in_use` falso;
-  com uso, 409 `CATALOG_IN_USE`: desative). Renomear muda para todos (o técnico guarda o id). Desativar não mexe nos técnicos: a
-  ferramenta some do app, da ficha (`tool_ids`/`tools` só trazem as ativas) e do filtro da web (que lista só as
-  ativas), e volta para quem tinha marcado quando reativada. O `tool_id` de uma desativada, mandado direto na API (ou
+  com uso, 409 `CATALOG_IN_USE`: desative). Renomear muda para todos (o técnico guarda o id). Desativar não mexe nos
+  técnicos: a ferramenta some do app, da ficha (`tool_ids`/`tools` só trazem as ativas) e do filtro da web (que lista
+  só as ativas), e volta para quem tinha marcado quando reativada. O `tool_id` de uma desativada, mandado direto na API (ou
   num link `?ferramenta=` antigo), ainda acha quem a tem guardada.
 - Sem evento em tempo real: outra aba da central vê a mudança na próxima busca (até 1 min), e o app busca o catálogo
   ao abrir o Ferramental e guarda na memória por 10 min (puxar a tela busca de novo).
