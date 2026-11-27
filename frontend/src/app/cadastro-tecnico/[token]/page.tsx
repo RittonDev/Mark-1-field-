@@ -1082,7 +1082,6 @@ export default function TechnicianSignupPage() {
   // A ficha volta na mesma etapa, com a foto (sem a senha e o aceite).
   const reload = () => reloadKeeping(form, step, token, !pendingForeign);
 
-  const cat = catalog.data;
   // O texto do aviso desta página ficou para trás do servidor: só recarregando dá para ler o novo e enviar.
   const outdated = privacyOutdated(latestPrivacy ?? cat?.privacy_version);
   const login = form.email.trim().toLowerCase();

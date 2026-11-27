@@ -499,6 +499,7 @@ async def seed() -> None:
         )
         await backdate(t5, 3)
         t5 = await move(t5, rafael, TicketStatus.IN_PROGRESS)
+        # O apontamento de horas é da central (o técnico não mexe no horário).
         await svc.add_worklog(
             db,
             t5,
@@ -507,7 +508,7 @@ async def seed() -> None:
                 started_at=now - timedelta(minutes=50),
                 minutes=45,
             ),
-            rafael,
+            supervisor,
         )
         await svc.add_comment(
             db,
