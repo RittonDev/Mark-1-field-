@@ -107,8 +107,10 @@ async def list_technicians(
     """Base técnica. `state`/`city` filtram pela região de atuação (histórico) ou pelo endereço;
     `tool_id`, pela ferramenta marcada no app; `day` e `period` (cada um opcional), pela
     disponibilidade informada no app (quem nunca informou não entra). O total que bate com os
-    filtros vai no cabeçalho X-Total-Count (a lista é paginada). Cada técnico traz o resumo do
-    perfil técnico; o detalhe (ferramentas, formação, datas) fica em GET /technicians/{id}."""
+    filtros vai no cabeçalho X-Total-Count (a lista é paginada; a web pede `q` e `limit=5000` e
+    filtra na tela). Cada técnico traz o resumo do perfil técnico (com as áreas e as aptidões
+    ativas), a certificação vencendo e a média das avaliações; o detalhe (nomes das ferramentas e
+    das áreas, formação, datas) fica em GET /technicians/{id}."""
     await _ensure_regions(db)
     await _ensure_levels(db)
     items, total = await svc.list_technicians(
@@ -183,15 +185,20 @@ async def create_technician(
 async def update_technician(
     user_id: uuid.UUID, body: TechnicianUpdate, db: DB, actor: TechniciansEdit
 ) -> TechnicianOut:
-    """Só os campos enviados mudam. Desativar fecha as ofertas em aberto dele (o tempo real das OS
-    sai no commit) e invalida os links de senha. Trocar o e-mail troca o login na hora, zera a
-    validação e manda o link para o novo (sai depois do commit). CPF repetido: 409. O que mudou
-    fica no histórico do cadastro (via central). O perfil técnico e o veículo não mudam por aqui
-    (o técnico mantém no app; campo que a ficha não tem é ignorado)."""
+    """Só os campos enviados mudam (campo que a ficha não tem é ignorado). Desativar fecha as
+    ofertas em aberto dele (o tempo real das OS sai no commit) e invalida os links de senha.
+    Trocar o e-mail troca o login na hora, zera a validação e manda o link para o novo (sai depois
+    do commit). CPF repetido: 409.
+
+    Perfil profissional (`tool_ids`, `availability`, `unavailability`, `transport`,
+    `vehicle_model`, `vehicle_plate`, `education`, `skills` [{skill_id, level}] e `area_ids`):
+    cada parte inteira, com as regras e as mensagens do app (422: "Ferramenta não encontrada.
+    Atualize a lista.", AREA_NOT_FOUND, SKILL_NOT_FOUND, SKILL_REPEATED, AREAS_LIMIT, turnos,
+    placa, períodos) e o carimbo "central" na parte. Uma gravação por vez por técnico (a trava do
+    app). O que mudou fica no histórico do cadastro (via central); depois do commit, o aviso à
+    central e, quando é algo que o app mostra, o me.profile_changed só para o técnico."""
     user = await svc.get_technician(db, user_id)
-    before = await user_history.snapshot(db, user)
-    await svc.update(db, user, body, actor)
-    changes = await user_history.track(db, user, before, via=VIA_CENTRAL, actor=actor)
+    changes = await svc.update(db, user, body, actor)
     await commit_and_publish(db)
     await user_history.publish_changed(user, changes, via=VIA_CENTRAL, actor=actor)
     return await _one(db, user)
@@ -436,7 +443,7 @@ async def technician_emails(
 
 @router.get("/technicians/{user_id}", response_model=TechnicianOut)
 async def get_technician(user_id: uuid.UUID, db: DB, _: TechniciansView) -> TechnicianOut:
-    """Um técnico (a ficha em /tecnicos/{id} na web), com o detalhe: os nomes das ferramentas
-    ativas, a formação, a data de cada parte do perfil técnico, os dados pessoais, a empresa e o
-    veículo. 404 se não for técnico."""
+    """Um técnico (a ficha em /tecnicos/{id} na web), com o detalhe: os nomes das ferramentas e
+    das áreas de atuação ativas, a formação, a data de cada parte do perfil técnico, os dados
+    pessoais, a empresa e o veículo. 404 se não for técnico."""
     return await _one(db, await svc.get_technician(db, user_id))

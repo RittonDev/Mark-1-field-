@@ -1,10 +1,12 @@
 """Ferramental dos técnicos e o perfil técnico na central.
 
-GET/POST/PATCH /technician-tools: a central inclui, renomeia e desativa o catálogo (Configurações em
-Editar); o técnico lê só as ativas, sem a contagem. GET /technicians traz o resumo do perfil técnico
-e filtra por ferramenta e por dia/turno; GET /technicians/{id} traz o detalhe. O perfil vai direto
-nas colunas (quem grava pelo app é PATCH /me/profile, em tests/test_tech_profile.py). Dados
-fictícios.
+GET/POST/PATCH/DELETE /technician-tools: a central inclui, renomeia, desativa e exclui o que nunca
+foi usado (Configurações em Editar), com a regra dos catálogos de Configurações › Técnicos
+(services/technician_catalogs.py; as Áreas de atuação e as Aptidões em
+tests/test_technician_catalogs.py); o técnico lê só as ativas, sem a contagem. GET /technicians
+traz o resumo do perfil técnico e filtra por ferramenta e por dia/turno; GET /technicians/{id} traz
+o detalhe. O perfil vai direto nas colunas (quem grava pelo app é PATCH /me/profile, em
+tests/test_tech_profile.py; pela central, em tests/test_central_tech_profile.py). Dados fictícios.
 """
 
 import asyncio
@@ -19,8 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
 from app.core.enums import ApplicationStatus, UserRole
-from app.models import TechnicianApplication, TechnicianTool, User
-from app.services import tech_profile
+from app.core.text import fold
+from app.models import Skill, TechnicianApplication, TechnicianTool, User
+from app.services import tech_profile, technician_catalogs
 from tests.conftest import World, requires_db
 from tests.test_access import restrict_analyst
 
@@ -69,26 +72,32 @@ async def test_central_keeps_the_tool_catalog(
         assert r.status_code == 201, r.text
         created[r.json()["name"]] = r.json()
     meter = created["Multímetro digital"]
-    assert (meter["is_active"], meter["technicians"]) == (True, 0)
+    assert (meter["is_active"], meter["technicians"], meter["applications"]) == (True, 0, 0)
+    assert meter["in_use"] is False
     ladder, pliers = created["Escada"]["id"], created["Alicate de corte"]["id"]
+    async with engine.connect() as conn:
+        key = await conn.scalar(
+            select(TechnicianTool.name_key).where(TechnicianTool.id == uuid.UUID(meter["id"]))
+        )
+    assert key == "multimetro digital"
 
     # Nome: limpo, de 2 a 80; repetido sem acento e sem maiúsculas é recusado antes do banco.
-    issue = _issue(await client.post(TOOLS, json={"name": " a "}, headers=an))
-    assert (issue["msg"], issue["label"]) == ("Informe o nome da ferramenta", "Nome")
+    r = await client.post(TOOLS, json={"name": " a "}, headers=an)
+    assert (r.status_code, r.json()["detail"]) == (422, "Informe o nome da ferramenta")
     issue = _issue(await client.post(TOOLS, json={"name": "x" * 81}, headers=an))
-    assert issue["msg"] == "No máximo 80 caracteres"
+    assert (issue["msg"], issue["label"]) == ("No máximo 80 caracteres", "Nome")
     issue = _issue(await client.post(TOOLS, json={"name": "Trena", "ativa": 1}, headers=an))
     assert issue["msg"] == "Campo não aceito"
     for name in ("MULTIMETRO  digital", "Escada"):
         r = await client.post(TOOLS, json={"name": name}, headers=an)
-        assert (r.status_code, r.json()["detail"]) == (409, TAKEN)
+        assert (r.status_code, r.json()) == (409, {"detail": TAKEN, "code": "CATALOG_NAME_TAKEN"})
 
     # Limite do catálogo (ativas e inativas).
-    monkeypatch.setattr(tech_profile, "MAX_TOOLS", 3)
+    monkeypatch.setitem(technician_catalogs.MAX_ITEMS, "tool", 3)
     r = await client.post(TOOLS, json={"name": "Trena"}, headers=an)
     assert (r.status_code, r.json()["detail"]) == (422, "O catálogo aceita até 3 ferramentas")
     monkeypatch.undo()
-    assert tech_profile.MAX_TOOLS == 200
+    assert technician_catalogs.MAX_ITEMS["tool"] == 200
     r = await client.post(TOOLS, json={"name": "Trena"}, headers=an)
     assert r.status_code == 201, r.text
     tape = r.json()["id"]
@@ -108,8 +117,17 @@ async def test_central_keeps_the_tool_catalog(
         f"{TOOLS}/{meter['id']}", json={"name": None, "is_active": None}, headers=an
     )
     assert (r.json()["name"], r.json()["is_active"]) == ("Multímetro", False)
-    issue = _issue(await client.patch(f"{TOOLS}/{ladder}", json={"name": "x"}, headers=an))
-    assert issue["msg"] == "Informe o nome da ferramenta"
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                select(TechnicianTool.name, TechnicianTool.name_key, TechnicianTool.is_active).where(
+                    TechnicianTool.id == uuid.UUID(meter["id"])
+                )
+            )
+        ).one()
+    assert tuple(row) == ("Multímetro", "multimetro", False)
+    r = await client.patch(f"{TOOLS}/{ladder}", json={"name": "x"}, headers=an)
+    assert (r.status_code, r.json()["detail"]) == (422, "Informe o nome da ferramenta")
     issue = _issue(await client.patch(f"{TOOLS}/{ladder}", json={"ordem": 1}, headers=an))
     assert issue["msg"] == "Campo não aceito"
     r = await client.patch(f"{TOOLS}/{uuid.uuid4()}", json={"is_active": True}, headers=an)
@@ -134,12 +152,14 @@ async def test_central_keeps_the_tool_catalog(
 
     r = await client.get(TOOLS, headers=an)
     assert r.status_code == 200, r.text
-    assert [(t["name"], t["is_active"], t["technicians"]) for t in r.json()] == [
-        ("Alicate de corte", True, 0),
-        ("Escada", True, 3),
-        ("Multímetro", False, 1),
-        ("Trena", True, 0),
+    rows = [(t["name"], t["is_active"], t["technicians"], t["applications"]) for t in r.json()]
+    assert rows == [
+        ("Alicate de corte", True, 0, 0),
+        ("Escada", True, 3, 0),
+        ("Multímetro", False, 1, 0),
+        ("Trena", True, 0, 0),
     ]
+    assert [t["in_use"] for t in r.json()] == [False, True, True, False]
     only_on = await client.get(TOOLS, params={"active": True}, headers=an)
     assert [t["name"] for t in only_on.json()] == ["Alicate de corte", "Escada", "Trena"]
     only_off = await client.get(TOOLS, params={"active": False}, headers=an)
@@ -147,6 +167,16 @@ async def test_central_keeps_the_tool_catalog(
     r = await client.patch(f"{TOOLS}/{meter['id']}", json={"is_active": True}, headers=an)
     assert (r.json()["is_active"], r.json()["technicians"]) == (True, 1)
     await client.patch(f"{TOOLS}/{meter['id']}", json={"is_active": False}, headers=an)
+
+    # Excluir: só a nunca usada; a usada (Escada, com técnicos), desative.
+    r = await client.delete(f"{TOOLS}/{ladder}", headers=an)
+    assert (r.status_code, r.json()["code"]) == (409, "CATALOG_IN_USE")
+    assert r.json()["detail"] == "Esta ferramenta já foi usada: desative para tirar das escolhas"
+    r = await client.post(TOOLS, json={"name": "Lanterna"}, headers=an)
+    lamp = r.json()["id"]
+    assert (await client.delete(f"{TOOLS}/{lamp}", headers=an)).status_code == 204
+    r = await client.delete(f"{TOOLS}/{lamp}", headers=an)
+    assert (r.status_code, r.json()["detail"]) == (404, "Ferramenta não encontrada")
 
     # O técnico (o app) recebe só as ativas e sem a contagem; o `active` não vale para ele.
     th = world.tech.headers
@@ -203,7 +233,7 @@ async def test_tool_catalog_holds_when_two_arrive_together(
             return {name: str(tool_id) for name, tool_id in rows}
 
     def same(name: str, names: dict[str, str]) -> list[str]:
-        return [n for n in names if tech_profile.fold(n) == tech_profile.fold(name)]
+        return [n for n in names if fold(n) == fold(name)]
 
     # Cadastro: a mesma ferramenta em duas grafias.
     both = await asyncio.gather(post("Multímetro"), post("multimetro"))
@@ -212,7 +242,7 @@ async def test_tool_catalog_holds_when_two_arrive_together(
 
     # Limite: com 2 de 3 no catálogo, só um dos dois entra.
     assert (await post("Escada"))[0] == 201
-    monkeypatch.setattr(tech_profile, "MAX_TOOLS", 3)
+    monkeypatch.setitem(technician_catalogs.MAX_ITEMS, "tool", 3)
     both = await asyncio.gather(post("Trena"), post("Alicate de corte"))
     assert sorted(both) == [(201, None), (422, full)]
     monkeypatch.undo()

@@ -10,7 +10,11 @@ por ali); só não recebem OS nem aparecem nas sugestões. Inativo e Bloqueado f
 fora do automático (o fixado pela central continua, com o selo da situação).
 
 Manual (tabela technician_favorites): a central fixa qualquer técnico na cidade (até 10, com
-nota) ou tira um automático, e aí o próximo sobe. Favorito efetivo = fixado ou automático.
+nota) ou tira um automático, e aí o próximo sobe. Favorito efetivo = fixado ou automático. Cada
+decisão vai ao histórico do cadastro do técnico (campo "favorites", via central, com a nota do
+pedido em `note`): "fixado em Santos-SP", "tirado da lista de Santos-SP", "voltou para a regra em
+Santos-SP" (a decisão apagada) ou "nota alterada em Santos-SP"; nada mudou, nada vai. A rota avisa a
+central depois do commit (o técnico não: favorito é da gestão).
 
 A cidade é a da LOJA, com a UF: (UF em maiúsculas, cidade sem acento), a mesma chave das cidades
 padronizadas. Loja sem UF ou sem cidade fica fora.
@@ -33,6 +37,7 @@ from app.core.enums import OperationalStatus, UserRole
 from app.db.base import utcnow
 from app.models import Location, Ticket, User
 from app.models.technician_favorite import FavoriteKind, TechnicianFavorite
+from app.models.user_change import VIA_CENTRAL
 from app.schemas.common import Ref
 from app.schemas.technician_favorite import NOTE_MAX as NOTE_MAX  # o FavoriteSet confere
 from app.schemas.technician_favorite import (
@@ -42,7 +47,7 @@ from app.schemas.technician_favorite import (
     FavoritesOut,
     FavoriteTechnician,
 )
-from app.services import technician_regions, technician_status, technicians
+from app.services import technician_regions, technician_status, technicians, user_history
 from app.services.errors import NotFound, WorkflowError
 from app.services.technician_regions import fold_text
 from app.services.workflow import OPEN_STATUSES
@@ -55,6 +60,13 @@ TOP = 3
 MAX_PINNED_PER_CITY = 10
 SUGGESTION_POINTS = 25
 OTHERS_LIMIT = 10
+
+# O histórico do cadastro ({c} = "Cidade-UF", na grafia das lojas): a frase em "to", "from" null.
+HISTORY_FIELD = "favorites"
+PINNED_TEXT = "fixado em {c}"
+HIDDEN_TEXT = "tirado da lista de {c}"
+RULE_TEXT = "voltou para a regra em {c}"
+NOTE_TEXT = "nota alterada em {c}"
 
 _UF = re.compile(r"^[A-Z]{2}$")
 CityKey = tuple[str, str]  # (UF, cidade sem acento)
@@ -605,11 +617,45 @@ async def _lock_city(db: AsyncSession, uf: str, key: str) -> None:
     )
 
 
+def history_change(
+    before: _Decision | None, kind: FavoriteKind | None, note: str | None, place: str
+) -> list[dict[str, Any]]:
+    """A linha do histórico de uma decisão (`kind` None: a decisão apagada; `place` = "Cidade-UF"):
+    "fixado em …" / "tirado da lista de …" quando a decisão muda, "voltou para a regra em …" quando
+    sai, "nota alterada em …" quando só a nota muda; nada mudou: nenhuma."""
+    if kind is None:
+        text = RULE_TEXT if before is not None else None
+    elif before is None or before.kind != kind:
+        text = PINNED_TEXT if kind == FavoriteKind.INCLUDE else HIDDEN_TEXT
+    else:
+        text = NOTE_TEXT if (before.note or None) != (note or None) else None
+    if text is None:
+        return []
+    return [{"field": HISTORY_FIELD, "from": None, "to": text.format(c=place)}]
+
+
+def _record(
+    db: AsyncSession,
+    tech: User,
+    before: _Decision | None,
+    kind: FavoriteKind | None,
+    note: str | None,
+    city: _City,
+    actor: User,
+) -> list[dict[str, Any]]:
+    """Grava a linha no histórico do cadastro (via central, com a nota do pedido) e devolve as
+    mudanças (o aviso à central sai na rota, depois do commit)."""
+    changes = history_change(before, kind, note, f"{city.city}-{city.state}")
+    user_history.record(db, tech, changes, via=VIA_CENTRAL, actor=actor, note=note)
+    return changes
+
+
 async def set_favorite(
     db: AsyncSession, technician_id: uuid.UUID, data: FavoriteSet, actor: User
-) -> None:
+) -> tuple[User, list[dict[str, Any]]]:
     """favorite=true fixa o técnico na cidade (um tirado vira fixado). favorite=false: tirado só
-    troca a nota; automático agora vira tirado (o próximo sobe); fora disso, apaga a decisão."""
+    troca a nota; automático agora vira tirado (o próximo sobe); fora disso, apaga a decisão.
+    Devolve o técnico e as mudanças do histórico (vazio: nada mudou)."""
     tech = await technicians.get_technician(db, technician_id)
     uf, key = _place(data.state, data.city)
     await _lock_city(db, uf, key)
@@ -625,22 +671,28 @@ async def set_favorite(
         if pinned >= MAX_PINNED_PER_CITY:
             raise WorkflowError(f"Até {MAX_PINNED_PER_CITY} técnicos fixados por cidade")
         await _save(db, tech.id, city, FavoriteKind.INCLUDE, data.note, actor)
-        return
+        return tech, _record(db, tech, mine, FavoriteKind.INCLUDE, data.note, city, actor)
     hidden = mine is not None and mine.kind == FavoriteKind.HIDE
     # hide: o Desfazer de um tirado grava tirado mesmo fora do top 3 (a decisão não se perde).
     if data.hide or hidden or tech.id in _board(city, decisions).automatic:
         await _save(db, tech.id, city, FavoriteKind.HIDE, data.note, actor)
-    elif mine is not None:
+        return tech, _record(db, tech, mine, FavoriteKind.HIDE, data.note, city, actor)
+    if mine is not None:
         await _delete(db, tech.id, uf, key, actor)
+    return tech, _record(db, tech, mine, None, data.note, city, actor)
 
 
 async def clear_favorite(
     db: AsyncSession, technician_id: uuid.UUID, state: str, city: str, actor: User
-) -> None:
-    """Apaga a decisão (fixado ou tirado): volta a valer só a regra. Sem decisão, não faz nada."""
+) -> tuple[User, list[dict[str, Any]]]:
+    """Apaga a decisão (fixado ou tirado): volta a valer só a regra. Sem decisão, não faz nada.
+    Devolve o técnico e as mudanças do histórico (vazio: não havia decisão)."""
     tech = await technicians.get_technician(db, technician_id)
     uf, key = _place(state, city)
-    found, _ = await _city_state(db, uf, key, with_visits=False)
+    found, decisions = await _city_state(db, uf, key, with_visits=False)
     if found is None:
         raise NotFound(f"Nenhuma loja em {city.strip()}-{uf}")
-    await _delete(db, tech.id, uf, key, actor)
+    mine = decisions.get(tech.id)
+    if mine is not None:
+        await _delete(db, tech.id, uf, key, actor)
+    return tech, _record(db, tech, mine, None, None, found, actor)

@@ -1,10 +1,11 @@
 """Meu cadastro (app do técnico): o próprio cadastro, o perfil técnico, a foto, o e-mail e as formas
 de recebimento.
 
-Só para o técnico (a gestão edita em Técnicos e em Usuários; o perfil técnico, a central só vê).
-Tudo pede internet: nada entra na fila offline do sync, a senha não fica guardada e o aviso à
-central sai na hora (services/my_profile.py). Toda rota responde o MyProfile inteiro (o app guarda o
-que voltar).
+Só para o técnico (a gestão edita em Técnicos e em Usuários; o perfil técnico, a central também
+edita, com as mesmas regras, e o app recebe me.profile_changed para reler). Tudo pede internet: nada
+entra na fila offline do sync, a senha não fica guardada e o aviso à central sai na hora
+(services/my_profile.py). Toda rota responde o MyProfile inteiro (o app guarda o que voltar), com os
+documentos (os envios têm rotas próprias, em api/routes/technician_documents.py).
 """
 
 import uuid
@@ -72,10 +73,12 @@ async def update_my_profile(body: MyProfileUpdate, db: DB, user: TechnicianUser)
     `unavailability`: a lista inteira dos períodos que não acabaram. `pix`: 422 (a chave PIX agora
     é forma de recebimento, com rota própria).
 
-    Perfil técnico (`tool_ids`, `availability`, `transport`, `skills`, `education`): sem senha,
-    cada parte inteira (o app manda uma por vez); a resposta volta normalizada (ordem, "desde" das
-    aptidões, id dos cursos). 422 com as mensagens do app (ferramenta que não existe: "Ferramenta
-    não encontrada. Atualize a lista.")."""
+    Perfil técnico (`tool_ids`, `availability`, `transport`, `skills`, `education`, `area_ids`):
+    sem senha, cada parte inteira (o app manda uma por vez); a resposta volta normalizada (ordem,
+    "desde" das aptidões pelo id, id dos cursos). Aptidões por `{skill_id, level}` ou, do app de
+    antes, `{name, level}` (casado pelo nome sem acento e maiúsculas). 422 com as mensagens do app
+    (ferramenta que não existe: "Ferramenta não encontrada. Atualize a lista."; AREA_NOT_FOUND,
+    AREAS_LIMIT, SKILL_NOT_FOUND, SKILL_UNKNOWN_NAME, SKILL_REPEATED)."""
     return await _save(db, user, svc.update(db, user, body))
 
 

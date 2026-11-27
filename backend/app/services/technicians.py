@@ -454,10 +454,27 @@ def _group(fields: dict[str, Any], user: User, keys: tuple[str, str, str], check
 
 async def update(
     db: AsyncSession, user: User, data: TechnicianUpdate, actor: User | None = None
-) -> User:
-    """`actor`: quem alterou (autor do fechamento das ofertas do técnico desativado e do link de
-    validação do e-mail novo). O histórico é da rota (user_history.track)."""
+) -> list[dict[str, Any]]:
+    """PATCH /technicians/{id} (o commit e os avisos são da rota): grava o que mudou e o histórico
+    do cadastro (via central) e devolve as mudanças (vazio: nada mudou). `actor`: quem alterou
+    (autor do histórico, do fechamento das ofertas do técnico desativado e do link de validação do
+    e-mail novo).
+
+    Uma gravação por vez por técnico (`lock_technician`, a trava do app): o cadastro é relido
+    depois da trava. O perfil profissional segue as regras e as mensagens do app: as partes do
+    perfil técnico por tech_profile.wanted/apply com o carimbo "central" (e o 1º uso dos itens do
+    catálogo), a indisponibilidade por unavailability.wanted e o veículo como veio (os validadores
+    são os do app)."""
+    from app.services import tickets  # import tardio, como o tracking em to_out
+
     fields = data.model_dump(exclude_unset=True)
+    profile = {key: fields.pop(key) for key in PROFESSIONAL_FIELDS if key in fields}
+    if fields.get("is_active") is False:
+        # Sem o app, ninguém responde as ofertas dele: fecham como canceladas pela central (a OS
+        # volta a "Sem técnico"). Antes da trava do técnico: as OS travam antes da linha dele,
+        # como no aceite. Os avisos saem no commit da rota.
+        await tickets.close_technician_offers(db, user.id, actor)
+    await lock_technician(db, user)
     if (
         fields.get("cpf")
         and fields["cpf"] != user.cpf
@@ -496,13 +513,14 @@ async def update(
         home = await canonical_home(
             db, fields.pop("home_city", user.home_city), fields.pop("home_state", user.home_state)
         )
-    if fields.get("is_active") is False:
-        from app.services import tickets  # import tardio, como o tracking em to_out
-
-        # Sem o app, ninguém responde as ofertas dele: fecham como canceladas pela central (a OS
-        # volta a "Sem técnico"). Antes de mexer no técnico: as OS travam antes da linha dele,
-        # como no aceite. Os avisos saem no commit da rota.
-        await tickets.close_technician_offers(db, user.id, actor)
+    # O perfil profissional: conferido antes de mudar qualquer coisa (422 com as mensagens do app).
+    new = await tech_profile.wanted(db, user, data) if profile else {}
+    periods = (
+        unavailability.wanted(data.unavailability, user.unavailability, personal.local_today())
+        if "unavailability" in profile
+        else None
+    )
+    before = await user_history.snapshot(db, user)
     for key, value in fields.items():
         if key in (
             "name",
@@ -528,8 +546,15 @@ async def update(
         # O login muda na hora: a validação recomeça e o link vai para o e-mail novo (sai depois
         # do commit; nada quando o endereço não recebe mensagens).
         await account.central_email_changed(db, user, actor)
+    tech_profile.apply(user, new, via=tech_profile.VIA_CENTRAL, at=utcnow())
+    await tech_profile.mark_used(db, new)
+    if periods is not None:
+        user.unavailability = [dict(period) for period in periods]
+    for key in ("vehicle_model", "vehicle_plate"):
+        if key in profile:
+            setattr(user, key, profile[key])
     await db.flush()
-    return user
+    return await user_history.track(db, user, before, via=VIA_CENTRAL, actor=actor)
 
 
 async def reset_password(db: AsyncSession, user: User) -> str:

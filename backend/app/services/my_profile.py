@@ -23,14 +23,19 @@ nome fantasia pedem o CNPJ); o que não vier no corpo fica como está gravado, e
 conferido de novo (dado antigo não trava outra mudança). Endereço: o app de antes manda uma linha só
 (`address_line` sem `address_number`): ela vira o logradouro e número e complemento ficam vazios.
 
-Perfil técnico (ferramental, disponibilidade, transporte e CNH, aptidões e formação;
-services/tech_profile.py): sem senha, nem a provisória trava; cada parte vem inteira e só grava
-quando muda de verdade, com a data e "app" na parte (tech_profile_stamps). Entra no histórico do
-cadastro e no aviso à central como as outras mudanças (sem aviso no sino da web).
+Perfil técnico (ferramental, disponibilidade, transporte e CNH, aptidões, formação e áreas de
+atuação; services/tech_profile.py): sem senha, nem a provisória trava; cada parte vem inteira e só
+grava quando muda de verdade, com a data e "app" na parte (tech_profile_stamps). Aptidões por
+`{skill_id, level}` ou, do app de antes, `{name, level}` (casado com o catálogo); áreas por
+`area_ids`. Entra no histórico do cadastro e no aviso à central como as outras mudanças (sem aviso
+no sino da web). A central edita o mesmo perfil (services/technicians.update, via "central"); o app
+recebe me.profile_changed e relê o cadastro.
 
-Uma gravação por vez por técnico: cada escrita trava a linha do usuário (SELECT ... FOR UPDATE, até
-o fim da transação) e relê o cadastro do banco. Duas gravações juntas (o app que reenvia depois do
-tempo esgotado, o técnico em dois aparelhos) não apagam o carimbo nem o histórico uma da outra.
+Uma gravação por vez por técnico: cada escrita trava a linha do usuário
+(technicians.lock_technician: SELECT ... FOR UPDATE, até o fim da transação; a mesma trava da
+central) e relê o cadastro do banco. Duas gravações juntas (o app que reenvia depois do tempo
+esgotado, o técnico em dois aparelhos, a central e o app) não apagam o carimbo nem o histórico uma
+da outra.
 
 Grupo, cargo, acesso ao app, situação na operação, papel, serviços, jornada e senha provisória
 continuam com a central.
@@ -140,10 +145,15 @@ async def _link_sent_at(db: AsyncSession, user: User) -> datetime | None:
 
 async def profile(db: AsyncSession, user: User) -> MyProfile:
     """O cadastro como o app mostra (o grupo já vem carregado com o usuário). Consultas a mais: as
-    formas de recebimento, o último link de validação e, com ferramenta marcada, quais delas
-    continuam ativas no catálogo."""
+    formas de recebimento, o último link de validação, os documentos e, com ferramenta, aptidão
+    ou área guardada, os itens dele no catálogo (só os ativos aparecem)."""
+    # Os documentos puxam o histórico do cadastro (que usa os schemas daqui): import tardio.
+    from app.services import technician_documents
+
     team = user.team
     tools = await tech_profile.user_tools(db, user)
+    skills = await tech_profile.user_skills(db, user)
+    areas = await tech_profile.user_areas(db, user)
     methods = await payout_methods.list_for(db, user.id)
     periods = unavailability.current(user.unavailability or [], personal.local_today())
     return MyProfile(
@@ -184,9 +194,11 @@ async def profile(db: AsyncSession, user: User) -> MyProfile:
         tool_ids=tech_profile.active_tool_ids(user, tools),
         availability=tech_profile.sort_slots(user.availability or []),
         transport=tech_profile.transport_of(user),
-        skills=tech_profile.skills_of(user),
+        skills=tech_profile.skills_of(user, skills),
+        area_ids=tech_profile.active_area_ids(user, areas),
         education=tech_profile.education_of(user),
         tech_profile_updated=tech_profile.stamps_of(user),
+        documents=await technician_documents.my_documents(db, user),
     )
 
 
@@ -196,15 +208,8 @@ def _phone_digits(value: str | None) -> str:
     return digits[2:] if len(digits) in (12, 13) and digits.startswith("55") else digits
 
 
-async def lock(db: AsyncSession, user: User) -> None:
-    """Trava a linha do técnico até o fim da transação e relê o cadastro do banco: uma gravação por
-    vez (a segunda espera a primeira e trabalha sobre o que ela gravou)."""
-    await db.execute(
-        select(User)
-        .where(User.id == user.id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
+# A trava do técnico (uma gravação por vez): a mesma da central, em services/technicians.py.
+lock = technicians.lock_technician
 
 
 async def confirm_password(user: User, password: str | None) -> None:
@@ -275,31 +280,20 @@ def _wanted_company(data: MyProfileUpdate, user: User) -> tuple | None:
     return wanted if wanted != stored else None
 
 
-def _period_days(periods: list[dict[str, Any]]) -> list[tuple[str, str]]:
-    return sorted((str(p["start"]), str(p["end"])) for p in periods)
-
-
 def _wanted_unavailability(data: MyProfileUpdate, user: User) -> list[dict[str, str]] | None:
-    """A lista inteira dos períodos que não acabaram (services/unavailability.normalize: ValueError
-    vira 422). Mudou quando as datas diferem das vigentes (os ids gravados ficam)."""
+    """A lista inteira dos períodos que não acabaram, pela regra do app e da central
+    (unavailability.wanted: 422 no período que não vale; None quando as datas são as vigentes)."""
     if "unavailability" not in data.model_fields_set:
         return None
-    today = personal.local_today()
-    stored = user.unavailability or []
-    try:
-        periods = unavailability.normalize(data.unavailability or [], stored, today)
-    except ValueError as exc:
-        raise WorkflowError(str(exc)) from None
-    if _period_days(periods) == _period_days(unavailability.current(stored, today)):
-        return None
-    return periods
+    return unavailability.wanted(data.unavailability, user.unavailability, personal.local_today())
 
 
 async def _wanted(db: AsyncSession, user: User, data: MyProfileUpdate) -> dict[str, Any]:
     """Só o que muda de verdade (o mesmo valor escrito de outro jeito não conta). As partes do
     perfil técnico vêm de tech_profile.wanted, com as chaves de tech_profile.PARTS (levanta
-    WorkflowError na ferramenta que não existe). Levanta WorkflowError no CPF já informado, nos
-    grupos incompletos e nos períodos que não valem."""
+    WorkflowError na ferramenta que não existe e CodedError na área ou aptidão fora do catálogo,
+    repetida ou além do limite). Levanta WorkflowError no CPF já informado, nos grupos incompletos
+    e nos períodos que não valem."""
     sent = data.model_fields_set
     new: dict[str, Any] = {}
     for key in _PLAIN:
@@ -419,8 +413,8 @@ async def update(db: AsyncSession, user: User, data: MyProfileUpdate) -> list[di
     ferramenta que não existe (tech_profile.TOOL_NOT_FOUND); CodedError 409 CPF_TAKEN no CPF de
     outro usuário; login_guard.LoginBlocked (429) depois de muitas senhas erradas e
     login_guard.RateLimited (429) depois de MAX_EMAIL_CHECKS_PER_HOUR trocas de e-mail (ou
-    MAX_CPF_CHECKS_PER_HOUR CPFs) na hora. O perfil técnico grava com tech_profile.apply entre as
-    duas fotos do histórico."""
+    MAX_CPF_CHECKS_PER_HOUR CPFs) na hora. O perfil técnico grava com tech_profile.apply (e o 1º
+    uso dos itens do catálogo, tech_profile.mark_used) entre as duas fotos do histórico."""
     await lock(db, user)
     new = await _wanted(db, user, data)
     if not new:
@@ -464,6 +458,7 @@ async def update(db: AsyncSession, user: User, data: MyProfileUpdate) -> list[di
     if email is not None:
         await _request_email(db, user, email)
     tech_profile.apply(user, new, via=tech_profile.VIA_APP, at=utcnow())
+    await tech_profile.mark_used(db, new)
     return await user_history.track(db, user, before, via=VIA_APP, actor=user)
 
 
