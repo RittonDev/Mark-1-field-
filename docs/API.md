@@ -2069,26 +2069,32 @@ das Áreas de atuação e das Aptidões, em `services/technician_catalogs.py`).
   (null: nunca informou), `skills` (agora do perfil técnico, com o `since`), `education_count` e
   `tech_profile_updated_at` (a parte mudada por último; null: nada informado). `application_id` continua da ficha
   aprovada; `service_areas`, desde 25/11/2026, vem do cadastro (`users.service_areas`, copiadas da ficha na aprovação e
-  na migração; vazias, as da ficha aprovada).
+  na migração; vazias, as da ficha aprovada). Desde 26/11/2026, `service_areas` saiu: `area_ids` (as ativas) e, no
+  detalhe, `areas`; `skills` traz o `skill_id` (ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)).
 - Só no detalhe (`GET /technicians/{id}` e as respostas de um técnico: `PATCH`, foto, redefinição de senha e criação;
   null na lista): `tools: Ref[]` (as ativas, em ordem alfabética), `education` e `tech_profile_updated` (as cinco
-  datas).
+  datas; desde 26/11/2026, seis, com `areas`).
 - `GET /technicians` filtra por `tool_id` (quem marcou a ferramenta; id inválido: 422 "Identificador inválido"), `day`
   (`mon` a `sun`) e `period` (`morning`, `afternoon`, `evening`, `night`), cada um opcional: os dois juntos, aquele
   turno daquele dia; só o dia, qualquer turno dele; só o turno, em qualquer dia. Quem nunca informou a disponibilidade
   não entra quando há `day` ou `period`. Valor fora da lista: 422 "Escolha uma das opções: …" (`label` "Dia" /
   "Turno"). Os filtros entram no `X-Total-Count`.
-- `PATCH /technicians/{id}` não edita o perfil técnico (ignora esses campos, como qualquer campo desconhecido).
-- Custo: +1 consulta (o catálogo, até 200 linhas) por chamada, e só quando algum técnico da página marcou ferramenta.
+- Até 25/11/2026, `PATCH /technicians/{id}` não editava o perfil técnico (ignorava esses campos, como qualquer campo
+  desconhecido). Desde 26/11/2026 edita (Técnicos E), com as regras e as mensagens daqui, o carimbo `central` e a trava
+  do app: ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26).
+- Custo: +1 consulta (o catálogo, até 200 linhas) por chamada, e só quando algum técnico da página marcou ferramenta
+  (desde 26/11/2026, o mesmo para os catálogos de aptidões e de áreas, mais a certificação vencendo e as avaliações).
 - Na web (Técnicos), desde 25/11/2026 a ficha é a página `/tecnicos/{id}`, e o perfil técnico fica nas seções do grupo
   **Perfil profissional** (Dias e horários, Transporte, Formação, Aptidões e Ferramental; até 24/11/2026, a aba
   **Perfil técnico** do diálogo). Cada parte aparece com a data ("Informado pelo técnico em 19/11/2026", "Da ficha da
   homologação, 12/11/2026" ou "Não informado"): a grade de 7 dias × 4 turnos ("{n} de 28 turnos"), o ferramental, o
   transporte com "Com CNH" ou "Sem CNH" (e o veículo), as aptidões com o nível e "desde 11/2026", a formação com o
-  período e as áreas da homologação com o link para a ficha. A lista ganha os filtros "Ferramenta", "Disponível no dia"
-  e "Disponível no turno" (com dia ou turno, o aviso "Só quem informou a disponibilidade no app."; os filtros ficam na
-  URL, como `?ferramenta={id}`) e, no CSV, as colunas `ferramental`, `disponibilidade`, `transporte`, `cnh`, `aptidoes`
-  e `perfil_tecnico_atualizado_em`.
+  período e as áreas da homologação com o link para a ficha (desde 26/11/2026, as seis seções são editáveis com Técnicos
+  E, com "Informado pela central em …", e a seção Áreas de atuação toma o lugar das áreas da homologação). A lista
+  ganha os filtros "Ferramenta", "Disponível no dia" e "Disponível no turno" (com dia ou turno, o aviso "Só quem
+  informou a disponibilidade no app."; os filtros ficam na URL, como `?ferramenta={id}`) e, no CSV, as colunas
+  `ferramental`, `disponibilidade`, `transporte`, `cnh`, `aptidoes` e `perfil_tecnico_atualizado_em` (desde 26/11/2026,
+  os filtros e as colunas novas da lista: ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)).
   Os nomes do ferramental vêm do catálogo (a lista só traz os ids): enquanto ele carrega, o Exportar fica desligado;
   com erro, avisa "Não deu para carregar o ferramental", busca de novo e não baixa.
 
@@ -2097,7 +2103,8 @@ das Áreas de atuação e das Aptidões, em `services/technician_catalogs.py`).
   em `to` (null: nada), e não o de → para:
   - `tools`: os nomes, em ordem alfabética, separados por ", ";
   - `availability`: os turnos em texto curto (`slots_text`);
-  - `skills`: "Linux (Básico)", em ordem alfabética, separados por ", ";
+  - `skills`: "Linux (Básico)", em ordem alfabética, separados por ", " (desde 26/11/2026, pelo nome atual do catálogo;
+    `areas`, do mesmo jeito que `tools`);
   - `education`: "Técnico em redes · Escola Exemplo · Técnico · desde 02/2024 (em andamento)", pelo início, separados
     por "; ";
   - lista com mais de 10 itens: os 10 primeiros e " e mais N" (a disponibilidade já sai curta, sem esse corte).
@@ -2115,7 +2122,8 @@ das Áreas de atuação e das Aptidões, em `services/technician_catalogs.py`).
   [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
 
 **Tempo real.** O `profile.changed` de sempre (só para quem tem Técnicos ou Pagamentos), com as partes em `data.fields`
-(`"tools"`, `"availability"`, `"transport"`, `"skills"`, `"education"`) e `via: "app"`. **Sem aviso no sino** para
+(`"tools"`, `"availability"`, `"transport"`, `"skills"`, `"education"` e, desde 26/11/2026, `"areas"`) e `via: "app"`
+(desde 26/11/2026, também `central`, e o técnico recebe `me.profile_changed`). **Sem aviso no sino** para
 essas partes. Com um evento só de partes do perfil técnico, a web relê a base técnica (`["technicians"]`: a lista, a
 ficha aberta e o histórico), as sugestões quando mudou a disponibilidade e as contagens do catálogo quando mudou o
 ferramental; os outros eventos continuam relendo tudo o que depende do cadastro.
@@ -2128,11 +2136,13 @@ mapa da migração; o resto do que a ficha coletou, desde 25/11/2026: ver [Cadas
 |---|---|
 | Disponibilidade | a união dos códigos: `dias_uteis_manha`, `dias_uteis_tarde` e `dias_uteis_noite` → de segunda a sexta naquele turno; `sabado` e `domingo_feriado` → manhã, tarde e noite do dia; `plantao` → os 28 turnos. Código desconhecido é ignorado, e o feriado (sem equivalente) se perde |
 | Transporte | com veículo, `carro` → `car` e `moto` → `motorcycle` (`outro` ou sem tipo: nenhum meio); a CNH da ficha. Só conta como informado com algum meio ou com CNH |
-| Aptidões | as de nível válido, com o nome limpo (de 2 a 80), sem repetir o nome (fica a primeira), até 30; `since` = o dia (Brasília) em que a ficha chegou |
+| Aptidões | as de nível válido, com o nome limpo (de 2 a 80), sem repetir o nome (fica a primeira), até 30; `since` = o dia (Brasília) em que a ficha chegou (desde 26/11/2026, pelo `skill_id` da ficha: `{skill_id, level, since}`) |
+| Áreas de atuação (desde 26/11/2026) | os ids da ficha, sem repetir, até 20 (carimbo `areas`) |
 
 Parte vazia fica sem carimbo (não informada). O ferramental e a formação começam vazios: os textos livres de
 ferramentas e de certificações da ficha não viram lista. A ficha pública (`cadastro-tecnico`) não mudou nesta entrega
-(a de 25/11/2026 trouxe os campos novos e as aptidões em cartões).
+(a de 25/11/2026 trouxe os campos novos e as aptidões em cartões; a de 26/11/2026, as áreas e as aptidões do catálogo e
+os arquivos depois do envio).
 
 **Sugestão de técnicos** (`services/suggestions.py`). Com horário na OS, a API calcula uma vez os turnos que a visita
 toca (`visit_slots`: `[início, fim)` no fuso da operação, com o fim informado, a estimativa ou 60 min; fim igual ou
