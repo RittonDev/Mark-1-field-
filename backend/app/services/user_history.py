@@ -676,10 +676,13 @@ def hide_internal(rows: list[UserChangeOut]) -> list[UserChangeOut]:
     """O histórico para quem não tem Técnicos em Editar: os itens dos anexos internos com "from"
     e "to" como "***" (null continua null; a tela diz "Anexos internos alterados"). Devolve
     cópias."""
+    def masked(value: str | None) -> str | None:
+        return None if value is None else INTERNAL_HIDDEN
+
     out: list[UserChangeOut] = []
     for row in rows:
         changes = [
-            item.model_copy(update={"from_": _hidden(item.from_), "to": _hidden(item.to)})
+            item.model_copy(update={"from_": masked(item.from_), "to": masked(item.to)})
             if item.field == INTERNAL_FIELD
             else item
             for item in row.changes
