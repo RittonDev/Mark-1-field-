@@ -466,11 +466,13 @@ async def test_verify_check_and_open_again(
     [line] = await _history(engine, tech.id)
     assert (line.via, line.actor_id) == ("link", tech.id)
     assert line.changes == [{"field": "email_verified", "from": "pendente", "to": "validado"}]
-    assert [e["data"] for e in events] == [{"fields": ["email_verified"], "via": "link"}]
+    # A central recebe o profile.changed; o app, o me.profile_changed (e-mail validado é de APP_FIELDS).
+    assert [e["type"] for e in events] == ["profile.changed", "me.profile_changed"]
+    assert events[0]["data"] == {"fields": ["email_verified"], "via": "link"}
     # Aberto de novo (outra aba, o e-mail no celular): a mesma resposta, sem mudar nada.
     r = await client.post(f"{API}/auth/verify-email", json={"token": raw})
     assert (r.status_code, r.json()) == (200, {"email": ALFA, "kind": "check"})
-    assert len(await _history(engine, tech.id)) == 1 and len(events) == 1
+    assert len(await _history(engine, tech.id)) == 1 and len(events) == 2
     # Inventado: 410 com o texto da validação.
     r = await client.post(f"{API}/auth/verify-email", json={"token": "inventado"})
     assert (r.status_code, r.json()) == (
@@ -532,7 +534,8 @@ async def test_verify_change_switches_the_login(
         {"field": "email_pending", "from": new, "to": None},
         {"field": "email_verified", "from": "pendente", "to": "validado"},
     ]
-    [event] = events
+    assert [e["type"] for e in events] == ["profile.changed", "me.profile_changed"]
+    [event] = [e for e in events if e["type"] == "profile.changed"]
     assert event["data"] == {"fields": ["email", "email_pending", "email_verified"], "via": "link"}
     # Aberto de novo: a mesma resposta.
     r = await client.post(f"{API}/auth/verify-email", json={"token": raw})
@@ -673,7 +676,11 @@ async def test_verify_signup_before_and_after_approval(
         "link",
         [{"field": "email_verified", "from": "pendente", "to": "validado"}],
     )
-    assert [e["type"] for e in events[1:]] == ["profile.changed", "onboarding.updated"]
+    assert [e["type"] for e in events[1:]] == [
+        "profile.changed",
+        "me.profile_changed",
+        "onboarding.updated",
+    ]
 
 
 async def test_link_routes_limit_by_ip(client: AsyncClient) -> None:
