@@ -387,6 +387,11 @@ async def test_rating_follows_the_queue_and_the_screens(
         assert (await client.get(url(t), headers=actor.headers)).status_code == 403
         r = await client.put(url(t, world.tech), json={"score": 1}, headers=actor.headers)
         assert r.status_code == 403
+        assert (await client.delete(url(t, world.tech), headers=actor.headers)).status_code == 403
+    assert (await client.get(url(t))).status_code == 401
+    # Nada mudou: a avaliação continua a do supervisor.
+    sup_view = (await client.get(url(t), headers=sup)).json()
+    assert sup_view["technicians"][0]["rating"]["score"] == 5
     # A ficha pede Técnicos em Visualizar (a fila não conta: a avaliação é do técnico).
     ficha = f"{API}/technicians/{world.tech.user.id}/ratings"
     assert (await client.get(ficha, headers=an)).json()["count"] == 1

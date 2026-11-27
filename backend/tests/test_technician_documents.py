@@ -812,11 +812,34 @@ async def test_documents_of_another_technician_are_not_found(
     assert (await client.delete(wrong, headers=adm)).status_code == 404
     r = await client.get(f"{API}/technicians/{world.admin.user.id}/documents", headers=adm)
     assert r.status_code == 404
-    # Cada um no seu lugar: o técnico não usa a central; a gestão não usa o app.
-    r = await client.get(f"{API}/technicians/{world.tech.user.id}/documents", headers=th)
-    assert r.status_code == 403
-    r = await send_mine(client, world.analyst, title="NR10 Exemplo")
-    assert r.status_code == 403
+    # Cada um no seu lugar: o técnico e o cliente não usam a central; a gestão e o cliente não
+    # usam as rotas do app.
+    pdf = {"files": {"file": ("x.pdf", PDF, "application/pdf")}}
+    central = f"{API}/technicians/{world.tech.user.id}/documents"
+    mine = f"{MINE}/{other['id']}"
+    for actor in (world.tech, world.requester):
+        for method, url, kwargs in (
+            ("GET", central, {}),
+            ("POST", central, {**pdf, "data": {"kind": "personal", "title": "RG"}}),
+            ("POST", f"{central}/{other['id']}/replace", pdf),
+            ("PATCH", f"{central}/{other['id']}", {"json": {"title": "X"}}),
+            ("DELETE", f"{central}/{other['id']}", {}),
+        ):
+            r = await client.request(method, url, headers=actor.headers, **kwargs)
+            assert r.status_code == 403, (actor.user.name, method, url, r.text)
+    for actor in (world.analyst, world.admin, world.requester):
+        for method, url, kwargs in (
+            ("POST", MINE, {**pdf, "data": {"kind": "personal", "title": "RG"}}),
+            ("POST", f"{mine}/replace", pdf),
+            ("PATCH", mine, {"json": {"title": "X"}}),
+            ("DELETE", mine, {}),
+            ("GET", f"{mine}/link", {}),
+        ):
+            r = await client.request(method, url, headers=actor.headers, **kwargs)
+            assert r.status_code == 403, (actor.user.name, method, url, r.text)
+    # Sem login: 401 (as rotas do app e da central).
+    assert (await client.get(central)).status_code == 401
+    assert (await client.get(f"{mine}/link")).status_code == 401
 
 
 # =========================================================================== ficha da homologação
