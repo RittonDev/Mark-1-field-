@@ -2447,7 +2447,7 @@ profissional; no app, "Credenciais" é "Senha"; o grupo Gestão é só da centra
   | `birth_date`, `phone_secondary` (40), `bio` | nascimento, telefone secundário ("(11) 98888-7777") e mini biografia (até 500 pela API) |
   | `vehicle_model` (60), `vehicle_plate` (7) | veículo; a placa sem hífen |
   | `company_document` (14), `company_name` e `company_trade_name` (160) | CNPJ (aceita o alfanumérico), razão social e nome fantasia |
-  | `service_areas` (JSONB NOT NULL, `[]`) | as áreas de atuação (copiadas da ficha na aprovação) |
+  | `service_areas` (JSONB NOT NULL, `[]`) | as áreas de atuação (copiadas da ficha na aprovação; desde 26/11/2026, ids do catálogo) |
   | `email_verified_at`, `email_pending` (255), `email_pending_at` | o e-mail de login validado; o e-mail novo pedido no app, à espera do link |
   | `operational_status` (NOT NULL, `active`), `operational_reason`, `operational_changed_at`, `operational_changed_by_id` (→ users, SET NULL) | a situação na operação |
   | `unavailability` (JSONB NOT NULL, `[]`) | `[{id, start, end}]`, dias "AAAA-MM-DD", os dois inclusive, sem motivo |
@@ -2679,7 +2679,8 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
 - Receber OS pede o acesso **e** Ativo:
   - sugestões (`GET /tickets/{id}/technician-suggestions`, `GET /technicians/suggest`): só quem tem acesso, está Ativo e
     não tem indisponibilidade nos dias da visita; as áreas de atuação são as do cadastro (`users.service_areas`; vazias,
-    as da ficha aprovada);
+    as da ficha aprovada; desde 26/11/2026, pelo catálogo, sem a reserva da ficha: ver
+    [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26));
   - ofertas: 422 "{nome} está inativo e não recebe OS: {motivo}" (ou bloqueado) e "{nome} está indisponível
     {period_short}"; o aceite de quem saiu de Ativo (a oferta que escapou do fechamento) dá 409 `OFFER_UNAVAILABLE`;
   - atribuição (`POST /tickets/{id}/assign`, o responsável no `PATCH` e na abertura) e outros técnicos da visita: só
@@ -2747,14 +2748,16 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
 - `TechnicianOut`, na lista e no detalhe: `operational_status`, `operational_reason`, `operational_changed_at`,
   `operational_changed_by` (`Ref`), `unavailability` (os períodos que não terminaram), `email_verified_at`,
   `email_pending`, `payout_methods_count` (0: "Sem forma de recebimento") e `payout_changed_at` (o destino da
-  preferencial mudou: o "Nova"); `service_areas` passa a vir do cadastro. Só no detalhe (null na lista): `cpf`,
+  preferencial mudou: o "Nova"); `service_areas` passa a vir do cadastro (desde 26/11/2026, sai: `area_ids` e
+  `areas`). Só no detalhe (null na lista): `cpf`,
   `rg_number`, `rg_issuer`, `rg_state`, `birth_date`, `phone_secondary`, `bio`, `address_number`,
   `address_complement`, `company_document`, `company_name`, `company_trade_name`, `vehicle_model` e `vehicle_plate`.
   Saíram `has_pix` e `pix_updated_at`.
 - `PATCH /technicians/{user_id}` aceita também `cpf` (muda e limpa, sem senha; de outro usuário: 409 `CPF_TAKEN`),
   `rg_number`, `rg_issuer`, `rg_state`, `birth_date`, `phone_secondary`, `bio`, `address_number`, `address_complement`,
   `company_document`, `company_name` e `company_trade_name` (RG e empresa conferidos em grupo com o que está gravado: a
-  web manda só o que mudou). O veículo e o perfil técnico continuam só com o técnico.
+  web manda só o que mudou). O veículo e o perfil técnico continuavam só com o técnico; desde 26/11/2026, a central
+  também os muda (ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)).
 - Trocar o e-mail (aqui ou no `PATCH /users/{id}` de um técnico) troca o login na hora (`account.central_email_changed`):
   zera a validação e o pedido de troca do app, revoga os links, vence as validações na fila, passa para o endereço novo a
   boas-vindas e a nova senha que ainda não saíram e manda a validação (`check`) para o novo, logo depois do commit. No
@@ -2909,7 +2912,8 @@ secundário", "Número", "Complemento", "Mini biografia", "Razão social", "Nome
 **Na central (web).**
 - Ficha do técnico (`/tecnicos/{id}`, `app/(app)/tecnicos/[id]/page.tsx` e `components/technicians/ficha/`): o menu com
   os três grupos de `TECH_SECTION_GROUPS` e o grupo Gestão (Situação, Equipe e jornada, Favoritos, Elo e Histórico), só
-  as seções com `delivery <= CADASTRO_DELIVERY` (as das Entregas 2 e 3 ficam fora); cada seção tem o próprio Salvar, que
+  as seções com `delivery <= CADASTRO_DELIVERY` (as das Entregas 2 e 3 ficavam fora; desde 26/11/2026,
+  `CADASTRO_DELIVERY = 2`, e só Desempenho, da Entrega 3, fica fora); cada seção tem o próprio Salvar, que
   manda só o que mudou, e sair com alteração não salva pergunta antes. Só com Visualizar, tudo fica só de leitura.
   Credenciais: o acesso ao app ("Cortar acesso" ou "Liberar acesso", que oferece manter a senha dele, mandar o link
   por e-mail ou gerar a provisória), o e-mail de login (validado, pendente ou "Sem e-mail válido.", com "Reenviar
@@ -3013,7 +3017,7 @@ Os links dos e-mails usam o `WEB_URL` de sempre. Configure SPF e DKIM do domíni
    a API nova: lê `pix` (a preferencial PIX); gravar `pix` recebe "Atualize o app…"; trocar o e-mail fica pendente até
    o link; `address_line` grava o logradouro e limpa número e complemento.
 6. `PRIVACY_VERSION` = a data do dia da publicação, igual em `backend/app/schemas/onboarding.py` e nas duas cópias de
-   `constants.ts` (hoje "2026-11-26").
+   `constants.ts` (o cadastro V2 saiu com "2026-11-26"; a Gestão, com "2026-11-26.2").
 7. Sem SMTP tudo funciona: `mail_enabled` falso, os e-mails ficam "Não enviado", o "Esqueci minha senha" manda falar com
    a central, e a central segue com o WhatsApp e a senha provisória. O provedor, o remetente, SPF e DKIM são do dono.
 8. **Fichas de antes da publicação.** As enviadas pela ficha de antes têm o endereço numa linha só ("Rua Exemplo, 123 -
@@ -3656,7 +3660,8 @@ Os mesmos valores fora dessas telas:
 - Quem só vê a própria fila recebe só eventos das OS dele (responsável atual ou anterior, executor) e, com a
   opção, das sem analista. `quote.decided` só vai para quem tem Orçamentos; `onboarding.submitted` e
   `onboarding.updated` (desde 25/11/2026), para quem tem Homologação; `technician.location` e `technician.shift`, para
-  quem tem o Mapa ao vivo; `profile.changed`, para quem tem Técnicos ou Pagamentos (basta uma das duas).
+  quem tem o Mapa ao vivo; `profile.changed`, para quem tem Técnicos ou Pagamentos (basta uma das duas). O
+  `me.profile_changed` (desde 26/11/2026) vai só ao técnico dono do cadastro, fora da matriz.
 - `{"type": "access.changed"}` vai só para a pessoa afetada; logo depois o servidor fecha o socket com 4401 e o
   cliente renova o token e reconecta com o acesso novo. O vigia de 5 minutos também fecha quando o acesso muda.
 
@@ -3677,7 +3682,7 @@ V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
 | `commercial.payouts` | V: `GET /payouts`, `GET /tickets/{id}/offers`, `GET /technician-invoices`, `GET /technicians/{id}/payout-methods`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay`, `POST /tickets/{id}/offers`, `POST /tickets/{id}/offers/{offer_id}/cancel`, `DELETE /technicians/{id}/payout-methods/{method_id}` (até 24/11/2026, `DELETE /technicians/{id}/pix`), `POST /technician-invoices/{id}/check`, `/uncheck`, `/reject` |
 | `base.customers` | V: `GET /customers/{id}`, `GET /assets`, `/assets/{id}`. E: `POST /customers`, `PATCH /customers/{id}`, `POST`/`PATCH /assets` |
 | `base.locations` | E: `POST /customers/{id}/locations`, `PATCH /locations/{id}`, `POST /locations/import` |
-| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`, `/technicians/{id}`, `/technicians/{id}/changes`, `/technicians/{id}/level`, `/technicians/{id}/stats`, `/technicians/{id}/emails`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST /technicians/{id}/operational-status`, `POST /technicians/{id}/email-verification`, `POST /technicians/{id}/password-reset-link`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}`, `POST /technicians/{id}/level/waivers`, `DELETE /technicians/{id}/level/waivers/{waiver_id}`, `POST /technicians/levels/refresh` |
+| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`, `/technicians/{id}`, `/technicians/{id}/changes`, `/technicians/{id}/level`, `/technicians/{id}/stats`, `/technicians/{id}/emails`, `/technicians/{id}/documents` (o anexo interno só com E), `/technicians/{id}/ratings`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST /technicians/{id}/operational-status`, `POST /technicians/{id}/email-verification`, `POST /technicians/{id}/password-reset-link`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}`, `POST /technicians/{id}/level/waivers`, `DELETE /technicians/{id}/level/waivers/{waiver_id}`, `POST /technicians/levels/refresh`, `POST /technicians/{id}/documents`, `POST /technicians/{id}/documents/{document_id}/replace`, `PATCH`/`DELETE /technicians/{id}/documents/{document_id}` |
 | `base.technicians` \| `base.onboarding` | V: `GET /technicians/regions` |
 | `base.technicians` \| `base.locations` | V: `GET /technicians/nearby` |
 | `base.onboarding` | V: `GET /onboarding/invites`, `/onboarding/applications`, `/applications/pending-count`, `/applications/{id}`. E: `POST`/`DELETE /onboarding/invites`, `POST .../approve`, `.../reject`, `.../reopen`, `.../email-verification`; `DELETE /onboarding/applications/{id}` (E e só admin e supervisor) |
@@ -3688,7 +3693,7 @@ V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
 | `setup.messages` | V: `GET /message-templates`. E: `PUT /message-templates`, `POST /message-templates/reset` |
 | `setup.service_types` | E: `POST /service-types`, `PATCH /service-types/{id}`, `POST /service-types/{id}/apply-observed` |
 | `setup.users` | V: `GET /access/profiles`. E: `POST /users`, `PATCH /users/{id}` (admin e supervisor), `POST`/`PATCH /teams` |
-| `setup.settings` | E: `PUT /settings/company`, `/settings/expenses`, `/settings/field`, `/ticket-tag-rules`, `POST`/`PATCH /categories`, `POST`/`PATCH /violation-reasons`, `POST /technician-tools`, `PATCH /technician-tools/{id}` |
+| `setup.settings` | E: `PUT /settings/company`, `/settings/expenses`, `/settings/field`, `/ticket-tag-rules`, `POST`/`PATCH /categories`, `POST`/`PATCH /violation-reasons`, `POST /technician-tools`, `PATCH`/`DELETE /technician-tools/{id}`, `POST /technician-areas`, `PATCH`/`DELETE /technician-areas/{id}`, `POST /technician-skills`, `PATCH`/`DELETE /technician-skills/{id}` |
 
 Sem tela (toda a gestão): as leituras que a Nova OS, o editor, a OS, os filtros, a Minha fila e o Início usam
 (`/customers`, `/customers/{id}/locations`, `/locations`, `/locations/{id}`, `/intake/context`,
@@ -3696,16 +3701,23 @@ Sem tela (toda a gestão): as leituras que a Nova OS, o editor, a OS, os filtros
 `/ticket-tags`, `/ticket-tag-rules`, `/form-templates`, `/users`, `/users/assignable`, `/users/{id}`,
 `/teams`, `/technicians/suggest`, `/technicians/favorites/city`, `/tickets/{id}/technician-suggestions`,
 `/calendar/conflicts`, `/projects`, `/queues`, `/settings/company`, `/settings/expenses`, `/settings/field`,
-`/portal/inbox-count`, `/access/catalog`, `/technician-tools`) e o núcleo da OS. `GET /technician-tools` também
-responde ao técnico (só as ferramentas ativas). `PUT /sla-policies` continua só do administrador e os motivos de visita
-improdutiva continuam com toda a gestão.
+`/portal/inbox-count`, `/access/catalog`, `/technician-tools` e, desde 26/11/2026, `/technician-areas` e
+`/technician-skills`) e o núcleo da OS (desde 26/11/2026, também a avaliação do cliente: `GET /tickets/{id}/ratings` e
+`PUT`/`DELETE /tickets/{id}/ratings/{technician_id}`, com a visibilidade de filas). Os três catálogos do perfil técnico
+também respondem ao técnico (só os itens ativos). `PUT /sla-policies` continua só do administrador e os motivos de
+visita improdutiva continuam com toda a gestão.
 
 Só do técnico (o papel; fora da matriz, gestão e cliente recebem 403): as rotas `/me/*` de sempre (ofertas, cadastro
-e foto, notas fiscais, elo), desde 2026-11-19 `GET /me/stats`, `GET /me/history` e `GET /me/earnings/months` e, desde
+e foto, notas fiscais, elo), desde 2026-11-19 `GET /me/stats`, `GET /me/history` e `GET /me/earnings/months`, desde
 25/11/2026, `POST /me/profile/email/verification`, `DELETE /me/profile/email/pending`, `POST /me/profile/payout-methods`,
-`PUT /me/profile/payout-methods/{method_id}` e `POST /me/profile/payout-methods/{method_id}/preferred` e `/remove`.
+`PUT /me/profile/payout-methods/{method_id}` e `POST /me/profile/payout-methods/{method_id}/preferred` e `/remove` e,
+desde 26/11/2026, `POST /me/profile/documents`, `POST /me/profile/documents/{document_id}/replace`,
+`PATCH`/`DELETE /me/profile/documents/{document_id}` e `GET /me/profile/documents/{document_id}/link`.
 
 Sem login (desde 25/11/2026, além das públicas de antes): `GET /public/cep/{cep}` (com sessão, o limite é por pessoa;
 o inventário a vê como pública), `POST /auth/forgot-password`, `/auth/password-reset/check`, `/auth/password-reset` e
-`/auth/verify-email` (ver [Cadastro V2](#cadastro-v2-2026-11-25)). O inventário completo está em
+`/auth/verify-email` (ver [Cadastro V2](#cadastro-v2-2026-11-25)); desde 26/11/2026, `POST /public/onboarding-documents`
+e `POST /public/onboarding-documents/{document_id}/remove` (pelo `upload_token`) e
+`GET /technician-documents/{file_id}/download` (o link assinado; ver
+[Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)). O inventário completo está em
 `backend/tests/test_access_routes.py` (rota nova sem classificação faz o teste falhar).
