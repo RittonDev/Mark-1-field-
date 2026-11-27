@@ -16,7 +16,7 @@ from app.core.enums import TechDocumentKind
 from app.schemas.common import Ref
 
 # O que o técnico envia e vê (app e ficha): o anexo interno fica só com a central.
-TechnicianDocumentKind = Literal["certification", "personal", "resume"]
+MyDocumentKind = Literal["certification", "personal", "resume"]
 # Quem mandou o arquivo: o técnico no app, a ficha da homologação ou a central.
 TechDocumentVia = Literal["app", "central", "ficha"]
 
@@ -26,7 +26,7 @@ class MyDocumentOut(BaseModel):
     Sem link: o app pede o dele na hora."""
 
     id: uuid.UUID
-    kind: TechnicianDocumentKind
+    kind: MyDocumentKind
     # 2 a 80; o currículo é "Currículo".
     title: str
     # Só na certificação ("AAAA-MM-DD").
@@ -104,7 +104,7 @@ class FichaDocumentOut(BaseModel):
     """POST /public/onboarding-documents: o arquivo recebido na ficha já enviada."""
 
     id: uuid.UUID
-    kind: TechnicianDocumentKind
+    kind: MyDocumentKind
     title: str
     expires_on: date | None
     file_name: str

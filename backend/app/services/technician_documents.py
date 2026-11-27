@@ -57,12 +57,12 @@ from app.schemas.technician_document import (
     CertificationDueOut,
     DocumentLinkOut,
     FichaDocumentOut,
+    MyDocumentKind,
     MyDocumentOut,
     TechDocumentFileOut,
     TechDocumentOut,
     TechDocumentUpdate,
     TechDocumentVia,
-    TechnicianDocumentKind,
 )
 from app.services import storage, user_history
 from app.services.errors import CodedError, WorkflowError
@@ -773,7 +773,7 @@ def _via(value: str) -> TechDocumentVia:
 def my_out(doc: TechnicianDocument) -> MyDocumentOut:
     return MyDocumentOut(
         id=doc.id,
-        kind=cast(TechnicianDocumentKind, doc.kind.value),
+        kind=cast(MyDocumentKind, doc.kind.value),
         title=doc.title,
         expires_on=doc.expires_on,
         file_name=doc.file_name,
@@ -816,7 +816,7 @@ def tech_out(
 def ficha_out(doc: TechnicianDocument) -> FichaDocumentOut:
     return FichaDocumentOut(
         id=doc.id,
-        kind=cast(TechnicianDocumentKind, doc.kind.value),
+        kind=cast(MyDocumentKind, doc.kind.value),
         title=doc.title,
         expires_on=doc.expires_on,
         file_name=doc.file_name,
