@@ -367,9 +367,9 @@ async def test_emails_newest_first(client: AsyncClient, world: World, engine: As
 async def test_central_patch_rereads_every_column(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
-    """Dados pessoais, endereço em partes e empresa pela central (sem senha), relidos do banco.
-    RG e empresa em grupo com o gravado; o CPF a central muda e limpa (único); veículo e perfil
-    profissional não mudam por aqui."""
+    """Dados pessoais, endereço em partes, empresa e veículo pela central (sem senha), relidos do
+    banco. RG e empresa em grupo com o gravado; o CPF a central muda e limpa (único); o veículo com
+    os validadores do app (o resto do perfil profissional: tests/test_central_tech_profile.py)."""
     an = world.analyst.headers
     tech_id = world.tech.user.id
     url = f"{API}/technicians/{tech_id}"
@@ -390,7 +390,8 @@ async def test_central_patch_rereads_every_column(
         "company_document": "12.345.678/0001-95",
         "company_name": "Alfa Servicos",
         "company_trade_name": "Alfa",
-        "vehicle_model": "Não muda por aqui",
+        "vehicle_model": "  Modelo   Exemplo ",
+        "vehicle_plate": "abc-1234",
     }
     r = await client.patch(url, json=body, headers=an)
     assert r.status_code == 200, r.text
@@ -411,7 +412,8 @@ async def test_central_patch_rereads_every_column(
         "company_document": "12345678000195",
         "company_name": "Alfa Servicos",
         "company_trade_name": "Alfa",
-        "vehicle_model": None,
+        "vehicle_model": "Modelo Exemplo",
+        "vehicle_plate": "ABC1234",
     }
 
     async def stored() -> dict:
@@ -436,6 +438,7 @@ async def test_central_patch_rereads_every_column(
     assert fields["birth_date"] == "10/03/1985"
     assert fields["company_document"] == "12.345.678/0001-95"
     assert fields["address_number"] == "S/N"
+    assert fields["vehicle"] == "Modelo Exemplo · ABC-1234"
 
     # Órgão emissor com a UF no fim ("SSP/SP", "Detran-RJ"): grava separado; a UF vazia recebe a
     # do fim, e com a UF no campo (a enviada ou a gravada) vale a do campo e o fim sai.
@@ -526,7 +529,7 @@ async def test_list_without_personal_data_and_detail_with_it(
         vehicle_plate="ABC1D23",
         company_document="12345678000195",
         company_name="Alfa Servicos",
-        service_areas=["redes"],
+        service_areas=[world.area_ids["redes"]],
     )
     changed_at = utcnow() - timedelta(days=2)
     async with engine.begin() as conn:
@@ -553,7 +556,9 @@ async def test_list_without_personal_data_and_detail_with_it(
     listed = rows[str(tech_id)]
     assert {key: listed[key] for key in PERSONAL} == dict.fromkeys(PERSONAL)
     assert "has_pix" not in listed and "pix_updated_at" not in listed
-    assert listed["service_areas"] == ["redes"]
+    # As áreas pelo id do catálogo (o nome só no detalhe); `service_areas` saiu.
+    assert (listed["area_ids"], listed["areas"]) == ([world.area_ids["redes"]], None)
+    assert "service_areas" not in listed
     assert (listed["payout_methods_count"], listed["operational_status"]) == (1, "active")
     assert datetime.fromisoformat(listed["payout_changed_at"]) == changed_at
     assert (listed["unavailability"], listed["email_verified_at"], listed["email_pending"]) == (

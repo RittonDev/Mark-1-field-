@@ -245,9 +245,7 @@ async def to_out(
     # Ferramental, Aptidões e Áreas de atuação: o catálogo inteiro (ativos e desativados; ≤ 300
     # linhas cada), só se alguém tem algum item dele.
     catalog = await tech_profile.tool_catalog(db) if any(u.tool_ids for u in users) else {}
-    skills = (
-        await technician_catalogs.catalog(db, "skill") if any(u.skills for u in users) else {}
-    )
+    skills = await technician_catalogs.catalog(db, "skill") if any(u.skills for u in users) else {}
     areas = (
         await technician_catalogs.catalog(db, "area") if any(u.service_areas for u in users) else {}
     )

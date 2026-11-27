@@ -30,12 +30,12 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from httpx import AsyncClient, Response
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
 from app.core.enums import ApplicationStatus
-from app.models import Skill, TechnicianApplication, TechnicianTool, User
+from app.models import TechnicianApplication, TechnicianTool, User
 from app.schemas.my_profile import (
     PROFESSIONAL_FIELDS,
     SLOT_MAX,
@@ -531,7 +531,10 @@ async def test_skills_keep_since_by_id(monkeypatch: pytest.MonkeyPatch) -> None:
         ("Linux", "avancado", "2025-03-10"),
     ]
     # Reordenar (ou mandar pelo nome a mesma) não é mudança.
-    same = [{"name": "Fibra óptica (fusão)", "level": "basico"}, {"skill_id": linux, "level": "avancado"}]
+    same = [
+        {"name": "Fibra óptica (fusão)", "level": "basico"},
+        {"skill_id": linux, "level": "avancado"},
+    ]
     assert await _save(user, skills=same) == {}
     # Renomear no catálogo vale para todos e não muda o técnico.
     skills[linux] = CatalogInfo("Linux (Debian e Ubuntu)", True)
@@ -547,18 +550,21 @@ async def test_skills_keep_since_by_id(monkeypatch: pytest.MonkeyPatch) -> None:
         nobreak: "2024-01-02",
     }
     # Recusas, com o nome do catálogo (a central recebe as mesmas).
-    for sent, code, text in (
+    for sent, code, message in (
         ([{"skill_id": gone, "level": "basico"}], "SKILL_NOT_FOUND", "Aptidão não encontrada"),
         ([{"name": "Linux Debian", "level": "basico"}], "SKILL_UNKNOWN_NAME", "Atualize o app"),
         (
-            [{"skill_id": linux, "level": "basico"}, {"name": "LINUX (debian e ubuntu)", "level": "avancado"}],
+            [
+                {"skill_id": linux, "level": "basico"},
+                {"name": "LINUX (debian e ubuntu)", "level": "avancado"},
+            ],
             "SKILL_REPEATED",
             "Aptidão repetida: Linux (Debian e Ubuntu)",
         ),
     ):
         with pytest.raises(CodedError) as caught:
             await _save(user, skills=sent)
-        assert caught.value.code == code and str(caught.value).startswith(text), sent
+        assert caught.value.code == code and str(caught.value).startswith(message), sent
     # Limpar tira as ativas; a desativada continua guardada (volta se a central reativar).
     assert await _save(user, skills=None) == {
         "skills": [{"skill_id": nobreak, "level": "avancado", "since": "2024-01-02"}]

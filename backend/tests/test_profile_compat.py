@@ -202,7 +202,12 @@ async def test_my_profile_sends_skill_ids_names_and_areas(
     assert me["area_ids"] == [redes, wifi]
     [doc] = me["documents"]
     assert doc["id"] == str(personal_doc.id)
-    assert (doc["kind"], doc["title"], doc["via"], doc["size"]) == ("personal", "RG", "central", 2048)
+    assert (doc["kind"], doc["title"], doc["via"], doc["size"]) == (
+        "personal",
+        "RG",
+        "central",
+        2048,
+    )
     assert (doc["file_name"], doc["content_type"], doc["expires_on"]) == (
         "arquivo.pdf",
         "application/pdf",

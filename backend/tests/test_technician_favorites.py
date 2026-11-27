@@ -499,6 +499,21 @@ async def test_audit_who_decided(client: AsyncClient, engine: AsyncEngine, world
     saved = (await _decisions(engine, other))[0]
     assert saved.created_by_id == world.analyst.user.id
     assert saved.updated_by_id == world.supervisor.user.id
+    # Cada decisão também fica no histórico do cadastro do técnico, com quem fez e a nota
+    # (tests/test_favorites_history.py cobre as frases).
+    r = await client.get(f"{API}/technicians/{other}/changes", headers=world.supervisor.headers)
+    assert [(row["actor"]["name"], row["note"], row["changes"]) for row in r.json()] == [
+        (
+            "Super",
+            "Editada",
+            [{"field": "favorites", "from": None, "to": "nota alterada em Santos-SP"}],
+        ),
+        (
+            "Analista",
+            "Primeira",
+            [{"field": "favorites", "from": None, "to": "fixado em Santos-SP"}],
+        ),
+    ]
 
 
 @requires_db

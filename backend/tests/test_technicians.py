@@ -1,4 +1,5 @@
-"""Base técnica: analistas e gestores cuidam do acesso dos técnicos (e só dos técnicos)."""
+"""Base técnica: analistas e gestores cuidam do acesso dos técnicos (e só dos técnicos). O perfil
+profissional pela central fica em test_central_tech_profile.py."""
 
 import asyncio
 import base64
@@ -37,6 +38,15 @@ async def test_access_management(client: AsyncClient, world: World) -> None:
     assert r.status_code == 201, r.text
     tech_id = r.json()["technician"]["id"]
     temp = r.json()["temporary_password"]
+    # A ficha nova: sem áreas, aptidões, certificação vencendo nem avaliações (Entrega 2).
+    novo = r.json()["technician"]
+    assert (novo["area_ids"], novo["areas"], novo["skills"]) == ([], [], [])
+    assert (novo["certification_due"], novo["rating_average"], novo["rating_count"]) == (
+        None,
+        None,
+        0,
+    )
+    assert novo["tech_profile_updated"]["areas"] is None and "service_areas" not in novo
     first = await login(client, "paula@campo.com", temp)
     assert first["status"] == 200 and first["user"]["must_change_password"] is True
 

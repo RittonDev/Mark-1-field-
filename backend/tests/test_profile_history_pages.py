@@ -3,7 +3,9 @@
 `before` = "{created_at}|{id}" da última linha recebida traz as linhas mais antigas que ela, na
 mesma ordem (do mais novo para o mais antigo) e com o mesmo `limit`: a troca de PIX ou de e-mail
 antiga continua alcançável depois das 200 mais novas, sem repetir nem pular linha (também com
-várias linhas no mesmo instante). Sem `before`, igual a antes. Dados fictícios.
+várias linhas no mesmo instante). Sem `before`, igual a antes. E o que cada perfil lê: sem
+Pagamentos, as formas de recebimento como "***"; sem Técnicos em Editar, os anexos internos como
+"***" (os documentos do técnico seguem legíveis). Dados fictícios.
 """
 
 import uuid
@@ -132,6 +134,77 @@ async def test_changes_pages_reach_the_old_pix_line(
     hidden_pix = next(row for row in hidden_rest if row["id"] == pix_id)
     assert hidden_pix["changes"] == [{"field": "pix", "from": None, "to": "***"}]
     assert "Tecnico Alfa" not in str(hidden_rest) and "456.789" not in str(hidden_rest)
+
+
+INTERNAL = {
+    "field": "internal_attachments",
+    "from": None,
+    "to": "incluiu Anexo interno Contrato de exemplo",
+}
+DOCUMENT = {
+    "field": "documents",
+    "from": None,
+    "to": "incluiu Certificação NR10 Exemplo (vence 01/12/2027)",
+}
+PAYOUT = {"field": "payout_methods", "from": None, "to": "PIX CPF ***.456.789-** · Tecnico Alfa"}
+
+
+async def test_internal_attachments_need_technicians_edit(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    """Os anexos internos no histórico: com Técnicos em Editar, a frase; só com Visualizar, "***"
+    (o "from" null continua null; a tela diz "Anexos internos alterados"). Os documentos do técnico
+    seguem legíveis; as formas de recebimento seguem a regra de Pagamentos, e as duas máscaras se
+    somam."""
+    tech = world.tech.user.id
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        db.add_all(
+            [
+                UserChange(
+                    id=uuid.uuid4(),
+                    user_id=tech,
+                    actor_id=world.analyst.user.id,
+                    via=VIA_CENTRAL,
+                    changes=[INTERNAL, DOCUMENT],
+                    created_at=START + timedelta(minutes=1),
+                ),
+                UserChange(
+                    id=uuid.uuid4(),
+                    user_id=tech,
+                    actor_id=tech,
+                    via=VIA_APP,
+                    changes=[PAYOUT],
+                    created_at=START,
+                ),
+            ]
+        )
+        await db.commit()
+    url = f"{API}/technicians/{tech}/changes"
+    hidden_internal = {**INTERNAL, "to": "***"}
+    hidden_payout = {**PAYOUT, "to": "***"}
+
+    async def read(headers: dict[str, str]) -> list[list[dict[str, Any]]]:
+        return [row["changes"] for row in await _page(client, url, headers)]
+
+    assert await read(world.supervisor.headers) == [[INTERNAL, DOCUMENT], [PAYOUT]]
+    for items, expected in (
+        (
+            {"base.technicians": "view", "commercial.payouts": "view"},
+            [[hidden_internal, DOCUMENT], [PAYOUT]],
+        ),
+        (
+            {"base.technicians": "edit", "commercial.payouts": "none"},
+            [[INTERNAL, DOCUMENT], [hidden_payout]],
+        ),
+        (
+            {"base.technicians": "view", "commercial.payouts": "none"},
+            [[hidden_internal, DOCUMENT], [hidden_payout]],
+        ),
+    ):
+        await restrict_analyst(client, world, **items)
+        assert await read(world.analyst.headers) == expected, items
+    assert "Contrato de exemplo" not in str(await _page(client, url, world.analyst.headers))
 
 
 async def test_changes_page_errors(client: AsyncClient, world: World) -> None:

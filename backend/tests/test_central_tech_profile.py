@@ -119,9 +119,7 @@ async def _used(engine: AsyncEngine, model: Any, ids: list[str]) -> list[bool]:
         rows = dict(
             (
                 await conn.execute(
-                    select(model.id, model.used_at).where(
-                        model.id.in_([uuid.UUID(i) for i in ids])
-                    )
+                    select(model.id, model.used_at).where(model.id.in_([uuid.UUID(i) for i in ids]))
                 )
             ).all()
         )
@@ -136,7 +134,8 @@ async def test_central_edits_each_part_and_rereads_the_columns(
 ) -> None:
     """Cada seção da ficha manda só a sua parte: a resposta (o detalhe) volta normalizada com o
     carimbo "central", o banco guardou cada coluna, o histórico tem uma linha por seção (via
-    central, quem fez) e os itens do catálogo ganham o 1º uso. A lista traz as áreas sem os nomes."""
+    central, quem fez) e os itens do catálogo ganham o 1º uso. A lista traz as áreas sem os
+    nomes."""
     trena, escada = await _new_tools(engine, "Trena", "Escada")
     linux, cameras = world.skill_ids["Linux"], world.skill_ids["Câmeras Hikvision"]
     redes, wifi = world.area_ids["redes"], world.area_ids["wifi"]
@@ -500,7 +499,10 @@ async def test_central_uses_the_app_messages(
                 "code": "SKILL_UNKNOWN_NAME",
             },
         ),
-        ({"tool_ids": [str(uuid.uuid4())]}, {"detail": "Ferramenta não encontrada. Atualize a lista."}),
+        (
+            {"tool_ids": [str(uuid.uuid4())]},
+            {"detail": "Ferramenta não encontrada. Atualize a lista."},
+        ),
         (
             {"unavailability": [{"start": day(-3), "end": day(2)}]},
             {"detail": "O início não pode ser antes de hoje"},
@@ -589,7 +591,9 @@ async def _until_blocked_by(engine: AsyncEngine, pid: int) -> None:
     async with engine.connect() as conn:
         while True:
             waiting = await conn.scalar(
-                text("SELECT count(*) FROM pg_stat_activity WHERE :pid = ANY(pg_blocking_pids(pid))"),
+                text(
+                    "SELECT count(*) FROM pg_stat_activity WHERE :pid = ANY(pg_blocking_pids(pid))"
+                ),
                 {"pid": pid},
             )
             await conn.rollback()  # o pg_stat_activity fica fixo dentro de uma transação
@@ -616,7 +620,9 @@ async def test_central_and_app_writes_take_turns(
         try:
             await _until_blocked_by(engine, pid)
             before = await user_history.snapshot(other, me)
-            tech_profile.apply(me, {"availability": ["mon:morning"]}, via="app", at=datetime.now(UTC))
+            tech_profile.apply(
+                me, {"availability": ["mon:morning"]}, via="app", at=datetime.now(UTC)
+            )
             await user_history.track(other, me, before, via="app", actor=me)
             await other.commit()
         finally:
