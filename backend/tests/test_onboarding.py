@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.api.routes import onboarding as onboarding_routes
 from app.core.config import settings
 from app.core.security import decode_token
 from app.models import ServiceArea, Skill, TechnicianApplication
@@ -406,10 +407,14 @@ async def test_ficha_areas_and_skills_come_from_the_catalog(
     assert detail["documents"] == []
 
 
-async def test_ficha_catalog_rules(client: AsyncClient, world: World, engine: AsyncEngine) -> None:
+async def test_ficha_catalog_rules(
+    client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Área desconhecida ou desativada, aptidão desconhecida, fora do catálogo ou repetida e a
     ficha sem área (com o catálogo tendo alguma ativa) são recusadas, sem gastar o link; com o
     catálogo de áreas todo desativado, a ficha vai sem área."""
+    # As recusadas pelo catálogo contam no limite por IP (5 por hora): aqui, mais tentativas.
+    monkeypatch.setattr(onboarding_routes, "MAX_PER_IP_HOUR", 50)
     token = await new_invite(client, world)
     url = f"{API}/public/onboarding/{token}"
     areas, skills = world.area_ids, world.skill_ids

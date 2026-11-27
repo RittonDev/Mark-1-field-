@@ -203,13 +203,13 @@ def test_control_and_format_characters_are_dropped() -> None:
     assert _problems(TechnicianSkillIn, {"name": "\u200b\u200b\u200b", "level": "basico"}) == [
         (("name",), "Informe o nome da aptidão")
     ]
-    assert _problems(TechnicianToolCreate, {"name": "\u0000\u00ad"}) == [
-        (("name",), "Informe o nome da ferramenta")
-    ]
+    # O nome do catálogo sai limpo do schema; o mínimo ("Informe o nome da ferramenta") é do
+    # serviço (services/technician_catalogs.py), com o nome do catálogo na mensagem.
+    assert TechnicianToolCreate.model_validate({"name": chr(0) + chr(0xAD)}).name == ""
     linux = {"name": "Linux", "level": "basico"}
-    assert _problems(MyProfileUpdate, {"skills": [linux, {**linux, "name": "Lin\u200bux"}]}) == [
-        (("skills",), "Aptidão repetida: Linux")
-    ]
+    zero_width = {**linux, "name": "Lin" + chr(0x200B) + "ux"}
+    data = MyProfileUpdate.model_validate({"skills": [linux, zero_width]})
+    assert [item.name for item in data.skills or []] == ["Linux", "Linux"]
 
 
 def test_items_text_cuts_long_lists() -> None:
@@ -317,19 +317,17 @@ def test_transport_item_is_checked() -> None:
 
 
 def test_tool_name_is_cleaned_and_checked() -> None:
+    """O schema do catálogo limpa o nome e corta em 80; o mínimo de 2 é do serviço, com o nome do
+    catálogo na mensagem ("Informe o nome da ferramenta", services/technician_catalogs.py)."""
     assert TechnicianToolCreate.model_validate({"name": " Trena   laser "}).name == "Trena laser"
-    assert _problems(TechnicianToolCreate, {"name": " x "}) == [
-        (("name",), "Informe o nome da ferramenta")
-    ]
+    assert TechnicianToolCreate.model_validate({"name": " x "}).name == "x"
     assert _problems(TechnicianToolCreate, {"name": "a" * (tp.TOOL_NAME_MAX + 1)}) == [
         (("name",), "no máximo 80 caracteres")
     ]
     assert TechnicianToolCreate(name="a" * tp.TOOL_NAME_MAX)
     update = TechnicianToolUpdate.model_validate({"name": None, "is_active": None})
     assert (update.name, update.is_active) == (None, None)
-    assert _problems(TechnicianToolUpdate, {"name": ""}) == [
-        (("name",), "Informe o nome da ferramenta")
-    ]
+    assert TechnicianToolUpdate.model_validate({"name": ""}).name == ""
     assert _problems(TechnicianToolUpdate, {"id": str(uuid.uuid4())}) == [
         (("id",), "campo não aceito")
     ]
@@ -350,6 +348,10 @@ def test_patch_limits_are_the_service_ones() -> None:
     assert max_length(MyProfileUpdate, "availability") == tp.MAX_SLOTS == len(tp.ALL_SLOTS)
     assert max_length(MyProfileUpdate, "skills") == tp.MAX_SKILLS == 30
     assert max_length(MyProfileUpdate, "education") == tp.MAX_EDUCATION == 20
+    # Áreas: a lista enviada até o catálogo inteiro; o limite de verdade (20, com as desativadas
+    # guardadas) é do serviço (AREAS_LIMIT), o mesmo de TECH_PROFILE_LIMITS.areas.
+    assert max_length(MyProfileUpdate, "area_ids") == technician_catalogs.MAX_ITEMS["area"] == 100
+    assert tp.MAX_AREAS == technician_catalogs.MAX_AREAS == 20
     assert max_length(TransportIn, "modes") == tp.MAX_MODES == len(tp.TRANSPORT_MODES)
     assert max_length(TechnicianSkillIn, "name") == tp.SKILL_NAME_MAX
     assert max_length(EducationIn, "course") == tp.COURSE_MAX
@@ -357,21 +359,42 @@ def test_patch_limits_are_the_service_ones() -> None:
     assert max_length(TechnicianToolCreate, "name") == tp.TOOL_NAME_MAX
     # Cada turno cabe no limite por item (o item enorme recusa sem ecoar o valor).
     assert max(len(slot) for slot in tp.ALL_SLOTS) <= SLOT_MAX == 16
+    # O app e a central: os mesmos campos, limites e validadores do perfil profissional.
+    assert set(PROFESSIONAL_FIELDS) == {
+        "tool_ids",
+        "availability",
+        "transport",
+        "skills",
+        "education",
+        "area_ids",
+        "unavailability",
+        "vehicle_model",
+        "vehicle_plate",
+    }
+    for model in (MyProfileUpdate, TechnicianUpdate):
+        assert issubclass(model, ProfessionalProfileIn)
+        for field in PROFESSIONAL_FIELDS:
+            assert model.model_fields[field] == ProfessionalProfileIn.model_fields[field]
 
 
 def test_patch_lists_are_checked_whole() -> None:
-    """A lista inteira: turno desconhecido, transporte null e itens repetidos (os itens se
-    conferem um a um nos testes acima)."""
-    assert _problems(MyProfileUpdate, {"availability": ["sat:afternoon", "sat:lunch"]}) == [
-        (("availability",), "Turno desconhecido: sat:lunch")
-    ]
-    assert _problems(MyProfileUpdate, {"transport": None}) == [
-        (("transport",), "Informe os meios de transporte")
-    ]
+    """A lista inteira: turno desconhecido, transporte null e cursos repetidos (os itens se
+    conferem um a um nos testes acima). A aptidão repetida passa ao serviço, que recusa com o nome
+    do catálogo; a central usa os mesmos validadores."""
+    for model in (MyProfileUpdate, TechnicianUpdate):
+        assert _problems(model, {"availability": ["sat:afternoon", "sat:lunch"]}) == [
+            (("availability",), "Turno desconhecido: sat:lunch")
+        ]
+        assert _problems(model, {"transport": None}) == [
+            (("transport",), "Informe os meios de transporte")
+        ]
+        assert _problems(model, {"vehicle_plate": "12"}) == [
+            (("vehicle_plate",), "Placa inválida: confira as letras e os números")
+        ]
+        assert _problems(model, {"area_ids": ["redes"]})[0][0] == ("area_ids", 0)
     linux = {"name": "linux", "level": "basico"}
-    assert _problems(MyProfileUpdate, {"skills": [linux, {**linux, "name": " LÍNUX "}]}) == [
-        (("skills",), "Aptidão repetida: LÍNUX")
-    ]
+    repeated = MyProfileUpdate.model_validate({"skills": [linux, {**linux, "name": " LÍNUX "}]})
+    assert [item.name for item in repeated.skills or []] == ["linux", "LÍNUX"]
     course = {
         "course": "Técnico em redes",
         "level": "technical",
@@ -394,9 +417,15 @@ def test_patch_lists_are_checked_whole() -> None:
         {"education": [course, {**course, "level": "certification"}, other]}
     )
     cleared = MyProfileUpdate.model_validate(
-        {"tool_ids": None, "availability": [], "skills": None, "education": None}
+        {"tool_ids": None, "availability": [], "skills": None, "education": None, "area_ids": []}
     )
-    assert cleared.model_fields_set == {"tool_ids", "availability", "skills", "education"}
+    assert cleared.model_fields_set == {
+        "tool_ids",
+        "availability",
+        "skills",
+        "education",
+        "area_ids",
+    }
 
 
 # ------------------------------------------------------------ wanted e apply
