@@ -1378,46 +1378,66 @@ async def test_validation_messages_and_no_password(
 
 
 @requires_db
-async def test_skill_since_is_kept_by_name(
+async def test_skill_since_is_kept_by_id(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
-    """O "desde" fica pelo nome (outro nível, outra caixa); a aptidão nova ganha hoje; trocar só a
-    grafia grava (e entra no histórico); renomear de verdade recomeça."""
+    """O "desde" fica pelo id (outro nível; o nome do app de antes casa com o mesmo id); a aptidão
+    nova ganha hoje; renomear no catálogo muda o nome para todos sem mexer no técnico nem no
+    histórico; sair e voltar recomeça."""
+    linux, printer_id = world.skill_ids["Linux"], world.skill_ids["Impressoras HP"]
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         user = await db.get(User, world.tech.user.id)
         assert user is not None
-        user.skills = [{"name": "Linux", "level": "basico", "since": "2025-03-10"}]
+        user.skills = [{"skill_id": linux, "level": "basico", "since": "2025-03-10"}]
         await db.commit()
     today = datetime.now(TZ).date().isoformat()
-    printer = {"name": "Impressoras HP", "level": "basico"}
+    printer = {"skill_id": printer_id, "level": "basico"}
 
     r = await _patch(client, world, skills=[{"name": "LINUX", "level": "avancado"}, printer])
     assert r.status_code == 200, r.text
     assert r.json()["skills"] == [
-        {"name": "Impressoras HP", "level": "basico", "since": today},
-        {"name": "LINUX", "level": "avancado", "since": "2025-03-10"},
+        {"skill_id": printer_id, "name": "Impressoras HP", "level": "basico", "since": today},
+        {"skill_id": linux, "name": "Linux", "level": "avancado", "since": "2025-03-10"},
     ]
-    r = await _patch(client, world, skills=[printer, {"name": "Linux", "level": "avancado"}])
+    # Renomear no catálogo (Configurações › Técnicos): o nome muda para todos; o técnico, o
+    # "desde" e o histórico, não.
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE skill_catalog SET name = :name, name_key = :key WHERE id = :id"),
+            {"name": "Linux (servidores)", "key": "linux (servidores)", "id": uuid.UUID(linux)},
+        )
+    r = await _patch(client, world, skills=[printer, {"skill_id": linux, "level": "avancado"}])
     assert r.status_code == 200, r.text
-    assert r.json()["skills"][1] == {"name": "Linux", "level": "avancado", "since": "2025-03-10"}
-    assert (await _stored(engine, world)).skills == r.json()["skills"]
-    r = await _patch(client, world, skills=[printer, {"name": "Linux Debian", "level": "avancado"}])
-    assert r.status_code == 200, r.text
-    assert {s["name"]: s["since"] for s in r.json()["skills"]} == {
-        "Impressoras HP": today,
-        "Linux Debian": today,
+    assert r.json()["skills"][1] == {
+        "skill_id": linux,
+        "name": "Linux (servidores)",
+        "level": "avancado",
+        "since": "2025-03-10",
     }
+    assert len(await _history(client, world)) == 1
+    # Sair e voltar recomeça o "desde".
+    assert (await _patch(client, world, skills=[printer])).status_code == 200
+    r = await _patch(client, world, skills=[printer, {"skill_id": linux, "level": "avancado"}])
+    assert r.status_code == 200, r.text
+    assert {s["skill_id"]: s["since"] for s in r.json()["skills"]} == {
+        printer_id: today,
+        linux: today,
+    }
+    assert (await _stored(engine, world)).skills == [
+        {"skill_id": printer_id, "level": "basico", "since": today},
+        {"skill_id": linux, "level": "avancado", "since": today},
+    ]
 
     rows = await _history(client, world)
     assert [row["changes"] for row in rows] == [
-        [{"field": "skills", "from": "Linux (Avançado)", "to": "Linux Debian (Avançado)"}],
-        [{"field": "skills", "from": "LINUX (Avançado)", "to": "Linux (Avançado)"}],
+        [{"field": "skills", "from": None, "to": "Linux (servidores) (Avançado)"}],
+        [{"field": "skills", "from": "Linux (servidores) (Avançado)", "to": None}],
         [
             {
                 "field": "skills",
                 "from": "Linux (Básico)",
-                "to": "Impressoras HP (Básico), LINUX (Avançado)",
+                "to": "Impressoras HP (Básico), Linux (Avançado)",
             }
         ],
     ]
@@ -1507,16 +1527,26 @@ async def test_history_texts_and_the_event(
     client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Histórico: nas listas, "from" é o que saiu e "to" o que entrou (mais de 10 itens: os 10
-    primeiros e "e mais N"); o transporte vai de → para. O aviso profile.changed leva só as partes
-    e "app", para a gestão (sem PIX, sem after_reset)."""
+    primeiros e "e mais N"; aptidões e áreas pelo nome do catálogo); o transporte vai de → para. O
+    aviso profile.changed leva só as partes e "app", para a gestão (sem PIX, sem after_reset); o
+    técnico não recebe o me.profile_changed do que ele mesmo mudou."""
     ids = dict(zip(tp.DEFAULT_TOOLS, await _new_tools(engine, *tp.DEFAULT_TOOLS), strict=True))
+    linux = world.skill_ids["Linux"]
+    redes, wifi, cftv = (world.area_ids[code] for code in ("redes", "wifi", "cftv"))
     for body in (
         {"tool_ids": [ids["Furadeira"]]},
         {"availability": ["mon:night"]},
-        {"skills": [{"name": "Linux", "level": "basico"}]},
+        {"skills": [{"skill_id": linux, "level": "basico"}]},
+        {"area_ids": [cftv]},
     ):
         assert (await _patch(client, world, **body)).status_code == 200
-    events = _profile_events(monkeypatch)
+    published: list[dict[str, Any]] = []
+
+    async def capture(event: dict[str, Any]) -> None:
+        published.append(event)
+
+    monkeypatch.setattr(realtime.bus, "publish", capture)
+    events = published
     steps: list[tuple[dict[str, Any], dict[str, Any]]] = [
         (
             {"tool_ids": [ids["Multímetro"], ids["Escada"]]},
@@ -1535,10 +1565,18 @@ async def test_history_texts_and_the_event(
             {"field": "transport", "from": "Carro, Moto · com CNH", "to": "Nenhum · sem CNH"},
         ),
         (
-            {"skills": [{"name": "Linux", "level": "intermediario"}]},
+            {"skills": [{"skill_id": linux, "level": "intermediario"}]},
             {"field": "skills", "from": "Linux (Básico)", "to": "Linux (Intermediário)"},
         ),
         ({"education": [COURSE]}, {"field": "education", "from": None, "to": COURSE_TEXT}),
+        (
+            {"area_ids": [wifi, redes]},
+            {
+                "field": "areas",
+                "from": "CFTV e câmeras IP",
+                "to": "Redes e cabeamento estruturado, Wi-Fi e access points",
+            },
+        ),
         (
             {"availability": []},
             {"field": "availability", "from": "sáb · tarde e noite", "to": None},
@@ -1560,6 +1598,7 @@ async def test_history_texts_and_the_event(
     ]
 
     expected = [{"fields": [change["field"]], "via": "app"} for _, change in steps]
+    assert {event["type"] for event in events} == {"profile.changed"}  # nada de me.profile_changed
     assert [event["data"] for event in events] == [*expected, {"fields": ["tools"], "via": "app"}]
     first = events[0]
     assert first["data"] == {"fields": ["tools"], "via": "app"}
@@ -1586,9 +1625,11 @@ async def test_invisible_characters_are_dropped_before_saving(
     assert r.status_code == 200, r.text
     [saved] = r.json()["education"]
     assert (saved["course"], saved["institution"]) == ("Técnico em redes", "Escola Exemplo")
+    # O nome do app de antes, sem os invisíveis, casa com a aptidão do catálogo.
     assert [skill["name"] for skill in r.json()["skills"]] == ["Linux"]
     user = await _stored(engine, world)
-    assert (user.education, user.skills) == (r.json()["education"], r.json()["skills"])
+    assert user.education == r.json()["education"]
+    assert [skill["skill_id"] for skill in user.skills] == [world.skill_ids["Linux"]]
     rows = await _history(client, world)
     assert rows[0]["changes"][1] == {"field": "education", "from": None, "to": COURSE_TEXT}
     r = await _patch(client, world, education=[{**course, "id": saved["id"]}])
