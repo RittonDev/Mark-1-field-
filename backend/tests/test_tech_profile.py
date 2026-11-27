@@ -1218,9 +1218,11 @@ async def test_each_part_is_saved_and_read_back(
 async def test_validation_messages_and_no_password(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
-    """Cada recusa com a mensagem e o rótulo que o app mostra, sem gravar nada. Nenhuma parte pede
-    senha, nem com a senha provisória (só e-mail e PIX travam)."""
+    """Cada recusa com a mensagem e o rótulo que o app mostra, sem gravar nada (as do catálogo vêm
+    do serviço, sem rótulo, com o código). Nenhuma parte pede senha, nem com a senha provisória (só
+    e-mail e PIX travam)."""
     skill = {"name": "Linux", "level": "basico"}
+    linux = world.skill_ids["Linux"]
     course = {key: value for key, value in COURSE.items() if key != "end"}
     twice = str(uuid.uuid4())
     modes = "car, motorcycle, bicycle, public_transport, ride_app ou on_foot"
@@ -1269,14 +1271,34 @@ async def test_validation_messages_and_no_password(
             {"skills": [{**skill, "level": "expert"}]},
             [("Nível", "Escolha uma das opções: basico, intermediario ou avancado")],
         ),
+        # Repetida (pelo nome, sem acento e maiúsculas, ou pelo id): 422 do serviço, com o nome do
+        # catálogo.
         (
             {"skills": [{**skill, "name": "linux"}, {**skill, "name": "Linux "}]},
-            [("Aptidões", "Aptidão repetida: Linux")],
+            [(None, "Aptidão repetida: Linux")],
         ),
         (
-            {"skills": [skill, {**skill, "name": "Lin\u200bux"}]},
-            [("Aptidões", "Aptidão repetida: Linux")],
+            {"skills": [skill, {**skill, "name": "Lin" + chr(0x200B) + "ux"}]},
+            [(None, "Aptidão repetida: Linux")],
         ),
+        (
+            {"skills": [skill, {"skill_id": linux, "level": "avancado"}]},
+            [(None, "Aptidão repetida: Linux")],
+        ),
+        (
+            {"skills": [{"skill_id": str(uuid.uuid4()), "level": "basico"}]},
+            [(None, "Aptidão não encontrada. Atualize a lista")],
+        ),
+        (
+            {"skills": [{**skill, "name": "Linux Debian"}]},
+            [(None, "Atualize o app: as aptidões agora são escolhidas numa lista")],
+        ),
+        ({"skills": [{**skill, "skill_id": linux}]}, [("Aptidões", "Escolha a aptidão")]),
+        (
+            {"area_ids": [str(uuid.uuid4())]},
+            [(None, "Área não encontrada. Atualize a lista")],
+        ),
+        ({"area_ids": ["redes"]}, [("Áreas de atuação", "Identificador inválido")]),
         (
             {"skills": [{**skill, "name": f"Aptidão {n:02d}"} for n in range(31)]},
             [("Aptidões", "No máximo 30 itens")],
@@ -1333,7 +1355,7 @@ async def test_validation_messages_and_no_password(
     assert await _history(client, world) == []
     user = await _stored(engine, world)
     assert (user.tool_ids, user.availability, user.skills, user.education) == ([], [], [], [])
-    assert user.tech_profile_stamps == {}
+    assert user.service_areas == [] and user.tech_profile_stamps == {}
 
     # Nenhuma parte pede senha, nem com a provisória (a central redefiniu).
     async with engine.begin() as conn:
