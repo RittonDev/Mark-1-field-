@@ -192,7 +192,8 @@ def test_expiry_status_and_texts_at_the_boundaries() -> None:
     }
     assert {day: docs.expiry_status(day, today) for day in cases} == cases
     assert docs.last_expiry_day(date(2026, 11, 26)) == date(2046, 11, 26)
-    assert docs.last_expiry_day(date(2028, 2, 29)) == date(2048, 2, 28)
+    assert docs.last_expiry_day(date(2028, 2, 29)) == date(2048, 2, 29)
+    assert docs.last_expiry_day(date(2080, 2, 29)) == date(2100, 2, 28)  # 2100 não é bissexto
     assert docs.document_name(TechDocumentKind.CERTIFICATION, "NR10") == "Certificação NR10"
     assert docs.document_name(TechDocumentKind.RESUME, "Currículo") == "Currículo"
     assert docs.document_name(TechDocumentKind.INTERNAL, "Contrato") == "Anexo interno Contrato"
