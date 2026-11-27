@@ -466,7 +466,7 @@ async def test_verify_check_and_open_again(
     [line] = await _history(engine, tech.id)
     assert (line.via, line.actor_id) == ("link", tech.id)
     assert line.changes == [{"field": "email_verified", "from": "pendente", "to": "validado"}]
-    # A central recebe o profile.changed; o app, o me.profile_changed (e-mail validado é de APP_FIELDS).
+    # A central recebe o profile.changed; o app, o me.profile_changed (o e-mail é de APP_FIELDS).
     assert [e["type"] for e in events] == ["profile.changed", "me.profile_changed"]
     assert events[0]["data"] == {"fields": ["email_verified"], "via": "link"}
     # Aberto de novo (outra aba, o e-mail no celular): a mesma resposta, sem mudar nada.
