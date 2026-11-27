@@ -1,13 +1,17 @@
 """Técnicos favoritos por cidade (gestão). Registrado antes das rotas de técnicos, para
-/technicians/favorites não cair em /technicians/{user_id}/..."""
+/technicians/favorites não cair em /technicians/{user_id}/... Cada decisão (fixar, tirar, voltar
+para a regra, trocar a nota) vai ao histórico do cadastro do técnico (via central) e, depois do
+commit, ao aviso profile.changed da central (o técnico não recebe: favorito é da gestão)."""
 
 import uuid
 
 from fastapi import APIRouter
 
 from app.api.deps import DB, TicketManagerUser, access_user
+from app.models.user_change import VIA_CENTRAL
 from app.schemas.technician_favorite import FavoriteCityDetail, FavoriteSet, FavoritesOut
 from app.services import technician_favorites as svc
+from app.services import user_history
 from app.services.errors import WorkflowError
 
 router = APIRouter(tags=["technicians"])
@@ -49,9 +53,11 @@ async def city_favorites(
 async def set_favorite(
     technician_id: uuid.UUID, body: FavoriteSet, db: DB, user: TechniciansEdit
 ) -> FavoriteCityDetail:
-    """favorite=true fixa o técnico na cidade; favorite=false tira da lista (ou desfaz o fixado)."""
-    await svc.set_favorite(db, technician_id, body, user)
+    """favorite=true fixa o técnico na cidade; favorite=false tira da lista (ou desfaz o fixado).
+    A linha do histórico leva a nota do pedido; nada mudou, nada vai."""
+    tech, changes = await svc.set_favorite(db, technician_id, body, user)
     await db.commit()
+    await user_history.publish_changed(tech, changes, via=VIA_CENTRAL, actor=user)
     return await svc.city_detail(db, body.state, body.city)
 
 
@@ -59,7 +65,8 @@ async def set_favorite(
 async def clear_favorite(
     technician_id: uuid.UUID, state: str, city: str, db: DB, user: TechniciansEdit
 ) -> FavoriteCityDetail:
-    """Volta a valer só a regra automática (idempotente)."""
-    await svc.clear_favorite(db, technician_id, state, city, user)
+    """Volta a valer só a regra automática (idempotente: sem decisão, nada no histórico)."""
+    tech, changes = await svc.clear_favorite(db, technician_id, state, city, user)
     await db.commit()
+    await user_history.publish_changed(tech, changes, via=VIA_CENTRAL, actor=user)
     return await svc.city_detail(db, state, city)

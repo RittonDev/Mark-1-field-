@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from app.core.config import settings
 from app.core.enums import ApplicationStatus, UserRole
 from app.core.text import fold
-from app.models import Skill, TechnicianApplication, TechnicianTool, User
+from app.models import ServiceArea, Skill, TechnicianApplication, TechnicianTool, User
 from app.services import tech_profile, technician_catalogs
 from tests.conftest import World, requires_db
 from tests.test_access import restrict_analyst
@@ -269,8 +269,11 @@ NEWEST_AT = "2026-11-19T14:02:11+00:00"
 
 
 async def _seed_profiles(engine: AsyncEngine, world: World) -> dict[str, Any]:
-    """Tecnico (tudo informado, uma ferramenta desativada guardada), Redes (ferramenta e sábado
-    de manhã; ficha aprovada com aptidão que não é dele no perfil) e Tecnico Bravo (nada)."""
+    """Tecnico (tudo informado, com uma ferramenta, uma aptidão e uma área desativadas
+    guardadas), Redes (ferramenta e sábado de manhã; ficha aprovada com área e aptidão que não
+    estão no perfil dele) e Tecnico Bravo (nada). As aptidões e as áreas são as dos catálogos
+    iniciais (`world`)."""
+    skills, areas = world.skill_ids, world.area_ids
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         ladder = TechnicianTool(name="Escada", is_active=True)
@@ -294,13 +297,16 @@ async def _seed_profiles(engine: AsyncEngine, world: World) -> dict[str, Any]:
             city="Cidade Exemplo",
             state="SP",
             coverage_area="Cidade Exemplo",
-            service_areas=["cftv"],
-            skills=[{"name": "DVR/NVR Intelbras", "level": "avancado"}],
+            service_areas=[areas["cftv"]],
+            skills=[{"skill_id": skills["DVR/NVR Intelbras"], "level": "avancado"}],
             privacy_consent_at=datetime(2026, 11, 1, tzinfo=UTC),
             privacy_version="2026-11-19.2",
             user_id=world.tech_other.user.id,
         )
         db.add(application)
+        rack, phone = uuid.UUID(skills["Montagem de rack"]), uuid.UUID(areas["telefonia"])
+        await db.execute(update(Skill).where(Skill.id == rack).values(is_active=False))
+        await db.execute(update(ServiceArea).where(ServiceArea.id == phone).values(is_active=False))
         await db.commit()
     education_id = str(uuid.uuid4())
     await _set_profile(
@@ -311,9 +317,15 @@ async def _seed_profiles(engine: AsyncEngine, world: World) -> dict[str, Any]:
         transport_modes=["car"],
         has_driver_license=True,
         skills=[
-            {"name": "Linux", "level": "avancado", "since": "2026-11-12"},
-            {"name": "Cabeamento estruturado", "level": "basico", "since": "2026-10-01"},
+            {"skill_id": skills["Linux"], "level": "avancado", "since": "2026-11-12"},
+            {"skill_id": skills["Montagem de rack"], "level": "basico", "since": "2026-11-20"},
+            {
+                "skill_id": skills["Certificação de cabeamento"],
+                "level": "basico",
+                "since": "2026-10-01",
+            },
         ],
+        service_areas=sorted([areas["redes"], areas["cftv"], areas["telefonia"]]),
         education=[
             {
                 "id": education_id,
@@ -330,6 +342,7 @@ async def _seed_profiles(engine: AsyncEngine, world: World) -> dict[str, Any]:
             "transport": _stamp("2026-11-12T10:00:00+00:00", "ficha"),
             "skills": _stamp("2026-11-12T10:00:00+00:00", "ficha"),
             "education": _stamp("2026-11-15T08:00:00+00:00"),
+            "areas": _stamp("2026-11-16T08:00:00+00:00", "central"),
         },
     )
     await _set_profile(
