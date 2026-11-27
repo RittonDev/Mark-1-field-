@@ -321,25 +321,32 @@ não duplica (reenvio seguro do lote). Histórico apagado após `TRACKING_RETENT
   responsável já tem OS ativa sobreposta. Reenviar com `allow_conflict: true` confirma. A ação do técnico (sync offline) não é barrada.
 
 ### Homologação de técnicos
-Público (sem login, pelo link): `GET /public/onboarding/catalog` (áreas, disponibilidade, níveis, sugestões de skill,
-versão do aviso de privacidade; o app usa as `skill_suggestions` nas sugestões das Aptidões) ·
+Público (sem login, pelo link): `GET /public/onboarding/catalog` (áreas de atuação e, desde 26/11/2026, `skills`, os
+ativos dos catálogos de Configurações › Técnicos com `key` = id; disponibilidade, níveis, veículos, versão do aviso de
+privacidade; `skill_suggestions`, os nomes das aptidões, ficam só para o app e a ficha de antes) ·
 `GET /public/onboarding/{token}` → `{valid, expires_at}` ·
 `POST /public/onboarding/{token}` (ficha + `password` + `privacy_consent: true` + `photo` em data URL) →
-`{protocol, email_verification}` (desde 25/11/2026, a ficha traz também telefone secundário, RG, o endereço em partes,
-mini biografia, empresa e veículo, e o link de validação do e-mail vai para a fila: ver
-[Cadastro V2](#cadastro-v2-2026-11-25));
+`{protocol, email_verification, upload_token, upload_expires_at}` (desde 25/11/2026, a ficha traz também telefone
+secundário, RG, o endereço em partes, mini biografia, empresa e veículo, e o link de validação do e-mail vai para a
+fila: ver [Cadastro V2](#cadastro-v2-2026-11-25); desde 26/11/2026, as áreas e as aptidões vêm do catálogo e o
+`upload_token`, de 2 h, envia os arquivos depois, por `POST /public/onboarding-documents`: ver
+[Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26));
 410 se o link expirou, foi cancelado ou já usado; 422 com CPF/UF/e-mail inválido ou e-mail ou CPF já cadastrado. E-mail de
 domínio da empresa (`ENTRA_ALLOWED_DOMAINS`, o domínio exato): 422 "Use um e-mail que não seja da empresa", antes da
-checagem de e-mail já usado, e o link não é gasto. Cada código de `service_areas` e de `availability` tem até 32
-caracteres (os de hoje têm até 16): maior, 422 "No máximo 32 caracteres", sem o valor na resposta, e o link não é gasto;
-o código desconhecido dentro do limite continua na mensagem ("Área desconhecida: …", "Disponibilidade desconhecida: …").
+checagem de e-mail já usado, e o link não é gasto. Cada código de `availability` tem até 32 caracteres (os de hoje têm
+até 16): maior, 422 "No máximo 32 caracteres", sem o valor na resposta, e o link não é gasto; o código desconhecido
+dentro do limite continua na mensagem ("Disponibilidade desconhecida: …"). Desde 26/11/2026, cada área
+(`service_areas`, 0 a 20) é o id do catálogo ou o código antigo, até 40 caracteres; desconhecida ou desativada, 422
+`AREA_NOT_FOUND` (saiu o "Área desconhecida: …").
 Gestão: `GET|POST /onboarding/invites` (`{label?, reusable, days_valid}`; o `token` só aparece na criação) ·
 `DELETE /onboarding/invites/{id}` · `GET /onboarding/applications?status=` · `GET /onboarding/applications/pending-count` ·
 `GET /onboarding/applications/{id}` (com `photo_url` assinado; desde 25/11/2026, também `has_password`, `reviews`,
-`reopened_by` e `purge_at`) · `POST .../{id}/approve` (num passo, corpo opcional `{team_id?, job_title?, note?}`; a web
+`reopened_by` e `purge_at`; desde 26/11/2026, `areas`, as aptidões com `skill_id` e `documents`, e a lista também traz
+`areas`) · `POST .../{id}/approve` (num passo, corpo opcional `{team_id?, job_title?, note?}`; a web
 manda `{}`) → `ApplicationApproved {technician: UserOut, welcome: EmailQueued, password_link}` (o técnico entra com o
 e-mail e a senha da ficha e com tudo o que ela coletou, o perfil técnico já vem com a disponibilidade, o transporte e
-as aptidões da ficha, ver [Perfil técnico](#perfil-técnico-2026-11-19), e a boas-vindas vai para a fila; sem senha na
+as aptidões da ficha, ver [Perfil técnico](#perfil-técnico-2026-11-19), e, desde 26/11/2026, com as áreas de atuação e
+os arquivos da ficha; a boas-vindas vai para a fila; sem senha na
 ficha, ela leva o link de criar a senha só com o e-mail validado, `password_link`) ·
 `POST .../{id}/reject {reason}` · `POST .../{id}/reopen {reason}` (a reprovada volta para análise) ·
 `POST .../{id}/email-verification` (reenvia a validação do e-mail da ficha). As regras de 25/11/2026 estão em
@@ -347,9 +354,10 @@ ficha, ela leva o link de criar a senha só com o e-mail validado, `password_lin
 
 ### Técnicos (gestão do acesso)
 Analistas e gestores, e só sobre usuários técnicos: `GET /technicians?q=&team_id=&active=&state=&city=&tool_id=&day=&period=`
-(com jornada, OS abertas, foto, as áreas de atuação, do cadastro desde 25/11/2026 (antes, da ficha aprovada), e o
-resumo do perfil técnico; `q` busca por palavras em
-nome, e-mail e telefone; `on_shift` é a jornada aberta e dentro do limite de 14 h, a mesma regra do mapa: a esquecida
+(com jornada, OS abertas, foto, as áreas de atuação, do cadastro desde 25/11/2026 (antes, da ficha aprovada; desde
+26/11/2026, `area_ids`, os ids do catálogo, no lugar de `service_areas`), o resumo do perfil técnico e, desde
+26/11/2026, a certificação vencendo e a média das avaliações; a web pede só `q` e `limit=5000` e filtra na tela; `q`
+busca por palavras em nome, e-mail e telefone; `on_shift` é a jornada aberta e dentro do limite de 14 h, a mesma regra do mapa: a esquecida
 aberta não fica "em jornada"; `tool_id`, `day` e `period` filtram pelo perfil técnico, ver
 [Perfil técnico](#perfil-técnico-2026-11-19); paginada por `limit`, 1 a 5000, padrão 2000, e `offset`, com o total
 do filtro no cabeçalho `X-Total-Count`) · `POST /technicians` →
@@ -357,7 +365,8 @@ do filtro no cabeçalho `X-Total-Count`) · `POST /technicians` →
 desativar encerra as sessões, fecha as ofertas de OS em aberto dele e invalida os links de nova senha; e a ficha
 completa: endereço, jornada e serviços, ver "Fichas completas"; desde 25/11/2026, também CPF, RG, nascimento, telefone
 secundário, mini biografia, número, complemento e empresa, e trocar o e-mail troca o login na hora e manda a
-validação, ver [Cadastro V2](#cadastro-v2-2026-11-25)) ·
+validação, ver [Cadastro V2](#cadastro-v2-2026-11-25); desde 26/11/2026, também o perfil profissional, com as regras
+do app e o carimbo `central`, ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)) ·
 `POST /technicians/{id}/reset-password` → `{technician, temporary_password}` (encerra as sessões e invalida os links
 de nova senha) ·
 `POST|DELETE /technicians/{id}/photo` (JPG/PNG/WebP até 2 MB, tipo conferido pelo conteúdo; a anterior sai do disco
@@ -377,7 +386,11 @@ copiadas na migração), e a lista traz o resumo do perfil técnico; `GET /techn
 um técnico trazem também o detalhe (ferramentas, formação e a data de cada parte): ver
 [Perfil técnico](#perfil-técnico-2026-11-19). `TechnicianOut.level` (o selo do elo) e as rotas
 `/technicians/{id}/level` e `/technicians/{id}/stats`: ver [Elo dos técnicos](#elo-dos-técnicos-2026-11-18) e
-[Perfil do técnico: estatísticas e histórico](#perfil-do-técnico-estatísticas-e-histórico-2026-11-19).
+[Perfil do técnico: estatísticas e histórico](#perfil-do-técnico-estatísticas-e-histórico-2026-11-19). Desde 26/11/2026:
+os documentos (`GET|POST /technicians/{id}/documents`, `POST …/{document_id}/replace`, `PATCH|DELETE
+…/{document_id}`), as avaliações do cliente (`GET /technicians/{id}/ratings`) e os campos `area_ids`, `areas` (só no
+detalhe), `certification_due`, `rating_average` e `rating_count` de `TechnicianOut` (sai `service_areas`): ver
+[Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26).
 
 ### Importação de locais
 `POST /locations/import?dry_run=true|false&customer_id=` (CSV/XLSX) → `{rows, created, updated, errors, customers_created}`.
@@ -422,8 +435,14 @@ accuracy_m, speed_mps, heading, battery_pct, is_mock}` (o ponto mais novo do lot
 (ficha nova na homologação), `onboarding.updated` `{application_id, name, data: {action}}` (desde 25/11/2026: a ficha
 teve o e-mail validado, foi reaberta, aprovada ou reprovada; só com Homologação) e `profile.changed` `{user_id, name,
 actor_id, actor_name, occurred_at, data: {fields, via, after_reset?}}` (cadastro do técnico alterado no app, pela
-central, pela aprovação da ficha ou pelo link do e-mail, inclusive o perfil técnico; só com Técnicos ou Pagamentos: ver
-[Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18) e [Cadastro V2](#cadastro-v2-2026-11-25)).
+central, pela aprovação da ficha ou pelo link do e-mail, inclusive o perfil técnico e, desde 26/11/2026, os documentos,
+os anexos internos, as avaliações do cliente e os favoritos; só com Técnicos ou Pagamentos: ver
+[Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18) e [Cadastro V2](#cadastro-v2-2026-11-25)). A avaliação do
+cliente na OS (desde 26/11/2026) sai como `ticket.updated` com `data.fields: ["ratings"]`, só para a gestão e sem push.
+
+Só para o técnico (desde 26/11/2026): `me.profile_changed` `{type, occurred_at, data: {}}`, sem dados nem quem fez,
+quando a central, a aprovação da ficha ou o link do e-mail muda algo que o app mostra; o app relê `GET /me/profile`. Ver
+[Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26).
 O cliente pode mandar `{"type":"ping"}` e recebe `{"type":"pong"}`.
 Ao receber um evento, recarregue a OS/lista (o evento não carrega o objeto inteiro).
 
@@ -878,7 +897,9 @@ colaboradores.
   cidade), somado a agenda livre, skill, equipe do projeto e carga. Só técnicos com acesso ao app e, desde 25/11/2026,
   **Ativos** na operação e sem período de indisponibilidade nos dias da visita (OS sem horário: hoje); as áreas de
   atuação são as do cadastro (`users.service_areas`; vazias, as da ficha aprovada): ver
-  [Cadastro V2](#cadastro-v2-2026-11-25).
+  [Cadastro V2](#cadastro-v2-2026-11-25). Desde 26/11/2026, as áreas são ids do catálogo, comparadas pelo código das 10
+  áreas de antes, sem a reserva da ficha, e o motivo "Atende …" leva o nome atual da área: ver
+  [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26).
   `home_city`/`home_state` trazem a região efetiva (a base, senão o endereço). Os favoritos da cidade da loja
   ganham pontos e vaga garantida (ver "Técnicos favoritos por cidade"). Com horário na OS, a disponibilidade que o
   técnico informou no app soma ou tira poucos pontos (`availability`, `availability_gaps` e o motivo "Fora da
@@ -921,6 +942,11 @@ Até 3 técnicos por cidade pela regra automática, mais os que a central fixar.
   ranking.
 - `set_by`/`set_at`: quem gravou a decisão por último e quando. Desfazer apaga a decisão e só deixa o registro no log.
   Técnico apagado leva as decisões junto.
+- Desde 26/11/2026, cada decisão também vai ao histórico do cadastro do técnico (campo `favorites`, via central, com a
+  nota do pedido em `note`: "fixado em Cidade Exemplo-SP", "tirado da lista de Cidade Exemplo-SP", "voltou para a regra
+  em Cidade Exemplo-SP", "nota alterada em Cidade Exemplo-SP"; nada mudou, nenhuma linha) e ao `profile.changed` da
+  gestão. A ficha do técnico, seção
+  Favoritos, fixa, tira, troca a nota e inclui cidade: ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26).
 
 **Rotas** (técnico e solicitante recebem 403):
 - `GET /technicians/favorites?state=&technician_id=` → `FavoritesOut {window_days, min_visits, top, max_pinned,
@@ -1581,12 +1607,16 @@ histórico do cadastro. Motivo da senha e do histórico: uma conta invadida não
 - O técnico, pelo app: nome, celular, telefone secundário, RG, nascimento, mini biografia, veículo, indisponibilidade,
   cidade/UF, região, endereço (logradouro, número, complemento, bairro) e CEP sem senha; o CPF uma vez (enquanto está
   vazio); e-mail, dados da empresa e formas de recebimento (incluir, editar, tornar preferencial, excluir) com a senha
-  atual; a foto; e o perfil técnico (ferramental, disponibilidade, transporte e CNH, aptidões e formação), sem senha e
-  sem a trava da senha provisória.
+  atual; a foto; e o perfil técnico (ferramental, disponibilidade, transporte e CNH, aptidões e formação e, desde
+  26/11/2026, as áreas de atuação), sem senha e sem a trava da senha provisória. Desde 26/11/2026, também os próprios
+  documentos pessoais, certificações e o currículo, por rotas próprias (ver
+  [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)).
 - Só a central (Técnicos ou Usuários): grupo, cargo, acesso ao app, situação na operação, papel, serviços que faz,
   jornada, senha provisória e a correção do CPF. A central também muda os dados pessoais, o endereço e a empresa (sem
-  senha), mas só vê o perfil técnico e o veículo (`PATCH /technicians/{id}` ignora esses campos). Os textos livres de
-  ferramentas e de certificações continuam só na ficha da homologação (não viram lista).
+  senha). Até 25/11/2026 ela só via o perfil técnico e o veículo (`PATCH /technicians/{id}` ignorava esses campos);
+  desde 26/11/2026 ela também os muda, com as regras do app e o carimbo `central`, e o app recebe `me.profile_changed`
+  (ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)). Os textos livres de ferramentas e de certificações
+  continuam só na ficha da homologação (não viram lista).
 - Formas de recebimento: só o técnico cadastra e muda. A central vê (Pagamentos em Visualizar) e só remove (Pagamentos
   em Editar); `PATCH /technicians/{id}` ignora esses campos.
 
@@ -1600,7 +1630,8 @@ histórico do cadastro. Motivo da senha e do histórico: uma conta invadida não
   `rg_number`, `rg_issuer`, `rg_state`, `birth_date`, `address_number`, `address_complement`, `bio`,
   `company_document`, `company_name`, `company_trade_name`, `vehicle_model`, `vehicle_plate`, `payout_methods` e
   `unavailability`; `pix` fica só para o app de antes (a forma preferencial quando ela é PIX). Ver
-  [Cadastro V2](#cadastro-v2-2026-11-25).
+  [Cadastro V2](#cadastro-v2-2026-11-25). Desde 26/11/2026, também `area_ids` e `documents` (sem link), e as aptidões
+  com `skill_id`: ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26).
 - As rotas do e-mail (`POST /me/profile/email/verification`, `DELETE /me/profile/email/pending`) e das formas de
   recebimento (`POST /me/profile/payout-methods`, `PUT …/{method_id}`, `POST …/{method_id}/preferred` e
   `POST …/{method_id}/remove`), todas respondendo o `MyProfile`: ver [Cadastro V2](#cadastro-v2-2026-11-25).
