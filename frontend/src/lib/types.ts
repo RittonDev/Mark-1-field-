@@ -1140,8 +1140,6 @@ export interface Technician {
   avatar_url: string | null;
   on_shift: boolean;
   open_tickets: number;
-  /** @deprecated Sai no fechamento da Entrega 2 (V1). */
-  service_areas?: string[];
   /** Aptidões do perfil técnico (só as ativas do catálogo, com o nome dele), com o "desde". */
   skills: TechnicianSkill[];
   /** Áreas de atuação: as ativas do catálogo, na ordem do nome. Lista e detalhe; a API de antes não manda. */
