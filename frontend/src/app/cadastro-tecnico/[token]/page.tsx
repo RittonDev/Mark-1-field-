@@ -210,6 +210,20 @@ function translateIssue(issue: ValidationIssue): { text: string; withLabel: bool
   }
 }
 
+/**
+ * Recusas do envio pelas áreas e aptidões (pelo `code`), na etapa Atuação. `refetch`: a lista do servidor mudou depois
+ * de a ficha abrir (área ou aptidão desativada ou excluída, a primeira área cadastrada), então ela é relida; `message`: o
+ * recado da tela no lugar do texto do servidor.
+ */
+const CATALOG_ERRORS: Record<string, { field: "service_areas" | "skills"; refetch: boolean; message?: string }> = {
+  AREA_NOT_FOUND: { field: "service_areas", refetch: true, message: "A lista de áreas mudou: confira as áreas e envie de novo." },
+  AREA_REQUIRED: { field: "service_areas", refetch: true },
+  AREAS_LIMIT: { field: "service_areas", refetch: false },
+  SKILL_NOT_FOUND: { field: "skills", refetch: true, message: "A lista de aptidões mudou: confira as aptidões e envie de novo." },
+  SKILL_UNKNOWN_NAME: { field: "skills", refetch: true, message: "A lista de aptidões mudou: confira as aptidões e envie de novo." },
+  SKILL_REPEATED: { field: "skills", refetch: false },
+};
+
 /** Erro da API para a pessoa: o primeiro campo recusado (para levar até ele) e a mensagem em português. */
 function apiProblem(error: unknown): Problem {
   if (error instanceof ApiError) {
@@ -646,10 +660,82 @@ function scrollTop() {
   window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
 }
 
-/** Resposta do envio: a validação do e-mail vem da API nova (a de antes manda só o protocolo). */
+/**
+ * Resposta do envio: a validação do e-mail e o token dos documentos vêm das APIs novas (a primeira manda só o
+ * protocolo). Sem `upload_token` (API de antes da Entrega 2), a ficha enviada não oferece os documentos.
+ */
 interface SubmitResult {
   protocol: string;
   email_verification?: EmailQueued["status"];
+  /** Envia e tira arquivos desta ficha, e só dela, até `upload_expires_at` (2 h). */
+  upload_token?: string;
+  upload_expires_at?: string;
+}
+
+/** A ficha enviada, com o login (a ficha some depois do envio) e os arquivos já recebidos. */
+interface SentState extends SubmitResult {
+  login: string;
+  documents: FichaDocument[];
+  savedAt: number;
+}
+
+/*
+ * A ficha enviada fica nesta aba: depois do envio, a pessoa vai à câmera para os documentos, e o navegador do celular
+ * pode descartar a aba. A sessionStorage (só desta aba; some ao fechá-la) guarda o protocolo, o login, o token dos
+ * arquivos e o que já subiu: aberto de novo o mesmo link, volta o "Ficha enviada!" com os documentos, até o prazo dos
+ * arquivos (sem ele, por 2 h). Sem sessionStorage, a página volta ao começo, como antes.
+ */
+const SENT_KEY = "mf-cadastro-tecnico-enviada:";
+const SENT_TTL_MS = 2 * 3_600_000;
+const FICHA_KINDS: readonly string[] = ["certification", "personal", "resume"];
+
+function isFichaDocument(value: unknown): value is FichaDocument {
+  if (!value || typeof value !== "object") return false;
+  const d = value as Record<string, unknown>;
+  return (
+    typeof d.id === "string" &&
+    typeof d.kind === "string" &&
+    FICHA_KINDS.includes(d.kind) &&
+    typeof d.title === "string" &&
+    typeof d.file_name === "string" &&
+    typeof d.size === "number" &&
+    (d.expires_on === null || d.expires_on === undefined || typeof d.expires_on === "string")
+  );
+}
+
+/** A ficha enviada por este link nesta aba, dentro do prazo; null sem ela. */
+function loadSent(token: string): SentState | null {
+  try {
+    const raw = window.sessionStorage.getItem(SENT_KEY + token);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Partial<Record<keyof SentState, unknown>>;
+    const savedAt = typeof saved.savedAt === "number" ? saved.savedAt : 0;
+    const expires = typeof saved.upload_expires_at === "string" ? saved.upload_expires_at : undefined;
+    const until = expires ? Date.parse(expires) : savedAt + SENT_TTL_MS;
+    if (typeof saved.protocol !== "string" || !(until > Date.now())) {
+      window.sessionStorage.removeItem(SENT_KEY + token);
+      return null;
+    }
+    return {
+      protocol: saved.protocol,
+      email_verification: typeof saved.email_verification === "string" ? (saved.email_verification as SubmitResult["email_verification"]) : undefined,
+      upload_token: typeof saved.upload_token === "string" ? saved.upload_token : undefined,
+      upload_expires_at: expires,
+      login: typeof saved.login === "string" ? saved.login : "",
+      documents: Array.isArray(saved.documents) ? saved.documents.filter(isFichaDocument) : [],
+      savedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveSent(token: string, sent: SentState) {
+  try {
+    window.sessionStorage.setItem(SENT_KEY + token, JSON.stringify(sent));
+  } catch {
+    // Sem sessionStorage: o "Ficha enviada!" não volta depois de recarregar.
+  }
 }
 
 export default function TechnicianSignupPage() {
@@ -671,7 +757,17 @@ export default function TechnicianSignupPage() {
   const [form, setForm] = useState<FormState>(() => withKeptPhoto(own?.form ?? EMPTY, token));
   const [problem, setProblem] = useState<Problem | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [sent, setSent] = useState<SubmitResult | null>(null);
+  // A ficha enviada por este link nesta aba (volta depois de recarregar, até o prazo dos documentos). Só depois da
+  // hidratação: o servidor desenhou o "carregando".
+  const [sent, setSent] = useState<SentState | null>(() => loadSent(token));
+  const isClient = useIsClient();
+  const shownSent = isClient ? sent : null;
+  const cat = catalog.data;
+  const choices = useMemo(() => choicesOf(cat), [cat]);
+  // Só o que está no catálogo de agora conta e vai no envio: o rascunho pode trazer uma área ou aptidão que saiu dele.
+  const chosenAreas = form.service_areas.filter((key) => choices.areas.some((a) => a.key === key));
+  const skillLabels = new Map(choices.skills.map((s) => [s.key, s.label]));
+  const chosenSkills = form.skills.filter((s) => skillLabels.has(s.key));
   const formRef = useRef<HTMLFormElement>(null);
   const stepRef = useRef<HTMLParagraphElement>(null);
   const focusStepRef = useRef(false);
@@ -710,6 +806,11 @@ export default function TechnicianSignupPage() {
     const id = window.setTimeout(() => saveDraft(form, step, token), 600);
     return () => window.clearTimeout(id);
   }, [form, step, sent, pendingForeign, token]);
+
+  // A ficha enviada e os documentos que já subiram ficam nesta aba (a câmera pode fazer o navegador recarregar).
+  useEffect(() => {
+    if (sent) saveSent(token, sent);
+  }, [sent, token]);
 
   // A foto guardada para o "Recarregar" vale só para esta abertura: sai da aba logo depois de a ficha montar. Num efeito,
   // e não na leitura: um render descartado (suspensão, hidratação refeita) leria de novo e não a acharia mais.
@@ -809,7 +910,9 @@ export default function TechnicianSignupPage() {
       if (form.coverage_area.trim().length < 2) return fail("coverage_area", "Informe a região que você atende.");
     }
     if (index === 2) {
-      if (form.service_areas.length === 0) return fail("service_areas", "Escolha pelo menos uma área de atuação.");
+      // Sem nenhuma área no catálogo, o grupo nem aparece (e não é obrigatório).
+      if (choices.areas.length && chosenAreas.length === 0) return fail("service_areas", "Escolha pelo menos uma área de atuação.");
+      if (chosenAreas.length > MAX_AREAS) return fail("service_areas", `Até ${MAX_AREAS} áreas de atuação.`);
       const yearsText = form.years_experience.trim();
       if (yearsText) {
         const years = Number(yearsText);
@@ -817,8 +920,6 @@ export default function TechnicianSignupPage() {
           return fail("years_experience", "Anos de experiência: use um número de 0 a 60.");
         }
       }
-      const skill = skillProblem(form.skills);
-      if (skill) return fail("skills", skill.message, `skill_${skill.index}`);
       // O limite conta como a API grava (normalizeBio: sem as linhas em branco repetidas).
       if (normalizeBio(form.bio).length > PROFILE_LIMITS.bio) return fail("bio", `No máximo ${PROFILE_LIMITS.bio} caracteres.`);
       if (form.company_document.trim() && !isValidCnpj(form.company_document)) {
@@ -853,8 +954,6 @@ export default function TechnicianSignupPage() {
         setForm((f) => ({ ...f, rg_issuer: rg.rg_issuer, rg_state: rg.rg_state }));
       }
     }
-    // Cartão de aptidão em branco sai sem aviso.
-    if (step === 2 && form.skills.some((s) => !s.name.trim())) set("skills", form.skills.filter((s) => s.name.trim()));
     goTo(step + 1);
   }
 
@@ -909,9 +1008,12 @@ export default function TechnicianSignupPage() {
           city: form.city.trim(),
           state: form.state,
           photo: form.photo,
-          service_areas: form.service_areas,
+          service_areas: chosenAreas,
           years_experience: form.years_experience.trim() ? Number(form.years_experience) : null,
-          skills: form.skills.filter((s) => s.name.trim().length >= 2).map((s) => ({ ...s, name: s.name.trim() })),
+          // Pelo id do catálogo; na API de antes, pelo nome da sugestão.
+          skills: chosenSkills.map((s) =>
+            choices.skillsById ? { skill_id: s.key, level: s.level } : { name: skillLabels.get(s.key) ?? s.key, level: s.level },
+          ),
           certifications: text(form.certifications),
           tools: text(form.tools),
           // Com os parágrafos (as quebras de linha ficam).
@@ -932,7 +1034,7 @@ export default function TechnicianSignupPage() {
         },
       });
       clearDraft();
-      setSent(res);
+      setSent({ ...res, login: form.email.trim().toLowerCase(), documents: [], savedAt: Date.now() });
       window.scrollTo({ top: 0 });
     } catch (error) {
       if (error instanceof ApiError && error.status === 410) {
@@ -940,6 +1042,16 @@ export default function TechnicianSignupPage() {
         saveDraft(form, step, token);
         setExpiredWhileFilling(true);
         setCheck("invalid");
+        return;
+      }
+      // A lista de áreas ou de aptidões mudou enquanto a pessoa preenchia (ou uma regra delas): volta à Atuação, com a
+      // lista relida (o que saiu dela some da tela e do envio).
+      const listError = CATALOG_ERRORS[apiErrorCode(error) ?? ""];
+      if (listError) {
+        if (listError.refetch) void catalog.refetch();
+        const detail = error instanceof ApiError && typeof error.detail === "string" ? error.detail.trim() : "";
+        setStep(2);
+        setProblem({ field: listError.field, message: listError.message ?? (detail ? sentence(detail) : errorMessage(error)), inline: true });
         return;
       }
       const found = apiProblem(error);

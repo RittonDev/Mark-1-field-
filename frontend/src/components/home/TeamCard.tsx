@@ -1,8 +1,9 @@
 "use client";
 
+import { FileWarning } from "lucide-react";
 import { Card, CardHeader, Skeleton } from "@/components/ui";
 import { useCan } from "@/lib/permissions";
-import { MeterRow } from "./figures";
+import { MeterRow, ProblemText } from "./figures";
 import { hoursText, intFmt, MIN_BASE, pctText, share } from "./rules";
 import type { HomeTeam } from "./types";
 import { CardLink } from "./vitals/VitalCard";
@@ -10,12 +11,22 @@ import { CardLink } from "./vitals/VitalCard";
 /** Com menos técnicos que isto, "os 3 maiores" é quase todo mundo e não diz nada. */
 const TOP3_MIN_WORKED = 5;
 
+/** A lista de Técnicos que mostra exatamente o número da linha (Ativos com certificação vencida ou vencendo). */
+const CERTIFICATIONS_HREF = "/tecnicos?certificacao=vencendo&situacao=ativo";
+
+/** "1 técnico com certificação vencendo" | "12 técnicos com certificação vencendo". */
+export function certificationsDueText(count: number): string {
+  return `${intFmt(count)} ${count === 1 ? "técnico" : "técnicos"} com certificação vencendo`;
+}
+
 /**
  * A rede de técnicos nos últimos 30 dias: quantos atenderam, quanto dependem de poucos, o app e o tempo
- * na loja. O atalho "Técnicos" só aparece para quem tem acesso à tela.
+ * na loja. O atalho "Técnicos" só aparece para quem tem acesso à tela. No pé, com Técnicos Visualizar, os técnicos
+ * Ativos com certificação vencida ou vencendo (o link abre a lista com o mesmo número), também sem OS no período.
  */
 export function TeamCard({ team }: { team: HomeTeam | null }) {
   const canTechnicians = useCan("base.technicians");
+  const due = canTechnicians ? (team?.certifications_due ?? 0) : 0;
   return (
     <Card className="overflow-hidden">
       <CardHeader
@@ -34,6 +45,13 @@ export function TeamCard({ team }: { team: HomeTeam | null }) {
       ) : (
         <TeamBody team={team} />
       )}
+      {due > 0 ? (
+        <p className="border-t border-line px-5 py-3 text-sm">
+          <ProblemText tone="warning" icon={FileWarning} href={CERTIFICATIONS_HREF} title="Vencidas ou vencendo em até 30 dias">
+            {certificationsDueText(due)}
+          </ProblemText>
+        </p>
+      ) : null}
     </Card>
   );
 }

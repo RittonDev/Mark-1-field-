@@ -46,15 +46,18 @@ services:
       JWT_SECRET: ${SERVICE_PASSWORD_64_JWT}
       CORS_ORIGINS: ${PUBLIC_SCHEME:-https}://${CENTRAL_HOST:-chamados-homolog.maxxsystem.net},${PUBLIC_SCHEME:-https}://${TECNICO_HOST:-tecnico-homolog.maxxsystem.net}
       WEB_URL: ${PUBLIC_SCHEME:-https}://${CENTRAL_HOST:-chamados-homolog.maxxsystem.net}
+      # Endereço do app dos técnicos (PWA): o botão "Abrir o app" das páginas de link e da boas-vindas.
+      TECH_APP_URL: ${PUBLIC_SCHEME:-https}://${TECNICO_HOST:-tecnico-homolog.maxxsystem.net}
       MEDIA_ROOT: /data/media
       COMPANY_NAME: Maxx Field
       TZ: America/Sao_Paulo
       # Senha dos usuários de exemplo do seed (admin@exemplo.com.br e os outros): leia no Coolify, em
       # Environment Variables. O seed é idempotente: na segunda subida ele não faz nada.
       SEED_PASSWORD: ${SERVICE_PASSWORD_SEED}
-      # A API só recebe tráfego do gateway (rede interna): confiar no X-Forwarded-* que ele repassa
-      # (https e o IP do técnico, para o limite de tentativas de login).
-      FORWARDED_ALLOW_IPS: "*"
+      # Confia no X-Forwarded-* só de quem está nas redes internas (o gateway e o proxy do Coolify): o uvicorn
+      # lê o X-Forwarded-For da direita para a esquerda e para no primeiro IP público, o do técnico. Assim um
+      # cabeçalho forjado por quem acessa de fora não engana o limite de tentativas (login, CEP, ficha, senha).
+      FORWARDED_ALLOW_IPS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
     # Migrações, dados de exemplo (o seed recusa ENVIRONMENT=production, por isso só ele roda como
     # development) e a API. Uma instância só: a migração no start vale aqui.
     command:

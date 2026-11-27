@@ -233,6 +233,22 @@ powershell -ExecutionPolicy Bypass -File scripts/dev-preview.ps1
 
 Se o celular não abrir o app: o Windows bloqueia conexões vindas de outros aparelhos quando o Wi-Fi está marcado como **rede pública**. Em *Configurações → Rede e Internet → Wi-Fi → (sua rede)*, marque **Rede privada**, ou libere o Docker Desktop no firewall.
 
+## Homologação (técnicos testando pelo navegador)
+
+Ambiente de teste na mesma VPS da homologação do site (Coolify), com banco novo e só dados de exemplo:
+
+| Endereço | O que abre |
+|---|---|
+| `https://tecnico-homolog.maxxsystem.net` | app dos técnicos, instalável pelo navegador (PWA): Android pelo Chrome, iPhone pelo Safari |
+| `https://chamados-homolog.maxxsystem.net` | central |
+
+Tudo em [deploy/homolog/](deploy/homolog/README.md): `docker-compose.yml` para o Coolify (banco, Redis, API, central e
+um gateway nginx que serve o PWA e repassa `/api`), senhas geradas pelo próprio Coolify, o passo a passo de DNS e
+publicação e como testar a pilha inteira no computador antes. O PWA (manifesto, ícones, service worker, cabeçalhos de
+isolamento do SQLite web) está em [mobile/README.md](mobile/README.md#app-instalável-pelo-navegador-pwa-homologação).
+No PWA, o GPS da jornada só registra com o app aberto e os lembretes da visita não tocam; o app completo continua
+sendo o nativo.
+
 ## Sincronização com o GitHub
 
 Repositório: https://github.com/RittonDev/Mark-1-field- (branch `main`, **público**).

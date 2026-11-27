@@ -191,6 +191,11 @@ export interface HomeTeam {
   onsite_median_minutes: number | null;
   onsite_over: Ratio;
   onsite_limit_hours: number;
+  /**
+   * Técnicos Ativos (com ou sem acesso ao app) com certificação atual vencida ou vencendo em até 30 dias: o mesmo número
+   * da lista de Técnicos com ?certificacao=vencendo&situacao=ativo. null sem Técnicos Visualizar; a API de antes não manda.
+   */
+  certifications_due?: number | null;
 }
 
 export interface CustomerPulse {

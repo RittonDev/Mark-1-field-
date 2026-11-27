@@ -102,6 +102,32 @@ Requisitos:
   no `.env` da raiz. Sem isso, o login falha com "Não foi possível falar com…".
 - O endereço padrão da API na web é o mesmo host da página, porta 8000 (dá para trocar em **Alterar**).
 
+## App instalável pelo navegador (PWA, homologação)
+
+Para os técnicos testarem sem loja, o mesmo app sai como **PWA**: `https://tecnico-homolog.maxxsystem.net` instala
+pelo Chrome no Android (**Instalar app**) e pelo Safari no iPhone (**Compartilhar › Adicionar à Tela de Início**). O
+guia em PDF para os técnicos explica os dois. A publicação (Coolify, gateway nginx, DNS) está em
+[../deploy/homolog/README.md](../deploy/homolog/README.md).
+
+- **Build:** `npx expo export --platform web` com `"web": { "output": "single" }` em `app.json` (uma página só; o
+  servidor manda qualquer rota para o `index.html`) e `EXPO_PUBLIC_API_URL` apontando para a `/api/v1` da mesma
+  origem (o gateway repassa). Com a variável, o login não deixa trocar o servidor.
+- **`public/`** (copiada para o `dist/`): `index.html` (modelo do export: `lang="pt-BR"`, manifesto, `theme-color`
+  claro/escuro, metas do iOS, `apple-touch-icon` e o registro do service worker), `manifest.json` (Maxx Field,
+  `standalone`, retrato), `icons/` (os ícones da marca, os mesmos da central, mais o de 180 px do iPhone) e `sw.js`.
+- **Service worker (`public/sw.js`):** guarda a casca do app para ele abrir sem internet depois da primeira visita:
+  o `index.html` (rede primeiro, cópia guardada sem internet) e os pacotes com hash, fontes e o wasm do SQLite (cache
+  primeiro). Na instalação, ele baixa a lista do build (`precache.json`, gerada no Dockerfile do gateway) para toda
+  tela abrir offline. A `/api` nunca passa pelo cache: os dados ficam no SQLite, como no aparelho. Cada build troca
+  a versão (`__BUILD_ID__`) e apaga o cache anterior. Ele só registra em `https` ou num teste em `*.localhost`; na
+  pré-visualização do Metro (porta 8081), não.
+- **Isolamento:** o SQLite web usa `SharedArrayBuffer`, então o domínio do técnico manda
+  `Cross-Origin-Opener-Policy: same-origin` e `Cross-Origin-Embedder-Policy: require-corp` (o Safari não aceita
+  `credentialless`). Tudo o que o app carrega é da mesma origem, então nada é bloqueado.
+- **O que fica de fora no PWA** (a tabela acima vale): GPS da jornada só com o app aberto na tela, sem lembretes da
+  visita e sem push; a câmera abre pelo seletor do navegador. O app completo continua sendo o nativo (Expo Go hoje,
+  APK/loja depois).
+
 ## O que o app faz
 
 - **O técnico é terceiro: só o básico.** A OS mostra cliente, local (nome e endereço da loja), data e
