@@ -256,7 +256,7 @@ describe("levelRuleProblems: as mensagens da tela (as do servidor, com ponto)", 
     assert.deepEqual(levelRuleProblems(withCount({ gold: "51" })), {
       "count_bands.gold": "O início do Ouro tem de ser maior que o da Prata.",
     });
-    assert.deepEqual(levelRuleProblems(withCount({ diamond: "150" })), {
+    assert.deepEqual(levelRuleProblems(withCount({ diamond: "101" })), {
       "count_bands.diamond": "O início do Diamante tem de ser maior que o do Ouro.",
     });
     assert.deepEqual(levelRuleProblems(withPoints({ silver: "100" })), {
@@ -284,7 +284,7 @@ describe("levelRuleProblems: as mensagens da tela (as do servidor, com ponto)", 
     assert.deepEqual(levelRuleProblems(draft({ opening_bonus: "0" })), {});
     assert.deepEqual(levelRuleProblems(draft({ opening_bonus: "" })), { opening_bonus: "Use um número inteiro de 0 a 1.000.000." });
     // Faixa com erro: a abertura espera a faixa ser corrigida.
-    assert.deepEqual(levelRuleProblems(withPoints({ gold: "x" }), {}), {
+    assert.deepEqual(levelRuleProblems(withPoints({ gold: "x" })), {
       "points_bands.gold": "Use um número inteiro de 0 a 1.000.000.",
     });
   });
@@ -417,15 +417,23 @@ function pythonInt(text, name) {
   return undefined;
 }
 
-/** O bloco de uma atribuição Python de `name` (tupla, lista ou dict), do abre ao fecha correspondente. */
+/** O bloco de uma atribuição Python de `name` (tupla, lista ou dict), do abre ao fecha correspondente (sem contar o que está entre aspas). */
 function pythonBlock(text, name) {
   const start = new RegExp(`^${name}\\b[^=\\n]*=\\s*([({\\[])`, "m").exec(text);
   if (!start) return undefined;
   const open = start.index + start[0].length - 1;
   let depth = 0;
+  let quote = null;
   for (let i = open; i < text.length; i++) {
-    if ("({[".includes(text[i])) depth += 1;
-    else if (")}]".includes(text[i])) depth -= 1;
+    const ch = text[i];
+    if (quote) {
+      if (ch === "\\") i += 1;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if ("({[".includes(ch)) depth += 1;
+    else if (")}]".includes(ch)) depth -= 1;
     if (depth === 0) return text.slice(open + 1, i);
   }
   return undefined;
@@ -470,6 +478,7 @@ describe("leitura do backend (as funções da sonda)", () => {
 
     const schema = 'RULE_KEYS: tuple[str, ...] = (\n    "count_bands",\n    "points_bands",\n)\nRULE_LABELS: dict[str, str] = {\n    "count_bands": "Abertura por atendimentos",\n}\n';
     assert.deepEqual(pythonStrings(pythonBlock(schema, "RULE_KEYS")), ["count_bands", "points_bands"]);
+    assert.deepEqual(pythonStrings(pythonBlock('PAIRS = ("a)", "b")\n', "PAIRS")), ["a)", "b"]);
     assert.deepEqual(pythonLabels(pythonBlock(schema, "RULE_LABELS")), { count_bands: "Abertura por atendimentos" });
 
     const enums = 'class LevelEntryKind(StrEnum):\n    """Tipo."""\n\n    OPENING = "opening"\n    ON_TIME = "on_time"\n\n\nclass Outro(StrEnum):\n    OPENING = "x"\n';
