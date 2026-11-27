@@ -1054,7 +1054,15 @@ def _included(doc: TechnicianDocument) -> str:
 
 async def drop_for_application(db: AsyncSession, application_id: uuid.UUID) -> list[str]:
     """A ficha vai ser apagada: saem os documentos só dela (sem técnico; as versões vão em cascata).
-    Devolve as chaves dos arquivos para `remove_files` depois do commit."""
+    Devolve as chaves dos arquivos para `remove_files` depois do commit.
+
+    Trava a ficha antes (FOR UPDATE): o envio que está acontecendo (ficha_application a trava para
+    leitura) termina antes e o arquivo dele sai junto; o que chegar depois espera e recebe 410."""
+    await db.execute(
+        select(TechnicianApplication.id)
+        .where(TechnicianApplication.id == application_id)
+        .with_for_update()
+    )
     only_ficha = (
         TechnicianDocument.application_id == application_id,
         TechnicianDocument.user_id.is_(None),
