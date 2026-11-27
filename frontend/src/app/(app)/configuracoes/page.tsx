@@ -9,6 +9,8 @@ import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { CompanyProfileCard } from "@/components/CompanyProfileCard";
 import { FieldRulesCard } from "@/components/FieldRulesCard";
 import { NoAccess } from "@/components/NoAccess";
+import { LevelRulesCard } from "@/components/settings/LevelRulesCard";
+import { LevelRulesHistory } from "@/components/settings/LevelRulesHistory";
 import { ActiveState, FieldError, fold, RowEditButton, useLeaveGuard } from "@/components/settings/shared";
 import { TagRulesCard } from "@/components/settings/TagRulesCard";
 import { TechCatalogCard } from "@/components/settings/TechCatalogCard";
@@ -49,6 +51,7 @@ const SECTIONS = [
   { id: "empresa", label: "Empresa" },
   { id: "campo", label: "Campo" },
   { id: "tecnicos", label: "Técnicos" },
+  { id: "elo", label: "Elo" },
   { id: "sla", label: "SLA" },
   { id: "categorias", label: "Categorias" },
   { id: "etiquetas", label: "Etiquetas" },
@@ -688,7 +691,7 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Configurações"
-        description="Dados da empresa, regras de campo, catálogos dos técnicos, SLA, categorias, etiquetas automáticas, motivos e fluxo de status."
+        description="Dados da empresa, regras de campo, catálogos dos técnicos, elo, SLA, categorias, etiquetas automáticas, motivos e fluxo de status."
       />
       {!canEdit ? (
         <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink-muted shadow-elev-1">
@@ -713,6 +716,11 @@ export default function SettingsPage() {
           <TechCatalogCard kind="areas" readOnly={!canEdit} />
           <TechCatalogCard kind="skills" readOnly={!canEdit} />
           <TechCatalogCard kind="tools" readOnly={!canEdit} />
+        </section>
+        {/* Elo por pontos: quem altera e aprova vem da API (can_edit: supervisor ou administrador com Editar). */}
+        <section id="elo" className="flex scroll-mt-28 flex-col gap-4">
+          <LevelRulesCard />
+          <LevelRulesHistory />
         </section>
         <section id="sla" className="scroll-mt-28">
           <SlaCard editable={isAdmin} />
