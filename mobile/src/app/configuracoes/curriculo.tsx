@@ -5,7 +5,7 @@
 // memória; sem a API da gestão (hasCadastroE2), "Indisponível".
 
 import { router } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CadastroUnavailable } from "../../components/settings/CadastroUnavailable";
@@ -14,6 +14,7 @@ import { OfflineNotice } from "../../components/settings/OfflineNotice";
 import { ProfileGate } from "../../components/settings/ProfileGate";
 import { Text } from "../../components/Text";
 import { Button, Card, EmptyState, InfoBox } from "../../components/ui";
+import { sweepDocumentFiles } from "../../lib/documentFile";
 import { splitDocuments } from "../../lib/documentRules";
 import { openDocument } from "../../lib/documents";
 import { hasCadastroE2 } from "../../lib/profile";
@@ -29,6 +30,10 @@ export default function ResumeScreen() {
   const task = useResumeTask();
   const [menu, setMenu] = useState(false);
   useResumeRecovery();
+  // Cópias de um envio que o sistema interrompeu (fechou o app) saem do cache; a que ainda está subindo fica.
+  useEffect(() => {
+    sweepDocumentFiles();
+  }, []);
 
   if (gate.status === "unavailable") return <CadastroUnavailable onRetry={retry} />;
   if (gate.status !== "ready") return <ProfileGate load={gate} onRetry={retry} />;

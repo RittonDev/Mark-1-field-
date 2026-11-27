@@ -106,7 +106,7 @@ export default function DocumentScreen() {
   // formulário fica com o que tinha e o envio diz que ele não existe mais.
   const [kept, setKept] = useState<MyDocument | null>(live);
   if (live && live !== kept) setKept(live);
-  const doc = live ?? kept;
+  const doc = live ?? (kept?.id === id ? kept : null);
   const group: DocumentGroup | null = id ? (doc ? documentGroupOf(doc) : null) : groupOfParam(params.grupo);
   const title = group ? DOCUMENT_GROUP_TEXT[group][id ? "edit" : "create"] : "Documento";
   const header = <Stack.Screen options={{ title }} />;
@@ -376,6 +376,8 @@ function DocumentForm({ group, doc, full, stale }: { group: DocumentGroup; doc: 
                 max={expiresMax(today)}
                 initial={today}
                 todayShortcut={false}
+                // A validade costuma estar a anos de hoje: no iPhone, as rodas de dia, mês e ano.
+                iosDisplay="spinner"
                 disabled={sending}
               />
               {dueText ? <Text style={[styles.due, { color: dueColor }]}>{dueText}</Text> : null}

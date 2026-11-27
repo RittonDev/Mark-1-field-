@@ -2061,7 +2061,7 @@ function SkillCards({
                 ))}
               </div>
             ) : null}
-            <p role="status" className="text-xs text-ink-muted empty:hidden">
+            <p role="status" className="text-xs text-ink-muted">
               {term && !matches.length
                 ? `Nenhuma aptidão com “${query.trim()}”.`
                 : matches.length > SKILL_MATCHES

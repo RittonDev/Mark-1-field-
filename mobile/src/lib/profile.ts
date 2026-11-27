@@ -97,7 +97,7 @@ async function keep(profile: MyProfile, askedBy: string | null): Promise<MyProfi
   return profile;
 }
 
-/** O servidor já manda o perfil técnico (API nova): as telas de Atendimento só abrem com ele. */
+/** O servidor já manda o perfil técnico (API nova): as telas do Perfil profissional só abrem com ele. */
 export function hasTechnicalProfile(p: MyProfile | null | undefined): p is MyProfile {
   return (
     !!p &&

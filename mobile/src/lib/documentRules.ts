@@ -14,10 +14,7 @@
 
 import { DOCUMENT_ACCEPT, DOCUMENT_KIND, DOCUMENT_LIMITS, documentDue, documentDueText, documentFileKind } from "./constants";
 import { cleanText, foldName } from "./techProfileForm";
-import type { MyDocument, TechDocumentKind, TechDocumentUpdate } from "./types";
-
-/** Os tipos que o técnico vê e envia (o anexo interno é só da central). */
-export type MyDocumentKind = Exclude<TechDocumentKind, "internal">;
+import type { MyDocument, TechDocumentUpdate } from "./types";
 
 /** Os dois blocos da tela Documentos (o currículo tem tela própria). */
 export type DocumentGroup = "certification" | "personal";

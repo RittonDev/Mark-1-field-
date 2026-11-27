@@ -59,7 +59,7 @@ export default function ToolsScreen() {
     if (missing) void reloadToolCatalog();
   }, [missing]);
 
-  const header =<Stack.Screen options={{ headerRight: () => <SavingStatus status={status} /> }} />;
+  const header = <Stack.Screen options={{ headerRight: () => <SavingStatus status={status} /> }} />;
 
   if (gate.status === "unavailable") {
     return (

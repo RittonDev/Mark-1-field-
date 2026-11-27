@@ -1,5 +1,6 @@
-// Perfil técnico (Configurações › Atendimento): as regras das telas sem React nem React Native, para a sonda
-// (tests/tech-profile-form.test.mjs). Só importa valores de ./constants (que só tem `import type`).
+// Perfil técnico (Configurações › Perfil profissional): as regras das telas sem React nem React Native, para as sondas
+// (tests/tech-profile-form.test.mjs e tests/skill-catalog.test.mjs). Só importa valores de ./constants (que só tem
+// `import type`).
 //
 // - Nomes: `foldName` compara como o servidor (services/tech_profile.fold) e `cleanText` limpa como ele grava. Os dois
 //   tiram os caracteres de controle e de formatação (invisíveis, BOM, direção), como o servidor, para contarem igual.

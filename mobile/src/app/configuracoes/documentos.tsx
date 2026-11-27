@@ -154,7 +154,7 @@ export default function DocumentsScreen() {
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[c.primary]} tintColor={c.primary} />}
     >
-      <OfflineNotice />
+      <OfflineNotice text="Sem internet: conecte o aparelho para enviar ou excluir." />
       {stale ? <InfoBox message="Não foi possível atualizar agora. Os dados podem estar desatualizados." /> : null}
       {full ? <InfoBox message={DOCUMENTS_LIMIT_TEXT} /> : null}
 

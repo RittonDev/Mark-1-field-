@@ -15,7 +15,7 @@ import { hasTechnicalProfile, loadProfile, useProfile } from "./profile";
 import { session } from "./session";
 import type { MyProfile, TechCatalogItem, TechnicianTool } from "./types";
 
-/** Servidor antigo (o cadastro vem sem o perfil técnico): o que as telas de Atendimento mostram no lugar. */
+/** Servidor antigo (o cadastro vem sem o perfil técnico): o que as telas do Perfil profissional mostram no lugar. */
 export const UNAVAILABLE = {
   title: "Indisponível no momento",
   description: "O servidor ainda não tem esta parte do cadastro. Tente de novo mais tarde.",
