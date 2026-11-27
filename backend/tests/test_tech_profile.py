@@ -438,12 +438,25 @@ def _tech() -> User:
 AT = datetime(2026, 11, 19, 14, 2, 11, tzinfo=UTC)
 
 
-async def _save(user: User, **body: Any) -> dict[str, Any]:
+async def _save(user: User, *, via: str = tp.VIA_APP, **body: Any) -> dict[str, Any]:
     """`wanted` e, com mudança, `apply` (como o PATCH faz); devolve as partes mudadas."""
     data = MyProfileUpdate.model_validate(body)
     new = await tp.wanted(None, user, data)  # type: ignore[arg-type]
-    tp.apply(user, new, via=tp.VIA_APP, at=AT)
+    tp.apply(user, new, via=via, at=AT)
     return new
+
+
+def _fake_catalogs(
+    monkeypatch: pytest.MonkeyPatch, **kinds: dict[str, CatalogInfo]
+) -> dict[str, dict[str, CatalogInfo]]:
+    """Os catálogos de mentira (technician_catalogs.catalog), por tipo: "skill", "area"."""
+    catalogs: dict[str, dict[str, CatalogInfo]] = {"tool": {}, "skill": {}, "area": {}, **kinds}
+
+    async def fake_catalog(_: Any, kind: str) -> dict[str, CatalogInfo]:
+        return catalogs[kind]
+
+    monkeypatch.setattr(technician_catalogs, "catalog", fake_catalog)
+    return catalogs
 
 
 async def test_availability_and_transport_change_only_for_real() -> None:
@@ -476,37 +489,127 @@ async def test_availability_and_transport_change_only_for_real() -> None:
     }
 
 
-async def test_skills_keep_since_by_name() -> None:
+async def test_skills_keep_since_by_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Aptidões pelo id do catálogo (ou pelo nome, o app de antes): o "desde" fica pelo id, a nova
+    ganha hoje; mudou = o conjunto (id, nível); renomear no catálogo não é mudança do técnico; a
+    desativada enviada é ignorada e a guardada fica; repetida, desconhecida ou fora do catálogo:
+    422 do serviço, com o nome do catálogo."""
+    linux, fibra, nobreak, gone = (str(uuid.uuid4()) for _ in range(4))
+    skills = {
+        linux: CatalogInfo("Linux", True),
+        fibra: CatalogInfo("Fibra óptica (fusão)", True),
+        nobreak: CatalogInfo("Nobreaks", False),
+    }
+    _fake_catalogs(monkeypatch, skill=skills)
     user = _tech()
-    user.skills = [{"name": "Linux", "level": "basico", "since": "2025-03-10"}]
+    user.skills = [
+        {"skill_id": linux, "level": "basico", "since": "2025-03-10"},
+        {"skill_id": nobreak, "level": "avancado", "since": "2024-01-02"},
+    ]
     today = datetime.now(TZ).date().isoformat()
-    # Outro nível e outra caixa: a aptidão é a mesma e mantém o "desde"; a nova ganha hoje.
+    # Outro nível pelo id e a nova pelo nome (sem acento e maiúsculas): o "desde" do Linux fica,
+    # a nova ganha hoje; a desativada guardada continua (e a enviada é ignorada).
     new = await _save(
         user,
         skills=[
-            {"name": "linux", "level": "avancado"},
-            {"name": "  Fibra óptica  (fusão) ", "level": "basico"},
+            {"skill_id": linux, "level": "avancado"},
+            {"name": "  FIBRA optica  (fusao) ", "level": "basico"},
+            {"skill_id": nobreak, "level": "basico"},
         ],
     )
     assert new["skills"] == [
-        {"name": "Fibra óptica (fusão)", "level": "basico", "since": today},
-        {"name": "linux", "level": "avancado", "since": "2025-03-10"},
+        {"skill_id": fibra, "level": "basico", "since": today},
+        {"skill_id": linux, "level": "avancado", "since": "2025-03-10"},
+        {"skill_id": nobreak, "level": "avancado", "since": "2024-01-02"},
     ]
     assert user.skills == new["skills"]
-    # Reordenar não é mudança.
-    same = [
-        {"name": "linux", "level": "avancado"},
-        {"name": "Fibra óptica (fusão)", "level": "basico"},
+    assert user.tech_profile_stamps["skills"] == {"at": AT.isoformat(), "via": "app"}
+    # Só as ativas saem, com o nome do catálogo.
+    assert [(s.name, s.level, s.since) for s in tp.skills_of(user, skills)] == [
+        ("Fibra óptica (fusão)", "basico", today),
+        ("Linux", "avancado", "2025-03-10"),
     ]
+    # Reordenar (ou mandar pelo nome a mesma) não é mudança.
+    same = [{"name": "Fibra óptica (fusão)", "level": "basico"}, {"skill_id": linux, "level": "avancado"}]
     assert await _save(user, skills=same) == {}
-    # Trocar só a grafia é mudança e grava; o "desde" fica.
-    new = await _save(user, skills=[{"name": "Linux", "level": "avancado"}])
-    assert new["skills"] == [{"name": "Linux", "level": "avancado", "since": "2025-03-10"}]
-    # Renomear de verdade recomeça o "desde".
-    new = await _save(user, skills=[{"name": "Linux Debian", "level": "avancado"}])
-    assert new["skills"] == [{"name": "Linux Debian", "level": "avancado", "since": today}]
-    assert [s.model_dump() for s in tp.skills_of(user)] == new["skills"]
-    assert await _save(user, skills=None) == {"skills": []}
+    # Renomear no catálogo vale para todos e não muda o técnico.
+    skills[linux] = CatalogInfo("Linux (Debian e Ubuntu)", True)
+    renamed = [{"skill_id": linux, "level": "avancado"}, {"skill_id": fibra, "level": "basico"}]
+    assert await _save(user, skills=renamed) == {}
+    assert tp.skills_of(user, skills)[1].name == "Linux (Debian e Ubuntu)"
+    # Sair e voltar recomeça o "desde"; pela central, o carimbo é "central".
+    assert await _save(user, via=tp.VIA_CENTRAL, skills=[{"skill_id": fibra, "level": "basico"}])
+    assert user.tech_profile_stamps["skills"]["via"] == "central"
+    new = await _save(user, skills=[{"skill_id": linux, "level": "basico"}])
+    assert {item["skill_id"]: item["since"] for item in new["skills"]} == {
+        linux: today,
+        nobreak: "2024-01-02",
+    }
+    # Recusas, com o nome do catálogo (a central recebe as mesmas).
+    for sent, code, text in (
+        ([{"skill_id": gone, "level": "basico"}], "SKILL_NOT_FOUND", "Aptidão não encontrada"),
+        ([{"name": "Linux Debian", "level": "basico"}], "SKILL_UNKNOWN_NAME", "Atualize o app"),
+        (
+            [{"skill_id": linux, "level": "basico"}, {"name": "LINUX (debian e ubuntu)", "level": "avancado"}],
+            "SKILL_REPEATED",
+            "Aptidão repetida: Linux (Debian e Ubuntu)",
+        ),
+    ):
+        with pytest.raises(CodedError) as caught:
+            await _save(user, skills=sent)
+        assert caught.value.code == code and str(caught.value).startswith(text), sent
+    # Limpar tira as ativas; a desativada continua guardada (volta se a central reativar).
+    assert await _save(user, skills=None) == {
+        "skills": [{"skill_id": nobreak, "level": "avancado", "since": "2024-01-02"}]
+    }
+    assert tp.skills_of(user, skills) == []
+    skills[nobreak] = CatalogInfo("Nobreaks", True)
+    assert [s.name for s in tp.skills_of(user, skills)] == ["Nobreaks"]
+
+
+async def test_areas_hide_inactive_and_keep_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Áreas de atuação (`area_ids`, a lista inteira): ids do catálogo; a desativada enviada é
+    ignorada e a guardada fica; mudou = o conjunto; id desconhecido: AREA_NOT_FOUND; mais de 20 no
+    fim (com as guardadas): AREAS_LIMIT. Só as ativas saem, na ordem do nome."""
+    redes, wifi, cftv, gone = (str(uuid.uuid4()) for _ in range(4))
+    areas = {
+        redes: CatalogInfo("Redes e cabeamento estruturado", True, "redes"),
+        wifi: CatalogInfo("Wi-Fi e access points", True, "wifi"),
+        cftv: CatalogInfo("CFTV e câmeras IP", False, "cftv"),
+    }
+    catalogs = _fake_catalogs(monkeypatch, area=areas)
+    user = _tech()
+    user.service_areas = [cftv]
+    assert await _save(user, area_ids=[]) == {}  # só a desativada guardada: nada muda
+    new = await _save(user, area_ids=[wifi, redes, wifi, cftv])
+    assert new == {"areas": sorted([redes, wifi, cftv])}
+    assert user.service_areas == sorted([redes, wifi, cftv])
+    assert user.tech_profile_stamps == {"areas": {"at": AT.isoformat(), "via": "app"}}
+    assert await _save(user, area_ids=[redes, wifi]) == {}
+    assert tp.active_area_ids(user, areas) == [uuid.UUID(redes), uuid.UUID(wifi)]
+    assert [ref.name for ref in tp.areas_of(user, areas)] == [
+        "Redes e cabeamento estruturado",
+        "Wi-Fi e access points",
+    ]
+    with pytest.raises(CodedError) as caught:
+        await _save(user, area_ids=[redes, gone])
+    assert (caught.value.code, str(caught.value)) == (
+        "AREA_NOT_FOUND",
+        "Área não encontrada. Atualize a lista",
+    )
+    # 19 ativas a mais + a desativada guardada = 21: passa do limite.
+    many = {str(uuid.uuid4()): CatalogInfo(f"Área {n:02d}", True) for n in range(19)}
+    catalogs["area"] = {**areas, **many}
+    assert await _save(user, area_ids=list(many)[:18] + [redes])  # 18 + Redes + CFTV = 20
+    with pytest.raises(CodedError) as caught:
+        await _save(user, area_ids=[*many, redes])
+    assert (caught.value.code, str(caught.value)) == ("AREAS_LIMIT", "Até 20 áreas de atuação")
+    # Limpar tira as ativas; a desativada continua e volta quando reativam.
+    assert await _save(user, via=tp.VIA_CENTRAL, area_ids=None) == {"areas": [cftv]}
+    assert user.tech_profile_stamps["areas"]["via"] == "central"
+    assert tp.active_area_ids(user, areas) == []
+    areas[cftv] = CatalogInfo("CFTV e câmeras IP", True, "cftv")
+    assert tp.active_area_ids(user, areas) == [uuid.UUID(cftv)]
 
 
 async def test_education_ids_and_order() -> None:
@@ -582,10 +685,20 @@ def test_apply_writes_new_objects_and_stamps() -> None:
     assert stamps.skills is not None and stamps.skills.via == "ficha"
     assert stamps.availability is not None and stamps.availability.via == "app"
     assert stamps.tools is None and stamps.transport is None and stamps.education is None
+    assert stamps.areas is None
     assert tp.latest_stamp(user) == AT
     tp.apply(user, {"name": "ignorado"}, via=tp.VIA_APP, at=AT)
     assert set(user.tech_profile_stamps) == {"skills", "availability"}
     assert tp.latest_stamp(_tech()) is None
+    # A central grava com o carimbo dela; as áreas vão para users.service_areas.
+    later = AT + timedelta(hours=1)
+    area = str(uuid.uuid4())
+    tp.apply(user, {"areas": [area]}, via=tp.VIA_CENTRAL, at=later)
+    assert user.service_areas == [area]
+    stamps = tp.stamps_of(user)
+    assert stamps.areas is not None and (stamps.areas.via, stamps.areas.at) == ("central", later)
+    assert tp.latest_stamp(user) == later
+    assert tp.PARTS == ("tools", "availability", "transport", "skills", "education", "areas")
 
 
 # ------------------------------------------------------ ficha da homologação
@@ -650,35 +763,51 @@ def test_ficha_transport(vehicle: dict[str, Any], license_: bool, transport: lis
     assert stamps == ({} if transport is None else {"transport": FICHA_STAMP})
 
 
-def test_ficha_skills_and_nothing_informed() -> None:
+def test_ficha_skills_areas_and_nothing_informed() -> None:
+    """A ficha guarda as aptidões {skill_id, level} e as áreas por id (conferidas no envio): a
+    aprovação copia, com o "desde" = o dia do envio e os carimbos "ficha"; item estragado (sem id,
+    nível desconhecido, o formato de antes só com o nome) e id repetido ficam de fora."""
+    linux, cameras = (str(uuid.uuid4()) for _ in range(2))
     skills = [
-        {"name": " linux ", "level": "basico"},
-        {"name": "Linux", "level": "avancado"},
-        {"name": "Câmeras  Hikvision", "level": "intermediario"},
-        {"name": " a ", "level": "basico"},
-        {"name": "Nobreaks", "level": "expert"},
+        {"skill_id": linux, "level": "basico"},
+        {"skill_id": linux.upper(), "level": "avancado"},
+        {"skill_id": cameras, "level": "intermediario"},
+        {"skill_id": "x", "level": "basico"},
+        {"skill_id": str(uuid.uuid4()), "level": "expert"},
+        {"name": "Nobreaks", "level": "basico"},
         {"level": "basico"},
+        "Redes",
     ]
     since = CREATED.astimezone(TZ).date().isoformat()
     profile = tp.from_ficha(_ficha(skills=skills))
     assert profile["skills"] == [
-        {"name": "Câmeras Hikvision", "level": "intermediario", "since": since},
-        {"name": "linux", "level": "basico", "since": since},
+        {"skill_id": linux, "level": "basico", "since": since},
+        {"skill_id": cameras, "level": "intermediario", "since": since},
     ]
     assert profile["tech_profile_stamps"] == {"skills": FICHA_STAMP}
-    many = [{"name": f"Aptidão {n:02d}", "level": "basico"} for n in range(tp.MAX_SKILLS + 5)]
+    many = [{"skill_id": str(uuid.uuid4()), "level": "basico"} for _ in range(tp.MAX_SKILLS + 5)]
     assert len(tp.from_ficha(_ficha(skills=many))["skills"]) == tp.MAX_SKILLS
+
+    redes, wifi = sorted(str(uuid.uuid4()) for _ in range(2))
+    profile = tp.from_ficha(_ficha(service_areas=[wifi, redes, wifi.upper(), "redes", None]))
+    assert profile["service_areas"] == [redes, wifi]
+    assert profile["tech_profile_stamps"] == {"areas": FICHA_STAMP}
+    for broken in ("redes", None, {"redes": True}, []):
+        assert tp.from_ficha(_ficha(service_areas=broken))["service_areas"] == []
+
     assert tp.from_ficha(_ficha()) == {
         "availability": [],
         "transport_modes": [],
         "has_driver_license": False,
         "skills": [],
+        "service_areas": [],
         "tech_profile_stamps": {},
     }
 
 
 def test_ficha_since_is_the_local_day() -> None:
-    profile = tp.from_ficha(_ficha(skills=[{"name": "Linux", "level": "basico"}]))
+    skill_id = str(uuid.uuid4())
+    profile = tp.from_ficha(_ficha(skills=[{"skill_id": skill_id, "level": "basico"}]))
     if settings.TIMEZONE == "America/Sao_Paulo":
         assert profile["skills"][0]["since"] == "2026-11-19"
     assert profile["skills"][0]["since"] == CREATED.astimezone(TZ).date().isoformat()
