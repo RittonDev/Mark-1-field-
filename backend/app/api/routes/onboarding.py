@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.enums import ApplicationStatus
 from app.core.security import InvalidToken, create_token, decode_token
 from app.db.base import utcnow
-from app.models import OnboardingInvite, TechnicianApplication
+from app.models import OnboardingInvite, TechnicianApplication, User
 from app.models.user_change import VIA_FICHA
 from app.schemas.account import EmailQueued
 from app.schemas.onboarding import (
@@ -32,7 +32,14 @@ from app.schemas.onboarding import (
     catalog,
 )
 from app.schemas.user import UserOut
-from app.services import account, login_guard, mail, user_history
+from app.services import (
+    account,
+    login_guard,
+    mail,
+    technician_catalogs,
+    technician_documents,
+    user_history,
+)
 from app.services import onboarding as svc
 
 # Formulário que o técnico abre pelo link, sem login.
@@ -56,8 +63,11 @@ MAX_RESENDS_HOUR = 5
 
 
 @public.get("/catalog", response_model=OnboardingCatalog)
-async def onboarding_catalog() -> OnboardingCatalog:
-    return catalog()
+async def onboarding_catalog(db: DB) -> OnboardingCatalog:
+    """As listas da ficha: as áreas de atuação e as aptidões ativas dos catálogos de Configurações
+    › Técnicos (`key` = o id), a disponibilidade, os níveis, os veículos e a versão do aviso."""
+    areas, skills = await technician_catalogs.public_lists(db)
+    return catalog(areas, skills)
 
 
 @public.get("/{token}", response_model=InviteCheck)
@@ -75,7 +85,8 @@ async def submit_application(
 ) -> ApplicationReceived:
     """Recebe a ficha e põe na fila o link de validação do e-mail (sai logo depois do commit):
     `email_verification` diz se foi para a fila, se o envio está desligado ou se o endereço não
-    recebe mensagens."""
+    recebe mensagens. `upload_token` (2 h, só desta ficha) envia os arquivos depois: POST
+    /public/onboarding-documents."""
     try:
         # Trava a linha do convite: duas fichas juntas no link de uso único não passam as duas.
         invite = await svc.active_invite(db, token, lock=True)
@@ -97,7 +108,13 @@ async def submit_application(
     if row is not None and verification == "queued":
         mail.deliver_soon([row.id])
     await svc.publish_submitted(application)
-    return ApplicationReceived(protocol=svc.protocol(application), email_verification=verification)
+    upload_token, upload_expires_at = technician_documents.ficha_upload_token(application)
+    return ApplicationReceived(
+        protocol=svc.protocol(application),
+        email_verification=verification,
+        upload_token=upload_token,
+        upload_expires_at=upload_expires_at,
+    )
 
 
 # ------------------------------------------------------------------ convites
@@ -144,11 +161,15 @@ async def list_applications(
     db: DB,
     _: OnboardingView,
     status_: Annotated[ApplicationStatus | None, Query(alias="status")] = None,
-) -> list[TechnicianApplication]:
+) -> list[ApplicationSummary]:
+    """As fichas, a mais nova primeiro (até 500), com `areas`: as áreas gravadas (também as
+    desativadas) pelo nome atual do catálogo."""
     stmt = select(TechnicianApplication).order_by(TechnicianApplication.created_at.desc())
     if status_ is not None:
         stmt = stmt.where(TechnicianApplication.status == status_)
-    return list(await db.scalars(stmt.limit(500)))
+    applications = list(await db.scalars(stmt.limit(500)))
+    areas = await technician_catalogs.catalog(db, "area") if applications else {}
+    return [svc.summary(application, areas) for application in applications]
 
 
 @router.get("/applications/pending-count")
@@ -159,7 +180,9 @@ async def pending_count(db: DB, _: OnboardingView) -> dict[str, int]:
     return {"pending": count or 0}
 
 
-def _detail(application: TechnicianApplication) -> ApplicationDetail:
+async def _detail(db: DB, application: TechnicianApplication, viewer: User) -> ApplicationDetail:
+    """A ficha inteira: as áreas e as aptidões pelo nome atual do catálogo (também as desativadas)
+    e os arquivos enviados depois da ficha, com os links de 30 min de quem pediu."""
     out = ApplicationDetail.model_validate(application)
     out.invite_label = application.invite.label if application.invite else None
     out.has_password = application.password_hash is not None
@@ -169,14 +192,16 @@ def _detail(application: TechnicianApplication) -> ApplicationDetail:
         out.photo_url = (
             f"{settings.API_PREFIX}/onboarding/applications/{application.id}/photo?token={token}"
         )
+    out.areas, out.skills = await svc.catalog_parts(db, application)
+    out.documents = await technician_documents.application_documents(db, application.id, viewer)
     return out
 
 
 @router.get("/applications/{application_id}", response_model=ApplicationDetail)
 async def get_application(
-    application_id: uuid.UUID, db: DB, _: OnboardingView
+    application_id: uuid.UUID, db: DB, user: OnboardingView
 ) -> ApplicationDetail:
-    return _detail(await svc.get_application(db, application_id))
+    return await _detail(db, await svc.get_application(db, application_id), user)
 
 
 @router.get("/applications/{application_id}/photo", include_in_schema=False)
@@ -196,11 +221,12 @@ async def application_photo(application_id: uuid.UUID, token: str, db: DB) -> Fi
 
 @router.delete("/applications/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_application(application_id: uuid.UUID, db: DB, _: OnboardingDelete) -> Response:
-    """Pedido de exclusão do titular (LGPD): apaga a ficha pendente ou reprovada e a foto."""
+    """Pedido de exclusão do titular (LGPD): apaga a ficha pendente ou reprovada, a foto e os
+    arquivos."""
     application = await svc.get_application(db, application_id)
-    photo = await svc.delete_application(db, application)
+    keys = await svc.delete_application(db, application)
     await db.commit()
-    svc.remove_photos([photo])  # só depois da exclusão gravada
+    technician_documents.remove_files(keys)  # só depois da exclusão gravada
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -211,10 +237,11 @@ async def approve_application(
     user: OnboardingEdit,
     body: ApplicationApprove | None = None,
 ) -> ApplicationApproved:
-    """Aprova num passo (corpo opcional): o técnico entra na base com tudo o que a ficha coletou e
-    já acessa o app com o e-mail e a senha da ficha. Sem senha, a boas-vindas leva o link para
-    criar só com o e-mail validado (`password_link`); sem a validação, a central gera a senha
-    provisória. CPF já de outro usuário: 409. `welcome` diz se a boas-vindas foi para a fila."""
+    """Aprova num passo (corpo opcional): o técnico entra na base com tudo o que a ficha coletou
+    (os arquivos dela também) e já acessa o app com o e-mail e a senha da ficha. Sem senha, a
+    boas-vindas leva o link para criar só com o e-mail validado (`password_link`); sem a validação,
+    a central gera a senha provisória. CPF já de outro usuário: 409. `welcome` diz se a boas-vindas
+    foi para a fila."""
     application = await svc.get_application(db, application_id, lock=True)
     approval = await svc.approve(db, application, body or ApplicationApprove(), user)
     await db.commit()
@@ -243,7 +270,7 @@ async def reject_application(
     await db.commit()
     await db.refresh(application, ["reviewed_by"])
     await account.publish_onboarding_updated(application, "rejected")
-    return _detail(application)
+    return await _detail(db, application, user)
 
 
 @router.post("/applications/{application_id}/reopen", response_model=ApplicationDetail)
@@ -258,7 +285,7 @@ async def reopen_application(
     await db.commit()
     await db.refresh(application, ["reviewed_by", "reopened_by"])
     await account.publish_onboarding_updated(application, "reopened")
-    return _detail(application)
+    return await _detail(db, application, user)
 
 
 @router.post(

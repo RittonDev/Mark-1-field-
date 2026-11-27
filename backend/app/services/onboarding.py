@@ -27,7 +27,7 @@ import hashlib
 import re
 import secrets
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -46,6 +46,7 @@ from app.models import EmailOutbox, OnboardingInvite, Team, TechnicianApplicatio
 from app.models.user_change import VIA_FICHA
 from app.schemas import personal
 from app.schemas.account import EmailQueuedStatus
+from app.schemas.common import Ref
 from app.schemas.onboarding import (
     PRIVACY_VERSION,
     ApplicationApprove,

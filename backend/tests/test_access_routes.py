@@ -120,6 +120,14 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("POST", "/technicians/{user_id}/operational-status"): (("base.technicians",), E),
     ("POST", "/technicians/{user_id}/email-verification"): (("base.technicians",), E),
     ("POST", "/technicians/{user_id}/password-reset-link"): (("base.technicians",), E),
+    # Gestão (Entrega 2): documentos e avaliações na ficha (o anexo interno pede Editar também
+    # para ler, no serviço).
+    ("GET", "/technicians/{user_id}/documents"): (("base.technicians",), V),
+    ("POST", "/technicians/{user_id}/documents"): (("base.technicians",), E),
+    ("POST", "/technicians/{user_id}/documents/{document_id}/replace"): (("base.technicians",), E),
+    ("PATCH", "/technicians/{user_id}/documents/{document_id}"): (("base.technicians",), E),
+    ("DELETE", "/technicians/{user_id}/documents/{document_id}"): (("base.technicians",), E),
+    ("GET", "/technicians/{user_id}/ratings"): (("base.technicians",), V),
     ("GET", "/onboarding/invites"): (("base.onboarding",), V),
     ("GET", "/onboarding/applications"): (("base.onboarding",), V),
     ("GET", "/onboarding/applications/pending-count"): (("base.onboarding",), V),
@@ -165,9 +173,17 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("PUT", "/settings/expenses"): (("setup.settings",), E),
     ("PUT", "/settings/field"): (("setup.settings",), E),
     ("PUT", "/ticket-tag-rules"): (("setup.settings",), E),
-    # Ferramental dos técnicos (Configurações › Técnicos): incluir, renomear e desativar.
+    # Catálogos de Configurações › Técnicos (Ferramental, Áreas de atuação e Aptidões): incluir,
+    # renomear, desativar e excluir só o que nunca foi usado.
     ("POST", "/technician-tools"): (("setup.settings",), E),
     ("PATCH", "/technician-tools/{tool_id}"): (("setup.settings",), E),
+    ("DELETE", "/technician-tools/{tool_id}"): (("setup.settings",), E),
+    ("POST", "/technician-areas"): (("setup.settings",), E),
+    ("PATCH", "/technician-areas/{area_id}"): (("setup.settings",), E),
+    ("DELETE", "/technician-areas/{area_id}"): (("setup.settings",), E),
+    ("POST", "/technician-skills"): (("setup.settings",), E),
+    ("PATCH", "/technician-skills/{skill_id}"): (("setup.settings",), E),
+    ("DELETE", "/technician-skills/{skill_id}"): (("setup.settings",), E),
 }
 
 # Consultas compartilhadas: toda a gestão (nunca por tela).
@@ -222,6 +238,10 @@ CORE = {
     ("PATCH", "/part-requests/{request_id}"),
     ("POST", "/tickets/{ticket_id}/report-link/rotate"),
     ("DELETE", "/tickets/{ticket_id}/report-link"),
+    # Avaliação do cliente registrada pela central na OS concluída (a fila vale).
+    ("GET", "/tickets/{ticket_id}/ratings"),
+    ("PUT", "/tickets/{ticket_id}/ratings/{technician_id}"),
+    ("DELETE", "/tickets/{ticket_id}/ratings/{technician_id}"),
     # Cadastro operacional que o analista mantém pela API desde antes (fora da matriz).
     ("POST", "/unproductive-reasons"),
     ("PATCH", "/unproductive-reasons/{reason_id}"),
@@ -258,8 +278,10 @@ OTHER: dict[tuple[str, str], str] = {
     # Equipe (gestão e técnico)
     ("GET", "/settings/field"): "SU",
     ("GET", "/unproductive-reasons"): "SU",
-    # O catálogo do ferramental: o técnico recebe só as ativas (o app marca no perfil técnico).
+    # Os catálogos do perfil técnico: o técnico recebe só os ativos (o app escolhe neles).
     ("GET", "/technician-tools"): "SU",
+    ("GET", "/technician-areas"): "SU",
+    ("GET", "/technician-skills"): "SU",
     ("POST", "/tickets/{ticket_id}/take"): "SU",
     ("GET", "/tickets/{ticket_id}/worklogs"): "SU",
     ("POST", "/tickets/{ticket_id}/worklogs"): "SU",
@@ -299,6 +321,12 @@ OTHER: dict[tuple[str, str], str] = {
     ("PUT", "/me/profile/payout-methods/{method_id}"): "TECHNICIAN",
     ("POST", "/me/profile/payout-methods/{method_id}/preferred"): "TECHNICIAN",
     ("POST", "/me/profile/payout-methods/{method_id}/remove"): "TECHNICIAN",
+    # Documentos do próprio técnico (nunca o anexo interno) e o link de 30 min de cada um.
+    ("POST", "/me/profile/documents"): "TECHNICIAN",
+    ("POST", "/me/profile/documents/{document_id}/replace"): "TECHNICIAN",
+    ("PATCH", "/me/profile/documents/{document_id}"): "TECHNICIAN",
+    ("DELETE", "/me/profile/documents/{document_id}"): "TECHNICIAN",
+    ("GET", "/me/profile/documents/{document_id}/link"): "TECHNICIAN",
     # Notas fiscais (o próprio técnico, na aba Faturamento)
     ("GET", "/me/invoices"): "TECHNICIAN",
     ("GET", "/me/invoices/payouts"): "TECHNICIAN",
@@ -323,6 +351,11 @@ OTHER: dict[tuple[str, str], str] = {
     ("GET", "/public/onboarding/catalog"): "PUB",
     ("GET", "/public/onboarding/{token}"): "PUB",
     ("POST", "/public/onboarding/{token}"): "PUB",
+    # Os arquivos da ficha já enviada (o upload_token de 2 h vem no corpo) e o download dos
+    # documentos por link assinado.
+    ("POST", "/public/onboarding-documents"): "PUB",
+    ("POST", "/public/onboarding-documents/{document_id}/remove"): "PUB",
+    ("GET", "/technician-documents/{file_id}/download"): "PUB",
     ("GET", "/onboarding/applications/{application_id}/photo"): "PUB",
     ("GET", "/public/quotes/{token}"): "PUB",
     ("POST", "/public/quotes/{token}/approve"): "PUB",

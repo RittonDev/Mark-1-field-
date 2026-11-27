@@ -29,19 +29,28 @@ na operação) e as mudanças [{field, from, to}] já com o texto da tela:
   "Ag. 0001" → "Ag. 0002"), o código do banco ("banco 999") e "outra conta", "outra chave" ou
   "outro documento" só no "to"; `_methods_delta`),
   unavailability ("20/12/2026 a 05/01/2027"; só os períodos que não acabaram) e o perfil técnico
-  (o técnico muda no app; services/tech_profile.py): tools com os nomes em ordem alfabética
-  ("Escada, Multímetro"), availability em turnos ("sáb · tarde e noite"), skills "Linux (Básico)"
-  em ordem alfabética, education "Técnico em redes · Escola Exemplo · Técnico · desde 02/2024 (em
-  andamento)" pelo início, separados por "; " (listas com mais de 10 itens: os 10 primeiros e " e
-  mais N"); transport segue de → para, "Carro, Moto · com CNH", null quando não informado.
+  (o técnico no app e a central; services/tech_profile.py): tools com os nomes em ordem
+  alfabética ("Escada, Multímetro"), availability em turnos ("sáb · tarde e noite"), skills
+  "Linux (Básico)" em ordem alfabética (o nome atual do catálogo; o que saiu dele, "Aptidão
+  removida"), areas pelos nomes em ordem alfabética ("Área removida"), education "Técnico em
+  redes · Escola Exemplo · Técnico · desde 02/2024 (em andamento)" pelo início, separados por
+  "; " (listas com mais de 10 itens: os 10 primeiros e " e mais N"); transport segue de → para,
+  "Carro, Moto · com CNH", null quando não informado;
+- as linhas de `record` com a frase em "to" ("from" null): documents e internal_attachments (os
+  documentos do técnico e os anexos internos, services/technician_documents.py), ratings (as
+  avaliações do cliente, services/technician_ratings.py) e favorites (as decisões de favorito por
+  cidade, services/technician_favorites.py, com a nota do pedido em `note`).
 As linhas antigas de pix/pix_holder (a chave única de antes das formas de recebimento) continuam
 legíveis. E-mail e celular ficam em claro (a central desfaz uma troca indevida); chave PIX e conta
 nunca. Quem não tem Pagamentos lê o histórico com as formas de recebimento como "***" e sem o
-titular (`hide_payout`). As partes do perfil técnico comparam como tech_profile.wanted (a rota do
-app só grava com mudança no histórico).
+titular (`hide_payout`); quem não tem Técnicos em Editar, os anexos internos como "***"
+(`hide_internal`). As partes do perfil técnico comparam como tech_profile.wanted (a rota só grava
+com mudança no histórico).
 
 Uso: `before = await snapshot(db, user)`, aplica, `changes = await track(db, user, before, ...)`
-(ou `record` com as mudanças especiais) e, depois do commit, `publish_changed`. O `snapshot` faz
+(ou `record` com as mudanças especiais) e, depois do commit, `publish_changed`: o aviso
+profile.changed vai à central e, quando a mudança não veio do app e é de algo que o app mostra
+(APP_FIELDS), o me.profile_changed vai só ao técnico (o app relê GET /me/profile). O `snapshot` faz
 flush antes de ler (a sessão é autoflush=False): as formas de recebimento recém-gravadas contam.
 """
 
@@ -59,15 +68,61 @@ from app.core.enums import UserRole
 from app.core.labels import ROLE_LABELS
 from app.db.base import utcnow
 from app.models import Team, TechnicianPayoutMethod, User, UserChange
-from app.models.user_change import VIA_CENTRAL
+from app.models.user_change import VIA_APP, VIA_CENTRAL
 from app.schemas import personal
 from app.schemas.my_profile import UserChangeItem, UserChangeOut
 from app.services import tech_profile, unavailability
 from app.services.errors import WorkflowError
+from app.services.technician_catalogs import CatalogInfo
 
 log = logging.getLogger(__name__)
 
 EVENT = "profile.changed"
+# Só para o técnico (o app relê GET /me/profile): a central, a aprovação da ficha ou o link do
+# e-mail mudou algo que o app mostra. Sem dados (= ME_PROFILE_EVENT de lib/constants.ts).
+ME_EVENT = "me.profile_changed"
+# Os campos do histórico que o app mostra (MyProfile): o me.profile_changed vai quando algum deles
+# muda por outro caminho que não o app. Nunca pela situação, pelo acesso, pela senha, pelos
+# favoritos, pelas avaliações nem pelos anexos internos (o técnico é terceiro).
+APP_FIELDS = frozenset(
+    {
+        "name",
+        "email",
+        "email_pending",
+        "email_verified",
+        "phone",
+        "phone_secondary",
+        "cpf",
+        "rg",
+        "birth_date",
+        "job_title",
+        "team",
+        "home_city",
+        "home_state",
+        "coverage_area",
+        "address_line",
+        "address_number",
+        "address_complement",
+        "address_district",
+        "address_zip",
+        "bio",
+        "company_document",
+        "company_name",
+        "company_trade_name",
+        "vehicle",
+        "unavailability",
+        "tools",
+        "availability",
+        "transport",
+        "skills",
+        "education",
+        "areas",
+        "documents",
+        "avatar",
+        "payout_methods",
+        "payout_preferred",
+    }
+)
 
 # GET /technicians/{id}/changes em páginas: `before` estragado (o nosso tem uns 70 caracteres).
 CHANGES_PAGE_ERROR = "Página do histórico inválida. Recarregue a ficha."
@@ -98,13 +153,20 @@ _RESET_ALERT_FIELDS = frozenset(
 # As formas de recebimento no histórico de quem não tem Pagamentos.
 PIX_HIDDEN = "***"
 _PAYOUT_FIELDS = frozenset({"pix", "payout_methods", "payout_preferred"})
+# Os anexos internos no histórico de quem não tem Técnicos em Editar (a tela diz "Anexos internos
+# alterados").
+INTERNAL_FIELD = "internal_attachments"
+INTERNAL_HIDDEN = "***"
 
 # Partes em lista: "from" = o que saiu, "to" = o que entrou.
 DELTA_FIELDS = frozenset(
-    {"tools", "availability", "skills", "education", "payout_methods", "unavailability"}
+    {"tools", "availability", "skills", "education", "areas", "payout_methods", "unavailability"}
 )
-# Ferramenta marcada que não está mais no catálogo (a API não exclui; só apagando no banco).
+# Item guardado que não está mais no catálogo (excluir só vale para o que nunca foi usado: só
+# apagando no banco).
 TOOL_GONE = "Ferramenta removida"
+SKILL_GONE = "Aptidão removida"
+AREA_GONE = "Área removida"
 
 # O destino do pagamento mudou sem mudar a máscara: as marcas neutras do "to" (o dado não aparece)
 # e o último recurso, quando nada do que se pode mostrar difere.
@@ -168,21 +230,41 @@ def _alphabetical(labels: Iterable[str]) -> list[str]:
     return sorted(labels, key=lambda label: (tech_profile.fold(label), label))
 
 
-def _tools(user: User, catalog: Mapping[str, tech_profile.ToolInfo]) -> tuple[Any, ItemsText]:
+def _names_text(catalog: Mapping[str, CatalogInfo], gone: str) -> ItemsText:
+    """Os ids pelos nomes do catálogo, em ordem alfabética (o que saiu do catálogo: `gone`)."""
+
     def text(ids: Iterable[str]) -> str | None:
-        names = [catalog[key].name if key in catalog else TOOL_GONE for key in ids]
+        names = [catalog[key].name if key in catalog else gone for key in ids]
         return tech_profile.items_text(_alphabetical(names))
 
-    return tech_profile.tool_set(user), text
+    return text
+
+
+def _tools(user: User, catalog: Mapping[str, CatalogInfo]) -> tuple[Any, ItemsText]:
+    return tech_profile.tool_set(user), _names_text(catalog, TOOL_GONE)
+
+
+def _areas(user: User, catalog: Mapping[str, CatalogInfo]) -> tuple[Any, ItemsText]:
+    return tech_profile.area_set(user.service_areas), _names_text(catalog, AREA_GONE)
 
 
 def _slots_text(slots: Iterable[str]) -> str | None:
     return tech_profile.slots_text(slots) or None
 
 
-def _skills_text(items: Iterable[tuple[Any, Any]]) -> str | None:
-    labels = [tech_profile.skill_label({"name": name, "level": level}) for name, level in items]
-    return tech_profile.items_text(_alphabetical(labels))
+def _skills(user: User, catalog: Mapping[str, CatalogInfo]) -> tuple[Any, ItemsText]:
+    """(skill_id, nível) de cada aptidão; o texto pelo nome atual do catálogo: "Linux (Básico)"."""
+
+    def text(items: Iterable[tuple[Any, Any]]) -> str | None:
+        labels = [
+            tech_profile.skill_label(
+                {"name": catalog[key].name if key in catalog else SKILL_GONE, "level": level}
+            )
+            for key, level in items
+        ]
+        return tech_profile.items_text(_alphabetical(labels))
+
+    return tech_profile.skill_set(user.skills or []), text
 
 
 def _education_text(items: Iterable[tuple[Any, ...]]) -> str | None:
@@ -369,11 +451,14 @@ async def _payout_rows(db: AsyncSession, user_id: uuid.UUID) -> list[TechnicianP
 
 async def snapshot(db: AsyncSession, user: User) -> Snapshot:
     """O cadastro agora, campo a campo. Vai ao banco pelo nome do grupo, pelas formas de
-    recebimento e, com ferramenta marcada, pelos nomes delas; antes, flush (a sessão é
-    autoflush=False: o que a gravação acabou de mudar precisa estar no banco)."""
+    recebimento e, com ferramenta, aptidão ou área guardada, pelos nomes delas (só os ids do
+    técnico: technician_catalogs.picked); antes, flush (a sessão é autoflush=False: o que a
+    gravação acabou de mudar precisa estar no banco)."""
     await db.flush()
     team = await db.get(Team, user.team_id) if user.team_id else None
     tools = await tech_profile.user_tools(db, user)
+    skills = await tech_profile.user_skills(db, user)
+    areas = await tech_profile.user_areas(db, user)
     methods = await _payout_rows(db, user.id)
     preferred = next((m for m in methods if m.preferred), None)
     periods = unavailability.current(user.unavailability or [], personal.local_today())
@@ -421,8 +506,9 @@ async def snapshot(db: AsyncSession, user: User) -> Snapshot:
         "availability": (tech_profile.slot_set(user), _slots_text),
         "transport": _transport(user),
         "vehicle": _vehicle(user),
-        "skills": (tech_profile.skill_set(user.skills or []), _skills_text),
+        "skills": _skills(user, skills),
         "education": (tech_profile.education_set(user.education or []), _education_text),
+        "areas": _areas(user, areas),
     }
 
 
@@ -586,12 +672,32 @@ def hide_payout(rows: list[UserChange]) -> list[UserChangeOut]:
     return out
 
 
+def hide_internal(rows: list[UserChangeOut]) -> list[UserChangeOut]:
+    """O histórico para quem não tem Técnicos em Editar: os itens dos anexos internos com "from"
+    e "to" como "***" (null continua null; a tela diz "Anexos internos alterados"). Devolve cópias."""
+    out: list[UserChangeOut] = []
+    for row in rows:
+        changes = [
+            item.model_copy(update={"from_": _hidden(item.from_), "to": _hidden(item.to)})
+            if item.field == INTERNAL_FIELD
+            else item
+            for item in row.changes
+        ]
+        out.append(row.model_copy(update={"changes": changes}))
+    return out
+
+
 def for_viewer(rows: list[UserChange], viewer: User) -> list[UserChange] | list[UserChangeOut]:
-    """GET /technicians/{id}/changes: como está para quem tem Pagamentos (a ficha mostra as Formas
-    de recebimento); para quem só tem Técnicos, `hide_payout`."""
-    if permissions.of(viewer).can("commercial.payouts"):
+    """GET /technicians/{id}/changes: como está para quem tem Pagamentos e Técnicos em Editar; sem
+    Pagamentos, `hide_payout` (a ficha não mostra as Formas de recebimento); sem Técnicos em
+    Editar, `hide_internal` (os anexos internos são só de quem edita)."""
+    access = permissions.of(viewer)
+    payouts = access.can("commercial.payouts")
+    edit = access.can("base.technicians", "edit")
+    if payouts and edit:
         return rows
-    return hide_payout(rows)
+    out = [UserChangeOut.model_validate(row) for row in rows] if payouts else hide_payout(rows)
+    return out if edit else hide_internal(out)
 
 
 async def after_reset(
@@ -627,9 +733,12 @@ async def publish_changed(
     actor: User | None,
     after_reset: dict[str, str] | None = None,
 ) -> None:
-    """Depois do commit: avisa a central (quem tem Técnicos ou Pagamentos; o técnico e o cliente
-    não recebem). `after_reset` (ver a função de mesmo nome) vai em data só quando existe. Falhar o
-    aviso não desfaz a gravação."""
+    """Depois do commit: avisa a central (profile.changed, para quem tem Técnicos ou Pagamentos;
+    o técnico e o cliente não recebem). `after_reset` (ver a função de mesmo nome) vai em data só
+    quando existe. Com `via` diferente de "app" (a central, a aprovação da ficha, o link do e-mail)
+    e algum campo de APP_FIELDS, avisa também o técnico: me.profile_changed endereçado só a ele,
+    sem dados nem quem fez (o app relê GET /me/profile). Falhar um aviso não desfaz a gravação nem
+    segura o outro."""
     from app.services.realtime import bus  # realtime puxa os modelos da OS: import tardio
 
     fields = event_fields(changes)
@@ -653,3 +762,16 @@ async def publish_changed(
         )
     except Exception:
         log.exception("Falha ao avisar a mudança no cadastro do técnico")
+    if via == VIA_APP or APP_FIELDS.isdisjoint(fields):
+        return
+    try:
+        await bus.publish(
+            {
+                "type": ME_EVENT,
+                "occurred_at": utcnow().isoformat(),
+                "data": {},
+                "audience": {"user_ids": [str(user.id)]},
+            }
+        )
+    except Exception:
+        log.exception("Falha ao avisar o técnico da mudança no cadastro")

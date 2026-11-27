@@ -11,7 +11,9 @@ tira ninguém da lista.
 
 Só entra quem pode receber a OS: acesso ao app liberado, Ativo na operação
 (services/technician_status.py) e sem período de indisponibilidade nos dias da visita (sem
-horário: hoje). As áreas de atuação são as do cadastro (users.service_areas).
+horário: hoje). As áreas de atuação são as do cadastro (users.service_areas: ids do catálogo de
+Configurações › Técnicos), comparadas com a OS pelo código das 10 áreas de antes da Entrega 2
+(area_catalog.code): a área nova, sem código, ou desativada não entra na comparação.
 """
 
 import math
@@ -25,11 +27,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.enums import ApplicationStatus, OperationalStatus, TicketStatus, UserRole
+from app.core.enums import OperationalStatus, TicketStatus, UserRole
+from app.core.text import fold
 from app.models import (
     Location,
     Project,
-    TechnicianApplication,
     Ticket,
     User,
 )
@@ -37,6 +39,7 @@ from app.models.ticket import ticket_helpers
 from app.services import (
     geo,
     tech_profile,
+    technician_catalogs,
     technician_favorites,
     technician_levels,
     technician_regions,
@@ -46,7 +49,8 @@ from app.services import (
 from app.services.schedule import busy_people, visit_end
 from app.services.workflow import OPEN_STATUSES
 
-# Palavras do tipo de serviço/categoria da OS -> área de atuação da homologação.
+# Palavras do tipo de serviço/categoria da OS -> o código da área de atuação (area_catalog.code,
+# das 10 áreas de antes da Entrega 2).
 AREA_KEYWORDS = {
     "impress": "impressoras",
     "multifunc": "impressoras",
@@ -70,18 +74,6 @@ AREA_KEYWORDS = {
     "energia": "energia",
     "pdv": "automacao",
     "automacao": "automacao",
-}
-AREA_LABEL = {
-    "impressoras": "impressoras",
-    "computadores": "computadores",
-    "redes": "redes",
-    "wifi": "Wi-Fi",
-    "cftv": "CFTV",
-    "seguranca": "segurança",
-    "telefonia": "telefonia",
-    "servidores": "servidores",
-    "energia": "energia",
-    "automacao": "PDV",
 }
 
 
@@ -192,6 +184,14 @@ async def _day_loads(
     return loads
 
 
+def _area_codes(stored: object, code_of: dict[str, str]) -> set[str]:
+    """Os códigos das áreas guardadas no técnico (ids do catálogo, em texto) que estão ativas e têm
+    código; o resto (área nova sem código, desativada, valor estragado) fica de fora."""
+    if not isinstance(stored, list):
+        return set()
+    return {code_of[str(value).lower()] for value in stored if str(value).lower() in code_of}
+
+
 def _distance_points(km: float | None) -> float:
     if km is None:
         return 0
@@ -243,23 +243,13 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
 
     # Em jornada: a aberta e dentro do limite (a esquecida aberta não conta).
     on_shift = set(await active_shifts(db, ids))
-    # Áreas de atuação: as do cadastro; sem elas, as da ficha aprovada (cadastro de antes da
-    # cópia na aprovação).
-    without_areas = [t.id for t in techs if not t.service_areas]
-    ficha_areas = (
-        {
-            user_id: list(found or [])
-            for user_id, found in await db.execute(
-                select(TechnicianApplication.user_id, TechnicianApplication.service_areas).where(
-                    TechnicianApplication.user_id.in_(without_areas),
-                    TechnicianApplication.status == ApplicationStatus.APPROVED,
-                )
-            )
-        }
-        if without_areas
-        else {}
-    )
-    areas = {t.id: set(t.service_areas or ficha_areas.get(t.id) or []) for t in techs}
+    # Áreas de atuação: as do cadastro (ids do catálogo), pelo código das ativas que têm um (a
+    # regra de technician_catalogs.area_codes); o motivo leva o nome atual da área. Uma leitura do
+    # catálogo para os dois.
+    catalog = await technician_catalogs.catalog(db, "area")
+    code_of = {key: info.code for key, info in catalog.items() if info.is_active and info.code}
+    area_name = {info.code: info.name for info in catalog.values() if info.code}
+    areas = {t.id: _area_codes(t.service_areas, code_of) for t in techs}
     point = await technician_regions.point_for_place(
         db,
         location=target.location,
@@ -340,7 +330,8 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
         matched = target.areas & areas.get(tech.id, set())
         if matched:
             score += 15
-            reasons.append("Atende " + ", ".join(sorted(AREA_LABEL[a] for a in matched)))
+            names = sorted((area_name[code] for code in matched), key=lambda n: (fold(n), n))
+            reasons.append("Atende " + ", ".join(names))
         if target.start and target.end:
             is_busy = tech.id in busy
             if is_busy:

@@ -29,8 +29,10 @@ from app.api.routes import (
     reports,
     schedule,
     sync,
+    technician_documents,
     technician_favorites,
     technician_levels,
+    technician_ratings,
     technicians,
     tickets,
     tracking,
@@ -50,6 +52,11 @@ for module in (
     # /technicians/levels/refresh, /me/level, /me/stats e /me/history.
     technician_levels,
     technicians,
+    # Documentos do técnico: /me/profile/documents/... (app), /technicians/{id}/documents/...
+    # (central) e o download por link assinado (/technician-documents/{id}/download).
+    technician_documents,
+    # Avaliação do cliente na OS concluída: /tickets/{id}/ratings/... e /technicians/{id}/ratings.
+    technician_ratings,
     customers,
     tickets,
     parts,
@@ -83,6 +90,8 @@ for module in (
 ):
     api_router.include_router(module.router)
 api_router.include_router(onboarding.public)
+# Arquivos da ficha da homologação já enviada (pelo upload_token): /public/onboarding-documents.
+api_router.include_router(technician_documents.public)
 api_router.include_router(quotes.public)
 api_router.include_router(client_report.public)
 # Busca de CEP dos formulários de endereço (sem login; logado, o limite é por pessoa).
