@@ -2946,6 +2946,461 @@ dos e-mails fica 180 dias e os links, até 30 dias depois de vencer; a ficha rep
 análise. O aviso de privacidade "2026-11-26" cita tudo isso: ver "Aviso de privacidade" em
 [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
 
+## Gestão dos técnicos (2026-11-26)
+
+**Por quê.** O levantamento do QA sobre o cadastro e a gestão dos técnicos (V2) pediu o que faltava para a central gerir
+a base de terceiros: os catálogos de **Áreas de atuação** e **Aptidões** ao lado do Ferramental, em Configurações ›
+Técnicos (excluir só o que nunca foi usado); as áreas e as aptidões do técnico escolhidas nesses catálogos, no app, na
+ficha pública e na central; a central editando o perfil profissional; **documentos e certificações** com validade (no
+app, na ficha pública e na central), o **currículo** e os **anexos internos** (só da central); os favoritos geridos pela
+ficha do técnico, com histórico; os filtros novos da lista de Técnicos, na URL e na planilha; e a **avaliação do
+cliente**, registrada pela central na OS concluída. A ficha do técnico e as Configurações do app ganham as seções
+Documentos, Currículo e Áreas de atuação, e a ficha, também Avaliações e Anexos internos (`CADASTRO_DELIVERY = 2`;
+Desempenho, da Entrega 3, segue fora). Código: `services/{technician_catalogs,technician_documents,technician_ratings}.py`,
+`core/text.py` (`visible`, `fold`, `clean`, que saíram de `services/tech_profile.py`),
+`models/{catalog,technician_document,technician_rating}.py`, `schemas/{technician_document,technician_rating}.py`, as
+rotas em `api/routes/{catalog,technician_documents,technician_ratings}.py` e as mudanças em
+`services/{tech_profile,technicians,my_profile,user_history,technician_favorites,unavailability,suggestions,onboarding,home}.py`.
+Testes: `test_gestao_migration.py`, `test_technician_catalogs.py`, `test_technician_documents.py`,
+`test_technician_ratings.py`, `test_central_tech_profile.py`, `test_profile_compat.py` e `test_favorites_history.py`.
+
+**Dados** (migração `c8f2a4e6b0d3`, depois de `b7e2d4f6a8c1`).
+- `area_catalog` (`ServiceArea`) e `skill_catalog` (`Skill`), em `models/catalog.py`: `id`, `name` (até 80), `name_key`
+  (até 160: o nome sem acento, sem maiúsculas e com os espaços juntados, `core/text.fold`; único:
+  `uq_area_catalog_name_key`, `uq_skill_catalog_name_key`), `is_active` (padrão true), `used_at` (o 1º uso: o item entrou
+  no perfil de alguém pelo app, pela central ou pela ficha) e as datas. Só a área tem `code` (até 32, único:
+  `uq_area_catalog_code`): o código das 10 áreas fixas de antes ("redes"). `tool_catalog` ganha `name_key` (NOT NULL,
+  `uq_tool_catalog_name_key`; o `uq_tool_catalog_name` fica) e `used_at`. Os três modelos gravam o `name_key` sozinhos
+  (`@validates("name")`, cortado em 160 como na migração).
+- `technician_documents` (`TechnicianDocument`): `user_id` (→ users, CASCADE) ou `application_id` (→
+  technician_applications, SET NULL), pelo menos um (`ck_technician_documents_owner`); `version_of_id` (→
+  technician_documents, CASCADE: a versão de um arquivo substituído, com `replaced_at`: `…_version`); `kind`
+  (`certification`, `personal`, `resume` ou `internal`; o anexo interno nunca é da ficha: `…_internal`), `title` (até
+  80), `expires_on` (só na certificação: `…_expiry`), `file_name`, `content_type`, `size_bytes`, `storage_key`,
+  `uploaded_at`, `uploaded_by_id` (SET NULL), `uploaded_via` (`app`, `central` ou `ficha`) e `client_upload_id` (único).
+  Índices parciais: `uq_technician_documents_user_resume` (um currículo atual por técnico) e
+  `ix_technician_documents_expiry` (as certificações atuais com validade).
+- `technician_ratings` (`TechnicianRating`): `ticket_id` e `technician_id` (CASCADE), `score` (1 a 5:
+  `ck_technician_ratings_score`), `comment`, `rater_name` (até 120), `source` (`central`; `client` fica para o formulário
+  do cliente, depois), `created_by_id` e `updated_by_id` (SET NULL); uma por OS e técnico
+  (`uq_technician_ratings_ticket_technician`).
+- Nas colunas JSONB, os ids em texto: `users.service_areas` e `technician_applications.service_areas` (as áreas),
+  `users.skills` `[{skill_id, level, since}]` e `technician_applications.skills` `[{skill_id, level}]`. O carimbo
+  `tech_profile_stamps` ganha a parte `areas` e a `via` `central`.
+- Passos de dados (laço simples; funções puras testadas em `tests/test_gestao_migration.py`, sem importar `app.*`):
+  1. as 10 áreas fixas entram no catálogo, com o código;
+  2. as aptidões: as 16 sugestões de antes e depois os nomes já gravados pelos técnicos e pelas fichas (por
+     `created_at`), sem repetir pelo `name_key`;
+  3. o `name_key` do ferramental: as repetidas por ele fundem na mais antiga (ativa se alguma estava) e `users.tool_ids`
+     troca o id;
+  4. as áreas dos técnicos e das fichas viram ids (o código desconhecido vira uma área nova, ativa);
+  5. as aptidões dos técnicos viram `{skill_id, level, since}` (sem "desde": o dia local do cadastro) e as das fichas,
+     `{skill_id, level}`; nível desconhecido vira "basico";
+  6. o 1º uso do que está nos técnicos e nas fichas e das ferramentas e aptidões citadas no histórico do cadastro;
+  7. o carimbo `areas` (via "ficha", na data da ficha aprovada ou do cadastro) de quem tem áreas.
+
+  Rodar de novo não muda nada.
+- Downgrade (`alembic downgrade b7e2d4f6a8c1`, com o código novo): apaga os eventos de OS `rating_set` e
+  `rating_removed`, tira do histórico do cadastro os itens `internal_attachments` (a linha que fica vazia sai), volta as
+  aptidões a `{name, level[, since]}` e as áreas a códigos, tira o carimbo `areas`, troca o `central` dos carimbos por
+  `app` e apaga as tabelas novas e as colunas `name_key` e `used_at` do ferramental. Perdas: os documentos e as
+  avaliações (os arquivos ficam em `MEDIA_ROOT/documents/`: limpeza manual), as áreas sem código, as aptidões que saíram
+  do catálogo, as ferramentas fundidas e o 1º uso.
+
+**Rotas** (prefixo `/api/v1`; a classificação está em `tests/test_access_routes.py`; V = Visualizar, E = Editar).
+
+| Rota | Guarda | Entrada → saída |
+|---|---|---|
+| `GET /technician-areas` · `/technician-skills` · `/technician-tools` (muda) | a equipe (o técnico, só os ativos) | `active` (só a gestão) → `TechCatalogItem[]` |
+| `POST /technician-areas` · `/technician-skills` · `/technician-tools` | Configurações E | `{name}` → 201 `TechCatalogItem` |
+| `PATCH /technician-areas/{area_id}` · `/technician-skills/{skill_id}` · `/technician-tools/{tool_id}` | Configurações E | `{name?, is_active?}` → `TechCatalogItem` |
+| `DELETE /technician-areas/{area_id}` · `/technician-skills/{skill_id}` · `/technician-tools/{tool_id}` | Configurações E | → 204; com uso, 409 `CATALOG_IN_USE` |
+| `GET /public/onboarding/catalog` (muda) | sem login | + `skills`; `service_areas` e `skills` com `key` = id |
+| `POST /public/onboarding/{token}` (muda) | sem login | áreas e aptidões do catálogo → + `upload_token`, `upload_expires_at` |
+| `POST /public/onboarding-documents` | `upload_token` | multipart → 201 `FichaDocument` |
+| `POST /public/onboarding-documents/{document_id}/remove` | `upload_token` | `{token}` → 204 |
+| `GET /onboarding/applications`, `…/{application_id}`, `POST …/approve` (mudam) | Homologação V / E | + `areas`; aptidões com `skill_id`; + `documents` |
+| `GET`/`PATCH /me/profile` (mudam) | técnico | + `area_ids` e `documents`; aptidões por `skill_id` |
+| `POST /me/profile/documents` · `POST …/{document_id}/replace` | técnico | multipart → `MyProfile` |
+| `PATCH /me/profile/documents/{document_id}` · `DELETE …/{document_id}` | técnico | `TechDocumentUpdate` / nada → `MyProfile` |
+| `GET /me/profile/documents/{document_id}/link` | técnico | → `DocumentLink` |
+| `GET /technicians`, `GET`/`PATCH /technicians/{user_id}` (mudam) | Técnicos V / E | campos novos; o `PATCH` grava o perfil profissional |
+| `GET /technicians/{user_id}/documents` | Técnicos V (anexo interno só com E) | → `TechDocument[]` |
+| `POST /technicians/{user_id}/documents` · `POST …/{document_id}/replace` | Técnicos E | multipart → 201/200 `TechDocument` |
+| `PATCH /technicians/{user_id}/documents/{document_id}` · `DELETE …/{document_id}` | Técnicos E | `TechDocumentUpdate` → `TechDocument` / 204 |
+| `GET /technician-documents/{file_id}/download?token=` | link assinado | → o arquivo |
+| `GET /technicians/{user_id}/ratings` | Técnicos V | `limit` 1 a 100 (padrão 20), `offset` → `TechnicianRatings` |
+| `GET /tickets/{ticket_id}/ratings` | a gestão, com a OS na fila | → `TicketRatings` |
+| `PUT`/`DELETE /tickets/{ticket_id}/ratings/{technician_id}` | a gestão, com a OS na fila | `RatingIn` → `TechnicianRating` / 204 |
+| `PUT`/`DELETE /technicians/favorites/{technician_id}` (mudam) | Técnicos E | como antes, + o histórico |
+| `GET /home/overview` (muda) | como antes | + `pulse.team.certifications_due` |
+
+**Erros com código** (`CodedError`, `{"detail", "code"}` com o status da tabela; os 422 sem código seguem `{"detail"}`).
+
+| HTTP | `code` | `detail` |
+|---|---|---|
+| 409 | `CATALOG_NAME_TAKEN` | "Já existe uma área com este nome" (ou aptidão, ferramenta) |
+| 409 | `CATALOG_IN_USE` | "Esta área já foi usada: desative para tirar das escolhas" (ou aptidão, ferramenta) |
+| 422 | `AREA_NOT_FOUND` | "Área não encontrada. Atualize a lista" |
+| 422 | `AREAS_LIMIT` | "Até 20 áreas de atuação" |
+| 422 | `AREA_REQUIRED` | "Escolha pelo menos uma área de atuação" (ficha pública) |
+| 422 | `SKILL_NOT_FOUND` | "Aptidão não encontrada. Atualize a lista" |
+| 422 | `SKILL_UNKNOWN_NAME` | "Atualize o app: as aptidões agora são escolhidas numa lista" (o nome fora do catálogo, do app ou da ficha de antes) |
+| 422 | `SKILL_REPEATED` | "Aptidão repetida: {nome do catálogo}" |
+| 422 | `DOCUMENTS_LIMIT` | "Limite de 30 documentos e certificações. Exclua um para enviar outro" |
+| 422 | `INTERNAL_LIMIT` | "Limite de 30 anexos internos. Exclua um para enviar outro" |
+| 404 | `DOCUMENT_NOT_FOUND` | "Este documento não existe mais. Atualize a lista" |
+| 401 | `LINK_EXPIRED` / `LINK_INVALID` | "Link expirado" (vencido ou estragado) / "Link inválido" (de outro arquivo), no download |
+| 404 | `FILE_MISSING` | "Arquivo não encontrado" (download) |
+| 410 | `FICHA_UPLOAD_GONE` | "O prazo para enviar arquivos desta ficha acabou. Fale com a central pelo WhatsApp" |
+| 409 | `APPLICATION_NOT_PENDING` | "A ficha já foi analisada. Fale com a central pelo WhatsApp" (arquivos da ficha; o reenvio da validação segue com o texto de 25/11/2026) |
+| 422 | `FICHA_DOCUMENTS_LIMIT` | "Limite de 10 arquivos na ficha" |
+| 409 | `RATING_NOT_CONCLUDED` | "Só a OS concluída recebe avaliação" |
+| 422 | `RATING_NOT_IN_TICKET` | "Este técnico não está nesta OS" |
+| 404 | `RATING_NOT_FOUND` | "Avaliação não encontrada" |
+
+Rótulos dos erros de validação (`main.FIELD_LABELS`): `area_ids` e `service_areas` "Áreas de atuação", `skill_id`
+"Aptidão", `title` "Título", `expires_on` "Validade", `file` "Arquivo", `score` "Nota", `comment` "Comentário" e
+`rater_name` "Quem avaliou". Reserva dos índices únicos (`CONSTRAINT_MESSAGES`, para dois pedidos juntos que passem a
+trava): "Já existe uma área com este nome" (e aptidão, ferramenta), "Já há um currículo. Atualize a lista", "Este arquivo
+já foi recebido. Atualize a lista" e "Este técnico já foi avaliado nesta OS. Atualize a OS".
+
+**Catálogos** (`services/technician_catalogs.py`, rotas em `api/routes/catalog.py`): Ferramental, Áreas de atuação e
+Aptidões com uma regra só.
+- Nome limpo (`core/text.clean`) de 2 a 80: curto, 422 "Informe o nome da área" (aptidão, ferramenta; `{"detail"}`);
+  acima de 80, a lista do pydantic com "No máximo 80 caracteres". Repetido pelo `name_key` (sem acento e sem maiúsculas,
+  também entre os desativados): 409 `CATALOG_NAME_TAKEN`, conferido sob a trava da tabela (`pg_advisory_xact_lock`):
+  "Multímetro" e "multimetro" juntos dão 201 e 409; o índice único fica de reserva.
+- Limite, ativos e desativados (= `CATALOG_LIMITS`): 100 áreas, 300 aptidões e 200 ferramentas (422 "O catálogo aceita
+  até 100 áreas", "… 300 aptidões", "… 200 ferramentas").
+- `PATCH` muda só o que vem (null é ignorado; 404 "Área não encontrada", "Aptidão não encontrada" ou "Ferramenta não
+  encontrada"). Renomear mantém o id e vale para todos. Desativar tira das escolhas (o app, a ficha pública e os filtros
+  da web) e o item fica guardado com quem tinha; reativado, volta.
+- `DELETE` só do que nunca foi usado: `in_use` = `used_at` gravado, ou algum técnico ou ficha com o item agora (a
+  ferramenta não tem ficha). Com uso, 409 `CATALOG_IN_USE` ("desative"). A linha fica travada até o fim: quem grava o
+  item ao mesmo tempo espera, e o `used_at` dele conta.
+- `TechCatalogItem {id, name, is_active, technicians, applications, in_use}`, em ordem alfabética (sem acento e sem
+  maiúsculas): `technicians`, os do papel técnico, com ou sem acesso, que têm o item (a regra dos filtros da lista);
+  `applications`, as fichas de qualquer situação que o citam (Ferramental: 0, a ficha tem o ferramental em texto livre).
+  O técnico recebe só os ativos, com os três null, e o `active` é ignorado.
+- Catálogo inicial: as 10 áreas fixas de antes, com o código (Impressoras e multifuncionais, Computadores e notebooks,
+  Redes e cabeamento estruturado, Wi-Fi e access points, CFTV e câmeras IP, Alarmes e controle de acesso, Telefonia e
+  PABX, Servidores e storage, Nobreaks e energia, Automação comercial (PDV)); as 16 sugestões de aptidão de antes
+  (`technician_catalogs.DEFAULT_AREAS` e `DEFAULT_SKILLS`, que eram `SERVICE_AREAS` e `SKILL_SUGGESTIONS` de
+  `schemas/onboarding.py`) mais os nomes já gravados; as 20 ferramentas de sempre. A área criada na central não tem código.
+  A operação revisa os três em Configurações › Técnicos depois de publicar.
+- `GET /public/onboarding/catalog`: `service_areas` e `skills` (novo) = os ativos `{key: id, label}`, em ordem
+  alfabética; `skill_suggestions` = os nomes das aptidões ativas, só para o app e a ficha abertos antes da publicação
+  (sai quando o app novo estiver em todos).
+- Sem evento em tempo real dos catálogos, como no Ferramental de antes: outra aba vê na próxima busca, e o app guarda
+  cada catálogo na memória por 10 min.
+
+**Perfil profissional pelo app e pela central** (`schemas/my_profile.ProfessionalProfileIn`, `services/tech_profile.py`).
+- O mixin `ProfessionalProfileIn` (`vehicle_model`, `vehicle_plate`, `unavailability`, `tool_ids`, `availability`,
+  `transport`, `skills`, `education` e `area_ids`) vale em `MyProfileUpdate` (via "app") e em `TechnicianUpdate` (via
+  "central", Técnicos E), com os mesmos validadores e mensagens. Só o que vem no corpo muda; cada parte vem inteira.
+  `PARTS` ganha `areas` (grava `users.service_areas` e o carimbo `areas`).
+- Áreas (`area_ids`, ids de `GET /technician-areas`; até 100 no corpo): desativada enviada é ignorada; as desativadas
+  guardadas ficam (voltam se a central reativar); desconhecida, 422 `AREA_NOT_FOUND`; mais de 20 no fim (contando as
+  guardadas desativadas), 422 `AREAS_LIMIT`; muda quando o conjunto é outro.
+- Aptidões (`skills`, até 30): `TechnicianSkillIn` = `{skill_id, level}` ou, só para o app de antes, `{name, level}`
+  (casado com a ativa de mesmo `name_key`); um e só um dos dois ("Escolha a aptidão"; `since` no corpo: "Campo não
+  aceito"). `skill_id` desconhecido, 422 `SKILL_NOT_FOUND`; nome fora do catálogo, 422 `SKILL_UNKNOWN_NAME`; a mesma duas
+  vezes (pelo id ou pelo nome), 422 `SKILL_REPEATED` com o nome do catálogo (saiu do schema e foi para o serviço);
+  desativada enviada é ignorada e as guardadas desativadas ficam; o `since` da guardada de mesmo id fica e a nova ganha
+  hoje (dia de Brasília); muda quando o conjunto de (`skill_id`, nível) é outro. Grava `[{skill_id, level, since}]`.
+- Gravou Ferramental, Aptidões ou Áreas (app, central ou ficha): `mark_used` grava o 1º uso dos itens (sem mexer no
+  `updated_at` do catálogo).
+- Central (`PATCH /technicians/{user_id}`): trava a linha do técnico e relê (`technicians.lock_technician`, a mesma trava
+  do app; `my_profile.lock` virou apelido dela); com `is_active: false`, as ofertas dele fecham antes da trava (a ordem do
+  aceite). O perfil profissional é conferido antes de qualquer gravação, com as mensagens do app ("Ferramenta não
+  encontrada. Atualize a lista.", os códigos de área e aptidão, turnos, placa e períodos; `transport: null` agora dá 422
+  "Informe os meios de transporte", antes ignorado); grava cada parte que mudou com o carimbo `{at, via: "central"}`, a
+  indisponibilidade pela regra do app (`unavailability.wanted`) e o veículo; o histórico sai via "central" e, depois do
+  commit, o `profile.changed` e, quando é algo que o app mostra, o `me.profile_changed`. `TechnicianUpdate` continua sem
+  `extra="forbid"`: campo desconhecido é ignorado. O `update` agora monta o histórico e devolve as mudanças.
+- `MyProfile` + `area_ids` (as ativas, na ordem do nome) e `documents` (`MyDocument[]`); `skills` =
+  `[{skill_id, name, level, since}]` (só as ativas, com o nome atual do catálogo, o "desde" mais novo primeiro);
+  `tech_profile_updated` + `areas`, com `via` `app` | `ficha` | `central`.
+- `TechnicianOut`: sai `service_areas`; entram `area_ids` (lista e detalhe), `areas: Ref[] | null` (só no detalhe:
+  `[]` sem áreas; null na lista), `certification_due: CertificationDue | null`, `rating_average` (uma casa; null sem
+  avaliação) e `rating_count`; `skills` com `skill_id`. Leitura a mais por página: os catálogos de aptidões e áreas
+  (inteiros, só quando alguém tem item), a certificação vencendo e as avaliações (uma consulta cada).
+- Aprovação da ficha (`tech_profile.from_ficha`): também as áreas (ids, sem repetir, até 20) e as aptidões
+  `{skill_id, level, since}` (o "desde" é o dia local do envio), com os carimbos `areas` e `skills` via "ficha"; o item
+  estragado fica de fora. O `approve` usa só `from_ficha` (saiu o `service_areas=` à parte).
+
+**Documentos** (`services/technician_documents.py`, rotas em `api/routes/technician_documents.py`).
+- Tipos (`TechDocumentKind`): `certification` (a única com validade), `personal`, `resume` (um só por técnico) e
+  `internal` (anexo interno da parceria: só a central, com Técnicos E; nunca chega ao app). O técnico vê e mexe nos
+  próprios certificação, documento pessoal e currículo, de qualquer origem (app, ficha ou central).
+- **Enviar** (multipart): `file`, `kind`, `title`, `expires_on` ("AAAA-MM-DD") e `client_upload_id` (opcional; o app e a
+  ficha sempre mandam). **Substituir** (`…/replace`): `file`, `client_upload_id` e, opcionais, `title` e `expires_on`
+  (ausente mantém, "" tira a validade, data troca; o formulário é lido cru, porque o FastAPI entrega "" como ausente).
+  **Editar** (`PATCH`, `TechDocumentUpdate {title?, expires_on?}`, `extra="forbid"`): sem arquivo; `expires_on` null ou
+  "" tira a validade; `title` null fica. O tipo nunca muda.
+- Arquivo pelo conteúdo (`storage.sniff_document`): só PDF, JPG, PNG ou WebP (GIF, HEIC, XML e HTML ficam fora, também
+  com a extensão trocada); até 10 MB (`storage.save_upload_in`); o nome limpo como na nota fiscal. Pastas
+  `documents/{user_id}/` e `documents/fichas/{application_id}/` (a aprovação não move).
+- Título limpo de 2 a 80 (o currículo é sempre "Currículo"); validade só na certificação, de 2000-01-01 a hoje + 20 anos
+  (fuso da operação).
+- Limites (= `DOCUMENT_LIMITS`): 30 certificações e documentos pessoais atuais por técnico (o currículo não conta), 30
+  anexos internos, 10 arquivos por ficha e 3 versões por documento. Até 30 envios por hora no app (por técnico, contando
+  enviar e substituir, também os recusados) e na ficha (por IP): 429 "Muitos arquivos enviados. Tente mais tarde", com
+  `Retry-After`. A central não tem limite por hora.
+- Uma gravação por vez de cada dono (trava "technician-documents:{user_id | application_id}"). A mesma
+  `client_upload_id` do mesmo dono devolve o documento já gravado, sem gravar nada (a resposta perdida não vira documento
+  repetido); de outro dono ou estragada, 422 "Envio inválido: atualize e tente de novo".
+- **Versões com id estável**: substituir copia o arquivo atual para uma linha de versão (`version_of_id`, `replaced_at`
+  agora, `client_upload_id` null) e grava o novo no documento, que mantém o id (`uploaded_*` agora); ficam as 3 versões
+  mais novas, e a mais antiga além disso sai do banco e do disco. Currículo: enviar com um atual substitui. Excluir leva
+  as versões. Os arquivos saem do disco só depois do commit; se o commit do envio falhar, o arquivo novo sai.
+- Ordem: certificação (a validade mais próxima primeiro; sem validade por último), documento pessoal, currículo, anexo
+  interno; dentro de cada tipo, o título sem acento e sem maiúsculas. Versões: a mais nova primeiro.
+- Tipos (`lib/types.ts`): `MyDocument {id, kind, title, expires_on, file_name, content_type, size, uploaded_at, via}`
+  (sem link); `DocumentLink {url, expires_at}`; `TechDocument {id, kind, title, expires_on, file: TechDocumentFile,
+  previous: TechDocumentFile[], created_at, updated_at}`, com `TechDocumentFile {id, file_name, content_type, size,
+  uploaded_at, uploaded_by: Ref | null, via, url}` (`url`: o link assinado de 30 min, relativo à API; `uploaded_by`
+  null: o candidato, pela ficha); `CertificationDue {document_id, title, expires_on, count}`; `FichaDocument {id, kind,
+  title, expires_on, file_name, size}`.
+- **App** (`/me/profile/documents*`, só o técnico; tudo online, nada entra na fila offline): enviar, substituir, editar e
+  excluir respondem o `MyProfile` inteiro (200; a lista em `MyProfile.documents`, sem link), e o link de 30 min
+  (`GET …/{document_id}/link`) é pedido na hora. Anexo interno, versão ou documento de outro técnico: 404
+  `DOCUMENT_NOT_FOUND`.
+- **Central** (`/technicians/{user_id}/documents*`; 404 "Técnico não encontrado" para quem não é técnico): ver com
+  Técnicos V (o anexo interno só com E, nem na lista sem ele); enviar responde 201 (ou 200 com a `client_upload_id`
+  repetida ou com o currículo que trocou o arquivo do atual), e enviar, substituir e editar devolvem o `TechDocument`
+  relido do banco, com as versões e os links; excluir, 204.
+- **Download** (`GET /technician-documents/{file_id}/download?token=`, `file_id` = o documento ou uma versão): o token é
+  `create_token("document:{id}", "download", 30 min, {"uid": quem pediu})`; foto `inline`, PDF `attachment`;
+  `X-Content-Type-Options: nosniff` e `Content-Security-Policy: default-src 'none'; img-src 'self' data:; sandbox`. Como
+  na nota fiscal, o download não confere de novo o acesso de quem pediu o link.
+- Mensagens sem código (422): "Escolha o arquivo" · "O arquivo está vazio" · "Envie PDF ou foto (JPG, PNG ou WebP)" ·
+  "Arquivo maior que 10 MB" · "Escolha o tipo do documento" (também o `internal` vindo do app ou da ficha) · "Informe o
+  título" · "O título tem no máximo 80 caracteres" · "Só a certificação tem validade" · "Confira a validade".
+- **Vencimento**: `due_map` dá, por técnico, a certificação atual de menor validade entre as vencidas e as que vencem até
+  hoje + 30 (`count`: quantas estão assim) → `TechnicianOut.certification_due`. `due_count` (o Início,
+  `pulse.team.certifications_due`, null sem Técnicos V): os técnicos com papel técnico, Ativos na operação (com ou sem
+  acesso ao app), com `certification_due`. `expiry_status`: antes de hoje `expired`; de hoje a hoje + 30 `soon`; depois
+  `ok` (= `documentDue` de `lib/constants.ts`: "Vencida em 25/11/2026", "Vence hoje", "Vence amanhã", "Vence em 30
+  dias", "Válida até 27/12/2026").
+
+**Ficha pública: áreas, aptidões e arquivos** (`services/onboarding.py` e `services/technician_documents.py`).
+- `ApplicationIn.service_areas`: 0 a 20 valores de até 40 caracteres, cada um o id do catálogo ou, na ficha aberta antes
+  da publicação, o código antigo ("redes"). Desconhecida ou desativada: 422 `AREA_NOT_FOUND` (a lista da ficha está
+  velha); nenhuma, com o catálogo tendo alguma área ativa: 422 `AREA_REQUIRED` (sem área ativa no catálogo, passa sem
+  área). `skills`: até 30 `TechnicianSkillIn` (`{skill_id, level}` ou, da ficha de antes, `{name, level}`), com os
+  erros do perfil; gravadas `{skill_id, level}`, sem "desde"; a desativada é ignorada. Saíram o "Área desconhecida: …" e
+  o `SkillIn`. O envio marca o 1º uso das áreas e das aptidões. A recusa pelo catálogo conta no limite de 5 fichas por IP
+  por hora, como as outras recusas do envio.
+- `POST /public/onboarding/{token}` responde também `upload_token` (`create_token("application:{id}", "ficha_upload",
+  2 h)`, só desta ficha) e `upload_expires_at`: os arquivos vão depois do envio, sem área temporária nem arquivo de quem
+  não enviou (o convite pode ser reutilizável). O texto livre "Certificações e cursos" continua.
+- `POST /public/onboarding-documents` (multipart `token`, `file`, `kind` `certification` | `personal` | `resume`,
+  `title`, `expires_on`, `client_upload_id`) → 201 `FichaDocument` (200 com a `client_upload_id` repetida ou com o
+  currículo que trocou o da ficha). Token inválido ou vencido, ou a ficha que não existe mais: 410 `FICHA_UPLOAD_GONE`;
+  ficha já analisada: 409 `APPLICATION_NOT_PENDING`; 10 arquivos: 422 `FICHA_DOCUMENTS_LIMIT`; 30 envios na hora do
+  mesmo IP: 429. A ficha fica travada para leitura durante o envio: aprovar, reprovar e excluir esperam.
+- `POST /public/onboarding-documents/{document_id}/remove` `{token}` → 204, só arquivo da ficha do token e pendente (410
+  e 409 como no envio; já removido: 404 `DOCUMENT_NOT_FOUND`).
+- `ApplicationSummary` + `areas: Ref[]` (todas as gravadas, também as desativadas, pelo nome atual; `service_areas`
+  passa a ser ids). `ApplicationDetail.skills: [{skill_id, name, level}]` (também as desativadas, em ordem alfabética) e
+  `documents: TechDocument[]` (os arquivos que vieram da ficha, também depois da aprovação, com as versões e os links de
+  30 min de quem abriu).
+- Aprovar (`attach_to_user`): os documentos da ficha (e as versões) passam ao técnico (`user_id`), sem mover arquivo e
+  mantendo o `application_id`; a linha "Aprovado na homologação (HOM-…)" ganha um item `documents` por arquivo ("incluiu
+  Certificação NR10 (vence 10/12/2027)").
+- Ficha apagada (o pedido do titular, que agora trava a ficha, e a rotina de retenção): `drop_for_application` apaga os
+  documentos só dela antes da ficha (o envio em curso termina antes e sai junto) e os arquivos saem do disco depois do
+  commit, com a foto (`technician_documents.remove_files`; saiu `onboarding.remove_photos`).
+
+**Avaliações do cliente** (`services/technician_ratings.py`, `api/routes/technician_ratings.py`).
+- Até o módulo de OS ter o formulário do cliente, a central registra na OS concluída (resolvida ou fechada) a avaliação
+  que o cliente fez de cada técnico dela. Uma por OS e técnico: o responsável ou um auxiliar com papel técnico (o analista
+  que assumiu a OS fica fora); quem saiu da OS e já tem avaliação ainda é corrigido ou excluído, não avaliado de novo.
+- `PUT /tickets/{ticket_id}/ratings/{technician_id}` `RatingIn {score, comment?, rater_name?}` (`extra="forbid"`; vazio
+  vira null; o comentário guarda as linhas): nota inteira de 1 a 5 ("Escolha uma nota de 1 a 5"); comentário até 1000 e
+  quem avaliou até 120 ("No máximo {n} caracteres"). OS aberta: 409 `RATING_NOT_CONCLUDED`; técnico que não está na OS
+  (sem avaliação): 422 `RATING_NOT_IN_TICKET`. Igual ao gravado: 200 sem mudança (sem evento nem histórico); corrigir
+  grava `updated_by` (e `source` `central`). Trava "technician-rating:{ticket_id}:{technician_id}": dois pedidos juntos
+  dão um registro só. → `TechnicianRating`.
+- `DELETE …/ratings/{technician_id}` → 204; sem avaliação, 404 `RATING_NOT_FOUND`; também pede a OS concluída (409). A
+  OS reaberta mantém as avaliações, só para consulta.
+- `GET /tickets/{ticket_id}/ratings` → `TicketRatings {concluded, technicians: [{technician: Ref, role: "assignee" |
+  "helper" | "former", rating: TechnicianRating | null}]}`: o responsável, os auxiliares e quem saiu com avaliação (por
+  nome).
+- Guarda: a gestão (`TicketManagerUser`) com a OS visível (`tickets.get_visible_ticket`; outra fila, 403
+  `QUEUE_FORBIDDEN`): é do núcleo da OS, sem tela própria. O técnico recebe 403.
+- `GET /technicians/{user_id}/ratings?limit=&offset=` (Técnicos V) → `TechnicianRatings {average, count, items}`: a média
+  com uma casa (ROUND_HALF_UP: [4, 5, 4, 4] → 4.3; null sem avaliação) e a contagem de todas, e a página, a mais nova
+  primeiro.
+- `TechnicianRating {id, ticket: {id, code, title, location, resolved_at}, technician: Ref, score, comment, rater_name,
+  source, created_at, created_by, updated_at, updated_by}` (`updated_by` null: nunca corrigida).
+- Rastro: na OS, os eventos `rating_set` (`from_value` "4 de 5" ou null, `to_value` "5 de 5", `note` = o comentário,
+  `data {technician_id, technician_name}`) e `rating_removed` (`from_value`), só da gestão (`managers_only` e nos tipos
+  internos de `GET /tickets/{id}/events`), e o `ticket.updated` com `fields: ["ratings"]` só para a gestão, sem push; no
+  cadastro do técnico, o histórico `ratings` e o `profile.changed`. Nada em `/me/*` nem no app, fora do Elo e do
+  relatório do cliente.
+
+**Favoritos** (`services/technician_favorites.py`). Nenhuma rota nova: `PUT`/`DELETE /technicians/favorites/{technician_id}`
+gravam no histórico do cadastro do técnico a linha `favorites` (via central, com a nota do pedido em `note`), com `to`
+({c} = "Cidade-UF" na grafia das lojas): "fixado em {c}" · "tirado da lista de {c}" · "voltou para a regra em {c}" (a
+decisão apagada) · "nota alterada em {c}". Nada mudou: nenhuma linha (o upsert de quem decidiu e quando continua). Depois
+do commit, o `profile.changed` só para a gestão (favorito não chega ao técnico). Inativo e Bloqueado seguem fora dos
+automáticos.
+
+**Sugestão de técnicos** (`services/suggestions.py`). As áreas do técnico (ids do catálogo) se comparam com a OS pelo
+código das 10 áreas de antes (`area_catalog.code`): a área nova, sem código, ou desativada não entra. O motivo "Atende …"
+usa o nome atual do catálogo, em ordem alfabética ("Atende CFTV e câmeras IP, Redes e cabeamento estruturado"; antes,
+rótulos curtos como "Atende CFTV, redes"). Saiu a reserva das áreas da ficha aprovada.
+
+**Histórico do cadastro e tempo real** (`services/user_history.py`).
+- `skills` passa a comparar o conjunto (`skill_id`, nível), com o texto pelo nome atual do catálogo ("Linux (Básico)",
+  em ordem alfabética; a que saiu do catálogo, "Aptidão removida"); `areas` (novo, em `DELTA_FIELDS`: o que saiu em
+  `from`, o que entrou em `to`) pelos nomes ("Área removida"). Os nomes vêm de `technician_catalogs.picked`, só dos ids
+  do técnico.
+- Linhas de `record` (`from` null, `to` = a frase):
+  - `documents` (certificação, documento pessoal e currículo) e `internal_attachments`, com {nome} = "{Tipo} {título}"
+    ("Certificação NR10"; o currículo, "Currículo"): "incluiu {nome}" (+ " (vence dd/mm/aaaa)") · "substituiu o arquivo
+    de {nome}" (+ " (vence dd/mm/aaaa)" ou " (sem validade)" quando a validade mudou junto; trocando também o título,
+    antes vem a linha "renomeou …") · "renomeou {Tipo} {antigo} → {novo}" · "mudou a validade de {nome}: {antes} →
+    {depois}" ("sem validade" no vazio) · "excluiu {nome}";
+  - `ratings`: "registrou OS-000123: 4 de 5" · "corrigiu OS-000123: 4 → 5 de 5" · "corrigiu OS-000123" (só o
+    comentário ou quem avaliou) · "excluiu a avaliação de OS-000123";
+  - `favorites`: as frases de Favoritos, acima.
+- `for_viewer`: além do `hide_payout` (sem Pagamentos), quem não tem Técnicos E recebe os itens `internal_attachments`
+  com `from`/`to` "***" (null continua null; na web, "Anexos internos alterados").
+- `profile.changed` em toda gravação nova, também de documentos, anexos internos, avaliações e favoritos, só para a
+  gestão com Técnicos ou Pagamentos. Na web, nenhum desses campos avisa no sino: só atualizam as telas.
+- **`me.profile_changed`** (novo, só para o técnico; `ME_PROFILE_EVENT` de `lib/constants.ts`): quando a gravação não
+  veio do app (`via` central, ficha ou link) e mexe em algum campo que o app mostra (`APP_FIELDS`: os do cadastro, a
+  foto, as formas de recebimento, o perfil técnico com as áreas e os documentos), `publish_changed` manda também
+  `{"type": "me.profile_changed", "occurred_at", "data": {}}`, endereçado só a ele (`audience.user_ids`) e sem quem fez.
+  Nunca pela situação, pelo acesso, pela senha, pelos favoritos, pelas avaliações nem pelos anexos internos. O app relê
+  `GET /me/profile` (ver `mobile/README.md`, Configurações). Cada aviso tem o próprio `try`: um que falha não segura o
+  outro nem desfaz a gravação. A validação pelo link do e-mail (via "link", `email_verified`) também avisa o app.
+
+**Na central (web).**
+- **Configurações › Técnicos** (`components/settings/TechCatalogCard.tsx` e `lib/techCatalog.ts`; saiu
+  `ToolCatalogCard`): três cartões, Áreas de atuação, Aptidões e Ferramental, com a coluna Técnicos ("{n} técnicos" abre
+  `/tecnicos?area|aptidao|ferramenta={id}`, só do item ativo e com Técnicos V), a Situação e Editar; a busca a partir de
+  13 itens; "Nova área", "Nova aptidão" e "Nova ferramenta"; o diálogo com "Nome" e "Ativa", as dicas ("Muda também para
+  3 técnicos.", "Sai das escolhas e fica guardada em 3 técnicos.", "Volta para 3 técnicos.") e o uso ("Em uso: 3
+  técnicos e 1 ficha." ou "Já foi usada: desative para tirar das escolhas."). **Excluir** só com `in_use === false`, com
+  confirmação. O nome repetido é avisado antes do 409; um 404 ou 409 ao salvar relê a lista.
+- **Ficha do técnico** (`/tecnicos/{id}`): o menu passa a ter Documentos (Dados pessoais e cadastrais), Currículo e
+  Áreas de atuação (Perfil profissional), Avaliações e Anexos internos (Gestão). Anexos internos só com Técnicos E
+  (`fichaMenu(canPayouts, canEditTechnicians)`; quem abre o endereço sem o acesso vê o aviso no lugar).
+  - Perfil profissional editável com Técnicos E: Dias e horários (com a indisponibilidade), Transporte (com o veículo),
+    Formação, Áreas de atuação, Aptidões (do catálogo, com o nível) e Ferramental, cada seção com o próprio Salvar e o
+    `PATCH` só do que mudou; o carimbo "Informado pela central em {dd/mm/aaaa}" ao lado dos de antes ("Informado pelo
+    técnico em …", "Da ficha da homologação, …"). Saiu `HomologationAreas`.
+  - Documentos, Currículo e Anexos internos (uma consulta para as três seções, relida a cada 20 min): os blocos
+    "Certificações" e "Documentos pessoais"; cada documento com o título, o selo da validade (`documentDueText`: vermelho
+    vencida, âmbar vencendo, "Válida até …" neutro), "{arquivo} · {tamanho} · Enviado pelo técnico em …" (ou "Enviado
+    por {nome} em …", "Da ficha da homologação, …"), **Abrir** (outra aba; com a lista lida há mais de 25 min, relê antes
+    para pegar o link novo) e, com Técnicos E, Substituir, Editar (não no currículo) e Excluir (pergunta antes);
+    "Versões anteriores ({n})". O diálogo: "Título" (com as sugestões; não no currículo), "Validade" (só na
+    certificação) e o arquivo (PDF ou foto até 10 MB, conferido antes; o servidor confere de novo pelo conteúdo).
+  - Avaliações: a média com as estrelas e "{n} avaliações", a lista da mais nova para a mais antiga (a OS abre no painel;
+    a loja, a conclusão, a nota, até 2 em vermelho, o comentário, "Avaliado por …" e "Registrada por … em …" + " ·
+    corrigida por …"), "Ver mais" de 20 em 20 e "Nenhuma avaliação."; sem ações (a avaliação se registra na OS).
+  - Favoritos: a estrela tira dos favoritos (com Desfazer), Fixar, Editar nota, "Tirados da lista" com "Voltar para a
+    lista" e "Incluir cidade" (a busca da cidade e a nota até 300).
+  - Histórico: os rótulos novos (Áreas de atuação, Documentos, Anexos internos, Favoritos, Avaliações); `areas` como
+    lista (incluiu, tirou); os outros "{rótulo}: {to}"; com "***", "Anexos internos alterados".
+- **Lista de Técnicos**: pede `GET /technicians?q=&limit=5000` (só a busca vai ao servidor) e filtra na tela
+  (`lib/techListFilter.ts`), um valor por filtro, combinados com E; cada opção mostra quantas linhas a lista terá ao
+  escolhê-la. Filtros: Cidade (a região de atuação, sem exigir UF), UF, Situação, Acesso ao app, Área, Aptidão e
+  Ferramenta (com busca), Grupo, Dia, Turno, os chips "Favoritos" e "Certificação vencendo" (título "Vencidas ou
+  vencendo em até 30 dias"), Cadastro incompleto e Elo; "Limpar filtros" (a aba e a ordem ficam). Na URL
+  (`lib/technicians.ts`): `cidade` ("Cidade Exemplo-SP"; aceita o `cidade` + `uf` dos links antigos), `uf`, `situacao`
+  (`ativo`, `inativo`, `bloqueado`), `acesso` (`liberado`, `sem-acesso`), `area`, `aptidao`, `ferramenta` e `grupo` (os
+  ids), `dia` (`seg` a `dom`), `turno` (`manha`, `tarde`, `noite`, `madrugada`), `favorito=sim`,
+  `certificacao=vencendo`, `incompleto`, `elo` e `ordem`; valor desconhecido vira vazio. Na linha, a estrela "Favorito
+  em {cidades}" e o selo da certificação.
+- **Planilha** (gerada na tela), com o cabeçalho `nome;email;celular;grupo;cidade;uf;regiao_atuacao;situacao;
+  situacao_motivo;acesso_app;email_validado;forma_recebimento;ultimo_acesso;ultima_os;os_abertas;elo;elo_em_risco;
+  ferramental;disponibilidade;transporte;cnh;aptidoes;areas_atuacao;favorito_em;certificacao_vencendo;avaliacao_media;
+  avaliacoes;perfil_tecnico_atualizado_em` (numa linha só, sem espaços): as áreas pelo nome, em ordem alfabética, com
+  "; "; `favorito_em` "Cidade-UF; …"; `certificacao_vencendo` "{título} vencida em dd/mm/aaaa" ou "{título} vence em
+  dd/mm/aaaa" (vencer hoje conta como "vence"); `avaliacao_media` com uma casa e vírgula (vazia sem avaliação). O
+  Exportar espera o ferramental, as áreas e os favoritos. Sem CPF, RG, nascimento nem dados de recebimento.
+- **Início**: no cartão Equipe, "1 técnico com certificação vencendo" ou "{n} técnicos com certificação vencendo", com o
+  link para `/tecnicos?certificacao=vencendo&situacao=ativo` (só com Técnicos V e n > 0).
+- **OS**: o cartão **Avaliação do cliente** (aba Geral, no painel e na página, abaixo do formulário), com a OS concluída
+  ou com alguma avaliação: uma linha por técnico (o nome, "Responsável", "Auxiliar" ou "Saiu da OS", as estrelas e "{n}
+  de 5", o comentário, "Avaliado por …", "Registrada por …", ou "Sem avaliação."; sem técnico, "Nenhum técnico nesta
+  OS."); com a OS concluída e editável, "Registrar" ou "Editar" abre o diálogo "Avaliação de {nome}" ("Nota",
+  "Comentário" até 1000, "Quem avaliou" até 120, "Excluir" com confirmação; toasts "Avaliação salva" e "Avaliação
+  excluída"). No Histórico da OS, "registrou a avaliação do cliente" e "excluiu a avaliação do cliente", com o técnico e
+  a nota.
+- **Links**: o nome do técnico vira link real da ficha (Ctrl/⌘+clique e o botão do meio abrem outra aba), com Técnicos
+  V e quando a pessoa tem papel técnico: na aba Geral ("Ver ficha" no Colaborador), nas ofertas, nos pagamentos da OS,
+  na avaliação, em Atividades do dia e no detalhe do Mapa; em Pagamentos, em outra aba.
+- **Homologação**: a URL guarda `aba` (aprovadas, reprovadas ou links), `q`, `uf`, `area` (ids separados por vírgula),
+  `veiculo=sim` e a ficha aberta (`?ficha=`, com uma entrada no histórico: o Voltar fecha); o nome na tabela é link
+  real; Atuação e o filtro de áreas pelos nomes de `areas` (o id da URL que não está em lugar nenhum, "Área removida");
+  as aptidões com o nível; a seção **Documentos**, só quando há, com o tipo e sem ações.
+- **Ficha pública** (`/cadastro-tecnico/{token}`): as áreas em fichas do catálogo (até 20; sem área no catálogo, o grupo
+  some) e as aptidões pela busca "Buscar aptidão", em cartões com o nível (até 30); manda `skill_id` (com o catálogo de
+  antes, os nomes e os códigos); `DRAFT_VERSION` 3 (o rascunho antigo perde áreas e aptidões). Depois do envio, o bloco
+  **Documentos (opcional)**: Certificações ("Adicionar certificação"), Documentos pessoais ("Adicionar documento") e
+  Currículo ("Adicionar currículo", um só); cada cartão com "Título" (as sugestões; não no currículo), "Validade" (só na
+  certificação) e "Tirar foto" / "Escolher arquivo", e escolher o arquivo já envia; "Envie até as {hora}."; até 10
+  arquivos; 409 e 410 travam o bloco com o texto do servidor; 429 "Muitos envios. Espere um pouco e tente de novo."; sem
+  rede, "Sem internet. Tente de novo.". A ficha enviada, os arquivos recebidos e os cartões abertos ficam guardados na
+  aba (sessionStorage) até o prazo: se a câmera recarregar a página, "Ficha enviada!" e os documentos voltam.
+- **Tempo real**: os campos novos do `profile.changed` só releem a base técnica (`["technicians"]`) e o que depende de
+  cada um (áreas: as sugestões e a contagem do catálogo de áreas; aptidões: a contagem do catálogo; favoritos: os
+  favoritos por cidade e as sugestões; documentos: o Início). A avaliação (`ticket.updated` com `ratings`) relê a OS.
+- Com a API de antes (a prévia ao vivo, até a publicação): Áreas e Aptidões de Configurações e as seções Documentos,
+  Currículo, Anexos internos e Avaliações mostram "Indisponível no momento. Tente de novo mais tarde." com "Tentar de
+  novo"; o Ferramental fica sem Excluir; o perfil profissional fica só de leitura (`isPreGestao`, o detalhe sem
+  `area_ids`), com "Indisponível no momento." para quem tem Técnicos E; na lista, Área, Aptidão e o chip da certificação
+  somem; o cartão da avaliação na OS some (404).
+
+**No app** (detalhes em `mobile/README.md`, Configurações): as telas Documentos, Documento e Currículo (Dados pessoais e
+cadastrais e Perfil profissional) e Áreas de atuação; as Aptidões pelo catálogo (`{skill_id, level}`; "Adicionar
+aptidão" escolhe várias de uma vez); o carimbo "Atualizado pela central em {dd/mm/aaaa}" nas seis telas do perfil
+profissional, quando a central mudou a parte por último; o `me.profile_changed` relê o cadastro. Com a API de antes
+(`hasCadastroE2` falso), Documentos, Currículo e Áreas de atuação dizem "Indisponível" e as Aptidões seguem pelo nome.
+
+**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-26.2" em `backend/app/schemas/onboarding.py` e nas duas cópias de
+`constants.ts` (publicada noutro dia, vira a data do dia, nos três lugares, no mesmo commit). O texto passa a citar os
+documentos enviados na ficha ou no app (documentos pessoais, certificações com a validade, se informada, e o currículo);
+o perfil técnico "informado na ficha, no app ou pela central"; a conferência das certificações em "Para quê"; a seção
+nova **Avaliações e anexos internos**, depois de "Situação na operação" (a nota de 1 a 5 e o comentário do cliente sobre
+um atendimento concluído e os documentos internos da parceria ficam só com a equipe, não aparecem no app e não mudam o
+Elo); em "Por quanto tempo", a ficha reprovada é excluída com a foto e os arquivos, e o documento substituído guarda as
+três versões anteriores mais recentes (excluído, saem todas); e, em "Seus direitos", os documentos. No app, o cartão de
+Hoje diz "Agora ele inclui documentos, currículo e avaliações.". O texto pede a revisão do dono ou do jurídico antes de
+publicar.
+
+**Publicação.**
+1. Antes, o `pg_dump -Fc` do banco, como no cadastro V2. A migração roda no start da API nova (`alembic upgrade head`,
+   `c8f2a4e6b0d3`), antes de ela atender. Ela não apaga coluna da API de antes, mas converte as áreas e as aptidões
+   gravadas para ids do catálogo e torna obrigatório o `name_key` do ferramental: não deixe a API de antes no ar com o
+   banco migrado. Para voltar: `alembic downgrade b7e2d4f6a8c1` com o código novo (as perdas estão em Dados), depois o
+   código de antes, apagando do contêiner `/app/alembic/versions/20261126_c8f2a4e6b0d3_gestao_dos_tecnicos.py` (o
+   `docker cp` por cima não apaga arquivo; o mesmo roteiro do cadastro V2).
+2. A web e a API sobem juntas, a web segundos antes (`PRIVACY_VERSION`): a ficha aberta antes pede para recarregar e não
+   envia; se enviar sem ler a versão, a API aceita os códigos de área e os nomes de aptidão.
+3. O app sobe depois da API. O app de antes com a API nova: lê as aptidões (com o nome), grava pelo nome (fora do
+   catálogo: 422 "Atualize o app…"), sugere pelas `skill_suggestions` e não vê documentos, áreas nem o
+   `me.profile_changed`. O app novo com a API de antes: Documentos, Currículo e Áreas de atuação "Indisponível"; as
+   Aptidões pelo nome, e a folha de incluir diz que o servidor ainda não tem a lista.
+4. Os arquivos ficam em `MEDIA_ROOT/documents/` (o volume das notas e das fotos; nada muda em `deploy/`).
+5. A web e o app deste ambiente ficam à frente da API até a publicação (a prévia ao vivo): rota nova dá 404 e campo novo
+   vem ausente, e as telas mostram os estados acima (nada quebra). Até lá, não mande documentos de verdade pela prévia.
+6. Depois de publicar, a operação revisa os catálogos iniciais em Configurações › Técnicos e confere uma gravação de cada
+   parte (documento, avaliação, área, aptidão).
+
+**Privacidade (LGPD).** Documentos: só o próprio técnico (nunca os anexos internos) e a central com Técnicos (os anexos
+internos só com Editar); o arquivo sai por link assinado de 30 min, ficam as 3 versões anteriores e a ficha reprovada é
+apagada com os arquivos. Avaliações e anexos internos: só a central; nada no app nem em `/me/*`, fora do Elo. O
+`me.profile_changed` não leva dado nenhum. O aviso de privacidade "2026-11-26.2" cita tudo isso.
+
 ## Acesso: perfis por tela e visibilidade de filas
 
 O papel (`users.role`) continua decidindo o canal (web ou app), a hierarquia de cadastro (quem cria e altera
