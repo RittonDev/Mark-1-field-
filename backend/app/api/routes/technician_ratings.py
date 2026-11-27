@@ -19,8 +19,8 @@ from app.schemas.technician_rating import (
     TechnicianRatingsOut,
     TicketRatingsOut,
 )
-from app.services import technicians, user_history
 from app.services import technician_ratings as svc
+from app.services import technicians, user_history
 from app.services import tickets as tickets_svc
 from app.services.realtime import commit_and_publish
 

@@ -1,8 +1,9 @@
 """Documentos do técnico (services/technician_documents.py; contrato da Entrega 2, §6.3 e §6.4).
 
 App (só o técnico; tudo online, nada entra na fila offline): envia, substitui, edita e exclui os
-próprios certificação, documento pessoal e currículo; toda rota responde o MyProfile inteiro (a lista
-em MyProfile.documents, sem link) e o link de 30 min é pedido na hora. Até 30 envios por hora.
+próprios certificação, documento pessoal e currículo; toda rota responde o MyProfile inteiro (a
+lista em MyProfile.documents, sem link) e o link de 30 min é pedido na hora. Até 30 envios por
+hora.
 
 Central (Técnicos): ver pede Visualizar (os anexos internos só com Editar, nem na lista sem ele);
 enviar, substituir, editar e excluir pedem Editar. O arquivo sai por link assinado de 30 min, gerado
@@ -198,9 +199,7 @@ async def delete_my_document(document_id: uuid.UUID, db: DB, user: TechnicianUse
 
 
 @router.get("/me/profile/documents/{document_id}/link", response_model=DocumentLinkOut)
-async def my_document_link(
-    document_id: uuid.UUID, db: DB, user: TechnicianUser
-) -> DocumentLinkOut:
+async def my_document_link(document_id: uuid.UUID, db: DB, user: TechnicianUser) -> DocumentLinkOut:
     """O link assinado de 30 min do arquivo atual (foto abre na tela; PDF baixa)."""
     return await svc.link(db, user, document_id)
 
@@ -214,9 +213,7 @@ async def _central_commit(db: DB, technician: User, actor: User, saved: svc.Save
         await user_history.publish_changed(technician, saved.changes, via=VIA_CENTRAL, actor=actor)
 
 
-async def _central_done(
-    db: DB, technician: User, actor: User, saved: svc.Saved
-) -> TechDocumentOut:
+async def _central_done(db: DB, technician: User, actor: User, saved: svc.Saved) -> TechDocumentOut:
     """Grava, avisa e devolve o documento relido do banco (com as versões e os links)."""
     document = saved.document
     assert document is not None  # enviar, substituir e editar sempre devolvem o documento

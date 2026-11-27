@@ -175,7 +175,8 @@ def _current(ticket: Ticket) -> list[tuple[User, TicketRatingRole]]:
 
 
 async def ticket_ratings(db: AsyncSession, ticket: Ticket) -> TicketRatingsOut:
-    """O responsável, os auxiliares e quem saiu da OS com avaliação (por nome), cada um com a sua."""
+    """O responsável, os auxiliares e quem saiu da OS com avaliação (por nome), cada um com a
+    avaliação dele."""
     rows = await db.scalars(
         select(TechnicianRating)
         .where(TechnicianRating.ticket_id == ticket.id)

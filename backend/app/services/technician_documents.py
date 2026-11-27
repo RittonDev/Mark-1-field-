@@ -15,22 +15,22 @@ XML e HTML ficam fora, também com a extensão trocada), até 10 MB, o nome limp
 documents/fichas/{application_id}/ (a aprovação não move).
 
 Versões com id estável: substituir copia o arquivo de antes para uma linha de versão
-(`version_of_id`, `replaced_at` agora, `client_upload_id` null) e grava o novo no próprio documento,
-que mantém o id (`uploaded_*` agora); ficam as 3 versões mais novas, a mais antiga além disso sai do
-banco e do disco. Excluir leva as versões (FK em cascata; as chaves são lidas antes). O currículo é um
-só: enviar outro substitui. Arquivo sai do disco só depois do commit; o commit do envio falhou, o
-arquivo novo sai (a rota cuida).
+(`version_of_id`, `replaced_at` agora, `client_upload_id` null) e grava o novo no próprio
+documento, que mantém o id (`uploaded_*` agora); ficam as 3 versões mais novas, a mais antiga além
+disso sai do banco e do disco. Excluir leva as versões (FK em cascata; as chaves são lidas antes). O
+currículo é um só: enviar outro substitui. Arquivo sai do disco só depois do commit; o commit do
+envio falhou, o arquivo novo sai (a rota cuida).
 
-Uma gravação por vez de cada dono (trava `technician-documents:{user_id | application_id}`): o mesmo
-envio repetido (`client_upload_id` do mesmo dono) devolve o mesmo documento, e os limites (30
+Uma gravação por vez de cada dono (trava `technician-documents:{user_id | application_id}`): o
+mesmo envio repetido (`client_upload_id` do mesmo dono) devolve o mesmo documento, e os limites (30
 certificações e documentos pessoais, 30 anexos internos, 10 arquivos por ficha) são conferidos
 lendo o banco antes de gravar.
 
-Histórico do cadastro (campo `documents` ou `internal_attachments`; a central sem Técnicos Editar lê
-"***" nos anexos internos): "incluiu Certificação NR10 (vence 10/12/2027)", "substituiu o arquivo de
-Currículo", "renomeou Certificação NR10 → NR35", "mudou a validade de Certificação NR10: sem
-validade → 10/12/2027", "excluiu Documento pessoal RG". A ficha ainda sem técnico não tem histórico;
-a aprovação devolve um item por arquivo para a linha "Aprovado na homologação".
+Histórico do cadastro (campo `documents` ou `internal_attachments`; a central sem Técnicos Editar
+lê "***" nos anexos internos): "incluiu Certificação NR10 (vence 10/12/2027)", "substituiu o
+arquivo de Currículo", "renomeou Certificação NR10 → NR35", "mudou a validade de Certificação NR10:
+sem validade → 10/12/2027", "excluiu Documento pessoal RG". A ficha ainda sem técnico não tem
+histórico; a aprovação devolve um item por arquivo para a linha "Aprovado na homologação".
 """
 
 import re
@@ -129,9 +129,7 @@ DOCUMENTS_LIMIT = (
 INTERNAL_LIMIT = f"Limite de {INTERNAL_MAX} anexos internos. Exclua um para enviar outro"
 NOT_FOUND = "Este documento não existe mais. Atualize a lista"
 BAD_UPLOAD = "Envio inválido: atualize e tente de novo"
-FICHA_GONE = (
-    "O prazo para enviar arquivos desta ficha acabou. Fale com a central pelo WhatsApp"
-)
+FICHA_GONE = "O prazo para enviar arquivos desta ficha acabou. Fale com a central pelo WhatsApp"
 FICHA_NOT_PENDING = "A ficha já foi analisada. Fale com a central pelo WhatsApp"
 FICHA_LIMIT = f"Limite de {PER_FICHA} arquivos na ficha"
 TOO_MANY = "Muitos arquivos enviados. Tente mais tarde"
@@ -764,9 +762,7 @@ async def _versions(
 def download_url(file_id: uuid.UUID, viewer_id: uuid.UUID | None) -> str:
     """Link assinado de 30 min para o arquivo (o documento ou uma versão; o uid diz quem pediu)."""
     extra = {"uid": str(viewer_id)} if viewer_id is not None else None
-    token = create_token(
-        f"document:{file_id}", "download", timedelta(minutes=LINK_MINUTES), extra
-    )
+    token = create_token(f"document:{file_id}", "download", timedelta(minutes=LINK_MINUTES), extra)
     return f"{settings.API_PREFIX}/technician-documents/{file_id}/download?token={token}"
 
 
@@ -856,9 +852,7 @@ async def technician_documents(
     return await _central_list(db, TechnicianDocument.user_id == user_id, kinds, viewer)
 
 
-async def one_document(
-    db: AsyncSession, document_id: uuid.UUID, viewer: User
-) -> TechDocumentOut:
+async def one_document(db: AsyncSession, document_id: uuid.UUID, viewer: User) -> TechDocumentOut:
     """Um documento relido do banco, com as versões e os links (a resposta da central)."""
     doc = await db.scalar(
         select(TechnicianDocument)
@@ -954,9 +948,7 @@ async def due_map(
     )
     grouped: dict[uuid.UUID, list[tuple[date, str, uuid.UUID, str]]] = {}
     for user_id, doc_id, title, expires_on in rows:
-        grouped.setdefault(user_id, []).append(
-            (expires_on, text_utils.fold(title), doc_id, title)
-        )
+        grouped.setdefault(user_id, []).append((expires_on, text_utils.fold(title), doc_id, title))
     out: dict[uuid.UUID, CertificationDueOut] = {}
     for user_id, items in grouped.items():
         expires_on, _, doc_id, title = min(items, key=lambda i: (i[0], i[1], str(i[2])))
@@ -1052,10 +1044,12 @@ async def attach_to_user(
         .values(user_id=user.id, updated_at=utcnow())
         .execution_options(synchronize_session=False)
     )
-    return [
-        _item(doc.kind, f"incluiu {document_name(doc.kind, doc.title)}{_due_suffix(doc.expires_on)}")
-        for doc in docs
-    ]
+    return [_item(doc.kind, _included(doc)) for doc in docs]
+
+
+def _included(doc: TechnicianDocument) -> str:
+    """ "incluiu Certificação NR10 (vence 10/12/2027)"."""
+    return f"incluiu {document_name(doc.kind, doc.title)}{_due_suffix(doc.expires_on)}"
 
 
 async def drop_for_application(db: AsyncSession, application_id: uuid.UUID) -> list[str]:

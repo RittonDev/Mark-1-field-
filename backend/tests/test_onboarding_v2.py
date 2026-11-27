@@ -6,7 +6,9 @@ Dados fictícios (Tecnico Alfa, Cidade Exemplo, @exemplo.com, CPF 12345678909, C
 12.345.678/0001-95, placa ABC1D23).
 """
 
-from datetime import UTC, datetime, timedelta
+import uuid
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient, Response
@@ -14,7 +16,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
-from app.models import TechnicianApplication, User
+from app.core.enums import TechDocumentKind
+from app.models import TechnicianApplication, TechnicianDocument, User
 from app.schemas import personal
 from app.schemas.onboarding import ApplicationIn
 from app.services import mail, realtime
@@ -258,7 +261,8 @@ async def test_approval_copies_everything(
     }
     one = (await client.get(f"{API}/technicians/{tech_id}", headers=an)).json()
     assert {key: one[key] for key in copied} == copied
-    assert one["service_areas"] == ["cftv", "redes"]
+    # As áreas da ficha (códigos da ficha de antes) chegam como os ids do catálogo.
+    assert one["area_ids"] == [world.area_ids["cftv"], world.area_ids["redes"]]
     assert one["operational_status"] == "active"
     assert datetime.fromisoformat(one["email_verified_at"]) == verified_at
     async with engine.connect() as conn:
@@ -270,6 +274,9 @@ async def test_approval_copies_everything(
     stored = dict(zip(copied, row, strict=True))
     stored["birth_date"] = stored["birth_date"].isoformat()
     assert stored == copied
+    async with engine.connect() as conn:
+        areas = await conn.scalar(select(User.service_areas).where(User.id == tech_id))
+    assert sorted(areas) == sorted([world.area_ids["cftv"], world.area_ids["redes"]])
 
     detail = (await client.get(f"{APPS}/{app_id}", headers=an)).json()
     assert detail["status"] == "approved" and detail["user_id"] == tech_id
@@ -280,6 +287,95 @@ async def test_approval_copies_everything(
         None,
     )
     assert detail["purge_at"] is None and detail["has_password"] is False
+
+
+PDF = b"%PDF-1.4\n% ficha de exemplo\n%%EOF\n"
+
+
+async def _ficha_document(
+    engine: AsyncEngine, media: Path, app_id: str, title: str, expires_on: date | None
+) -> tuple[str, Path]:
+    """Uma certificação que o candidato mandou depois do envio (o envio pelo upload_token fica em
+    tests/test_technician_documents.py): a linha só da ficha e o arquivo no disco."""
+    key = f"documents/fichas/{app_id}/{uuid.uuid4().hex}.pdf"
+    path = media / key
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(PDF)
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        document = TechnicianDocument(
+            application_id=uuid.UUID(app_id),
+            kind=TechDocumentKind.CERTIFICATION,
+            title=title,
+            expires_on=expires_on,
+            file_name="nr10-exemplo.pdf",
+            content_type="application/pdf",
+            size_bytes=len(PDF),
+            storage_key=key,
+            uploaded_via="ficha",
+        )
+        db.add(document)
+        await db.commit()
+        return str(document.id), path
+
+
+async def test_approval_passes_the_ficha_documents_to_the_technician(
+    client: AsyncClient,
+    world: World,
+    engine: AsyncEngine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """O envio responde o token dos arquivos (2 h); aprovada, os arquivos da ficha passam a ser do
+    técnico (sem copiar), com um item `documents` por arquivo na linha "Aprovado na homologação";
+    a ficha apagada a pedido do titular leva os arquivos dela, do banco e do disco."""
+    monkeypatch.setattr(settings, "MEDIA_ROOT", str(tmp_path))
+    an, sup = world.analyst.headers, world.supervisor.headers
+    token = await new_invite(client, world, reusable=True, days_valid=30)
+    received = await submit(client, token, full_ficha())
+    assert set(received) == {"protocol", "email_verification", "upload_token", "upload_expires_at"}
+    app_id = await application_id(client, world, "tecnico.alfa@exemplo.com")
+    doc_id, path = await _ficha_document(engine, tmp_path, app_id, "NR10 Exemplo", date(2027, 1, 31))
+    # A Homologação lista o arquivo da ficha (com o link).
+    detail = (await client.get(f"{APPS}/{app_id}", headers=an)).json()
+    assert [(d["id"], d["kind"], d["title"]) for d in detail["documents"]] == [
+        (doc_id, "certification", "NR10 Exemplo")
+    ]
+    assert detail["documents"][0]["file"]["url"]
+
+    r = await client.post(f"{APPS}/{app_id}/approve", json={}, headers=an)
+    assert r.status_code == 200, r.text
+    tech_id = r.json()["technician"]["id"]
+    async with engine.connect() as conn:
+        owner = (
+            await conn.execute(
+                select(TechnicianDocument.user_id, TechnicianDocument.application_id).where(
+                    TechnicianDocument.id == uuid.UUID(doc_id)
+                )
+            )
+        ).one()
+    assert (str(owner.user_id), str(owner.application_id)) == (tech_id, app_id)
+    assert path.exists()  # o mesmo arquivo, sem cópia
+    history = (await client.get(f"{API}/technicians/{tech_id}/changes", headers=an)).json()
+    [line] = history
+    assert line["via"] == "ficha"
+    first, *documents = line["changes"]
+    assert first["field"] == "application" and first["to"].startswith("Aprovado na homologação")
+    [item] = documents
+    assert (item["field"], item["from"]) == ("documents", None)
+    assert "NR10 Exemplo" in item["to"]
+
+    # Pedido do titular: a ficha pendente sai com os arquivos (do banco e do disco).
+    await submit(client, token, ficha(email="pedido@exemplo.com", document=cpf("147258369")))
+    other_id = await application_id(client, world, "pedido@exemplo.com")
+    other_doc, other_path = await _ficha_document(engine, tmp_path, other_id, "RG Exemplo", None)
+    r = await client.delete(f"{APPS}/{other_id}", headers=sup)
+    assert r.status_code == 204, r.text
+    async with engine.connect() as conn:
+        left = await conn.scalar(
+            select(TechnicianDocument.id).where(TechnicianDocument.id == uuid.UUID(other_doc))
+        )
+    assert left is None and not other_path.exists()
+    assert path.exists()  # o do técnico aprovado fica
 
 
 async def test_ficha_uses_the_rules_of_the_app_and_the_central(

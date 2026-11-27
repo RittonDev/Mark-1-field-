@@ -294,24 +294,173 @@ async def test_reject_and_revoke(client: AsyncClient, world: World) -> None:
 
 async def test_long_codes_are_refused_without_echo(client: AsyncClient, world: World) -> None:
     """Código enorme nas áreas ou na disponibilidade da ficha pública: 422 sem o valor na resposta
-    (o código desconhecido volta na mensagem, então cada item tem limite) e o link não é gasto. O
-    código desconhecido curto continua dizendo qual é."""
-    assert max(len(code) for code in (*SERVICE_AREAS, *AVAILABILITY)) <= CODE_MAX
+    e o link não é gasto. A disponibilidade desconhecida curta continua dizendo qual é; a área
+    desconhecida não ecoa nada (o id do catálogo ou o código antigo: "Área não encontrada")."""
+    codes = [code for code, _ in technician_catalogs.DEFAULT_AREAS]
+    assert max(len(code) for code in AVAILABILITY) <= CODE_MAX
+    assert max(len(code) for code in codes) <= AREA_VALUE_MAX
+    assert len(str(uuid.uuid4())) <= AREA_VALUE_MAX
     token = await new_invite(client, world)
     url = f"{API}/public/onboarding/{token}"
-    for field in ("service_areas", "availability"):
+    for field, limit in (("service_areas", AREA_VALUE_MAX), ("availability", CODE_MAX)):
         r = await client.post(url, json=ficha(photo=None, **{field: ["x" * 200]}))
         assert r.status_code == 422, r.text
-        assert "x" * (CODE_MAX + 1) not in r.text
+        assert "x" * (limit + 1) not in r.text
         [issue] = r.json()["detail"]
-        assert (issue["loc"], issue["msg"]) == (
-            ["body", field, 0],
-            f"No máximo {CODE_MAX} caracteres",
-        )
+        assert (issue["loc"], issue["msg"]) == (["body", field, 0], f"No máximo {limit} caracteres")
     r = await client.post(url, json=ficha(photo=None, availability=["madrugada"]))
     assert r.status_code == 422
     assert r.json()["detail"][0]["msg"] == "Disponibilidade desconhecida: madrugada"
+    r = await client.post(url, json=ficha(photo=None, service_areas=["madrugada"]))
+    assert (r.status_code, r.json()) == (
+        422,
+        {"detail": "Área não encontrada. Atualize a lista", "code": "AREA_NOT_FOUND"},
+    )
     assert (await client.get(url)).json()["valid"] is True
+
+
+async def test_ficha_areas_and_skills_come_from_the_catalog(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """A ficha nova manda os ids; a de antes, os códigos e os nomes (sem acento e sem maiúsculas
+    casam). A ficha guarda os ids (áreas) e {skill_id, level} (aptidões), marca o 1º uso e a
+    Homologação mostra os nomes atuais, também dos desativados depois."""
+    an = world.analyst.headers
+    token = await new_invite(client, world, reusable=True, days_valid=30)
+    url = f"{API}/public/onboarding/{token}"
+    areas, skills = world.area_ids, world.skill_ids
+    linux, rack = skills["Linux"], skills["Montagem de rack"]
+
+    # A ficha nova: ids do catálogo (repetida conta uma vez).
+    body = ficha(
+        email="nova@exemplo.com",
+        document="123.456.789-09",
+        photo=None,
+        service_areas=[areas["redes"], areas["wifi"], areas["redes"]],
+        skills=[{"skill_id": linux, "level": "avancado"}, {"skill_id": rack, "level": "basico"}],
+    )
+    r = await client.post(url, json=body)
+    assert r.status_code == 201, r.text
+    # A de antes: códigos e nomes (em outra grafia).
+    old = ficha(
+        email="antiga@exemplo.com",
+        photo=None,
+        service_areas=["CFTV", "seguranca"],
+        skills=[{"name": " câmeras hikvision ", "level": "intermediario"}],
+    )
+    r = await client.post(url, json=old)
+    assert r.status_code == 201, r.text
+
+    async with engine.connect() as conn:
+        rows = {
+            email: (sorted(areas_), skills_)
+            for email, areas_, skills_ in await conn.execute(
+                select(
+                    TechnicianApplication.email,
+                    TechnicianApplication.service_areas,
+                    TechnicianApplication.skills,
+                )
+            )
+        }
+    assert rows["nova@exemplo.com"] == (
+        sorted([areas["redes"], areas["wifi"]]),
+        [{"skill_id": linux, "level": "avancado"}, {"skill_id": rack, "level": "basico"}],
+    )
+    assert rows["antiga@exemplo.com"] == (
+        sorted([areas["cftv"], areas["seguranca"]]),
+        [{"skill_id": skills["Câmeras Hikvision"], "level": "intermediario"}],
+    )
+    # O 1º uso ficou marcado (agora só desativa).
+    async with engine.connect() as conn:
+        used_areas = set(
+            await conn.scalars(select(ServiceArea.code).where(ServiceArea.used_at.is_not(None)))
+        )
+        used_skills = set(await conn.scalars(select(Skill.name).where(Skill.used_at.is_not(None))))
+    assert used_areas == {"redes", "wifi", "cftv", "seguranca"}
+    assert used_skills == {"Linux", "Montagem de rack", "Câmeras Hikvision"}
+
+    # Homologação: as áreas e as aptidões pelo nome atual, em ordem alfabética; renomeada sai com
+    # o nome novo; desativada continua (é o que o candidato escolheu).
+    sup = world.supervisor.headers
+    r = await client.patch(
+        f"{API}/technician-areas/{areas['wifi']}", json={"name": "Wi-Fi corporativo"}, headers=sup
+    )
+    assert r.status_code == 200, r.text
+    await client.patch(f"{API}/technician-skills/{rack}", json={"is_active": False}, headers=sup)
+    listed = {a["email"]: a for a in (await client.get(f"{API}/onboarding/applications", headers=an)).json()}
+    new = listed["nova@exemplo.com"]
+    assert new["areas"] == [
+        {"id": areas["redes"], "name": "Redes e cabeamento estruturado"},
+        {"id": areas["wifi"], "name": "Wi-Fi corporativo"},
+    ]
+    assert sorted(new["service_areas"]) == sorted([areas["redes"], areas["wifi"]])
+    detail = (await client.get(f"{API}/onboarding/applications/{new['id']}", headers=an)).json()
+    assert detail["areas"] == new["areas"]
+    assert detail["skills"] == [
+        {"skill_id": linux, "name": "Linux", "level": "avancado"},
+        {"skill_id": rack, "name": "Montagem de rack", "level": "basico"},
+    ]
+    assert detail["documents"] == []
+
+
+async def test_ficha_catalog_rules(client: AsyncClient, world: World, engine: AsyncEngine) -> None:
+    """Área desconhecida ou desativada, aptidão desconhecida, fora do catálogo ou repetida e a
+    ficha sem área (com o catálogo tendo alguma ativa) são recusadas, sem gastar o link; com o
+    catálogo de áreas todo desativado, a ficha vai sem área."""
+    token = await new_invite(client, world)
+    url = f"{API}/public/onboarding/{token}"
+    areas, skills = world.area_ids, world.skill_ids
+    sup = world.supervisor.headers
+    await client.patch(f"{API}/technician-areas/{areas['energia']}", json={"is_active": False}, headers=sup)
+    linux = {"skill_id": skills["Linux"], "level": "basico"}
+
+    def coded(detail: str, code: str) -> dict:
+        return {"detail": detail, "code": code}
+
+    not_found = coded("Área não encontrada. Atualize a lista", "AREA_NOT_FOUND")
+    cases: list[tuple[dict, dict]] = [
+        ({"service_areas": [str(uuid.uuid4())]}, not_found),
+        ({"service_areas": [areas["energia"]]}, not_found),  # desativada: a lista está velha
+        ({"service_areas": ["energia"]}, not_found),
+        ({"service_areas": []}, coded("Escolha pelo menos uma área de atuação", "AREA_REQUIRED")),
+        (
+            {"skills": [{"skill_id": str(uuid.uuid4()), "level": "basico"}]},
+            coded("Aptidão não encontrada. Atualize a lista", "SKILL_NOT_FOUND"),
+        ),
+        (
+            {"skills": [{"name": "Solda Exemplo", "level": "basico"}]},
+            coded(
+                "Atualize o app: as aptidões agora são escolhidas numa lista", "SKILL_UNKNOWN_NAME"
+            ),
+        ),
+        (
+            {"skills": [linux, {"name": "LINUX", "level": "avancado"}]},
+            coded("Aptidão repetida: Linux", "SKILL_REPEATED"),
+        ),
+    ]
+    for extra, expected in cases:
+        r = await client.post(url, json=ficha(photo=None, **extra))
+        assert (r.status_code, r.json()) == (422, expected), extra
+    # O formato da aptidão: o id ou o nome, um só; nada a mais.
+    for skill, message in (
+        ({**linux, "name": "Linux"}, "Escolha a aptidão"),
+        ({"level": "basico"}, "Escolha a aptidão"),
+        ({**linux, "since": "2026-01-01"}, "Campo não aceito"),
+    ):
+        r = await client.post(url, json=ficha(photo=None, skills=[skill]))
+        assert r.status_code == 422 and r.json()["detail"][0]["msg"] == message, skill
+    r = await client.post(url, json=ficha(photo=None, service_areas=list(areas.values()) * 3))
+    assert r.status_code == 422 and r.json()["detail"][0]["msg"] == "No máximo 20 itens"
+    assert (await client.get(url)).json()["valid"] is True
+
+    # Sem área ativa no catálogo, a ficha vai sem área.
+    async with engine.begin() as conn:
+        await conn.execute(update(ServiceArea).values(is_active=False))
+    r = await client.post(url, json=ficha(photo=None, service_areas=[]))
+    assert r.status_code == 201, r.text
+    async with engine.connect() as conn:
+        stored = await conn.scalar(select(TechnicianApplication.service_areas))
+    assert stored == []
 
 
 async def test_company_email_is_refused_on_the_form(
