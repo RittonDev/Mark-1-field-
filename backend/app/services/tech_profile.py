@@ -323,8 +323,9 @@ def items_text(labels: list[str], sep: str = ", ") -> str | None:
 
 
 # --------------------------------------------------------------- os catálogos
-# Ferramental, Aptidões e Áreas de atuação: services/technician_catalogs.py. Os nomes de antes
-# (tool_catalog, user_tools, tool_counts, ToolInfo) ficam para quem já usa.
+# Ferramental, Aptidões e Áreas de atuação: services/technician_catalogs.py (as contagens e o uso
+# de cada item também). Os nomes de antes (tool_catalog, user_tools, ToolInfo) ficam para quem já
+# usa.
 
 ToolInfo = CatalogInfo
 
@@ -337,13 +338,6 @@ async def tool_catalog(db: AsyncSession) -> dict[str, CatalogInfo]:
 async def user_tools(db: AsyncSession, user: User) -> dict[str, CatalogInfo]:
     """Só as ferramentas que o técnico marcou (ativas ou não): nenhuma consulta sem ferramenta."""
     return await technician_catalogs.picked(db, "tool", user.tool_ids or [])
-
-
-async def tool_counts(db: AsyncSession) -> dict[str, int]:
-    """Quantos técnicos (papel technician, ativos ou não) marcaram cada id, a mesma regra do
-    filtro `tool_id` da lista de técnicos."""
-    usage = await technician_catalogs.usage(db, "tool")
-    return {key: technicians for key, (technicians, _) in usage.items()}
 
 
 def skill_ids_of(user: User) -> list[str]:

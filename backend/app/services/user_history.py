@@ -676,6 +676,7 @@ def hide_internal(rows: list[UserChangeOut]) -> list[UserChangeOut]:
     """O histórico para quem não tem Técnicos em Editar: os itens dos anexos internos com "from"
     e "to" como "***" (null continua null; a tela diz "Anexos internos alterados"). Devolve
     cópias."""
+
     def masked(value: str | None) -> str | None:
         return None if value is None else INTERNAL_HIDDEN
 
