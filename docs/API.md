@@ -3164,8 +3164,9 @@ Aptidões com uma regra só.
   encontrada"). Renomear mantém o id e vale para todos. Desativar tira das escolhas (o app, a ficha pública e os filtros
   da web) e o item fica guardado com quem tinha; reativado, volta.
 - `DELETE` só do que nunca foi usado: `in_use` = `used_at` gravado, ou algum técnico ou ficha com o item agora (a
-  ferramenta não tem ficha). Com uso, 409 `CATALOG_IN_USE` ("desative"). A linha fica travada até o fim: quem grava o
-  item ao mesmo tempo espera, e o `used_at` dele conta.
+  ferramenta não tem ficha). Com uso, 409 `CATALOG_IN_USE` ("desative"). A linha fica travada durante a exclusão; um id
+  que ainda assim sumir do catálogo (gravado no mesmo instante da exclusão) é ignorado nas leituras e aparece no
+  histórico como "Ferramenta removida", "Aptidão removida" ou "Área removida".
 - `TechCatalogItem {id, name, is_active, technicians, applications, in_use}`, em ordem alfabética (sem acento e sem
   maiúsculas): `technicians`, os do papel técnico, com ou sem acesso, que têm o item (a regra dos filtros da lista);
   `applications`, as fichas de qualquer situação que o citam (Ferramental: 0, a ficha tem o ferramental em texto livre).
@@ -3269,8 +3270,8 @@ Aptidões com uma regra só.
   hoje + 30 (`count`: quantas estão assim) → `TechnicianOut.certification_due`. `due_count` (o Início,
   `pulse.team.certifications_due`, null sem Técnicos V): os técnicos com papel técnico, Ativos na operação (com ou sem
   acesso ao app), com `certification_due`. `expiry_status`: antes de hoje `expired`; de hoje a hoje + 30 `soon`; depois
-  `ok` (= `documentDue` de `lib/constants.ts`: "Vencida em 25/11/2026", "Vence hoje", "Vence amanhã", "Vence em 30
-  dias", "Válida até 27/12/2026").
+  `ok` (= `documentDue` de `lib/constants.ts`; o texto, `documentDueText`: "Vencida em 25/11/2026", "Vence hoje", "Vence
+  amanhã", "Vence em 30 dias", "Válida até 27/12/2026").
 
 **Ficha pública: áreas, aptidões e arquivos** (`services/onboarding.py` e `services/technician_documents.py`).
 - `ApplicationIn.service_areas`: 0 a 20 valores de até 40 caracteres, cada um o id do catálogo ou, na ficha aberta antes
