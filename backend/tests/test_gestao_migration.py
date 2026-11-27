@@ -655,13 +655,17 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
             await transaction.rollback()
 
 
-@pytest.mark.parametrize("name", ["Multímetro", "  Trena   laser ", "\ufb01bra"])
+@pytest.mark.parametrize("name", ["Multímetro", "  Trena   laser ", "\ufb01bra", "\ufb03" * 80])
 def test_tool_name_key_is_the_fold(name: str) -> None:
-    """O modelo grava o name_key sozinho (o mesmo fold da migração)."""
+    """O modelo grava o name_key sozinho (o mesmo fold da migração, cortado no tamanho da coluna:
+    80 ligaduras "ffi" dão 240 letras)."""
     from app.models import ServiceArea, Skill, TechnicianTool
+    from app.models.catalog import NAME_KEY_MAX, name_key_of
 
+    assert NAME_KEY_MAX == M.KEY_MAX
     for model in (TechnicianTool, ServiceArea, Skill):
         item = model(name=name)
-        assert item.name_key == M.key_of(name)
+        assert item.name_key == M.key_of(name) == name_key_of(name)
+        assert len(item.name_key) <= NAME_KEY_MAX
         item.name = "Outro Exemplo"
         assert item.name_key == "outro exemplo"

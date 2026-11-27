@@ -267,6 +267,17 @@ describe("as telas da gestão no app (pelas fontes)", () => {
     assert.ok(!source.includes("service_area"));
   });
 
+  it("área ou ferramenta marcada pela central que a lista da memória não tem: relê o catálogo (uma vez)", () => {
+    for (const [screen, reload] of [
+      ["areas", "reloadAreaCatalog"],
+      ["ferramental", "reloadToolCatalog"],
+    ]) {
+      const source = read(`../src/app/configuracoes/${screen}.tsx`);
+      assert.match(source, /const missing = \w+ \? saved\.filter\(/, screen);
+      assert.match(source, new RegExp(`useEffect\\(\\(\\) => \\{\\s*if \\(missing\\) void ${reload}\\(\\);\\s*\\}, \\[missing\\]\\);`), screen);
+    }
+  });
+
   it("o menu: Documentos, Currículo e Áreas de atuação \"Indisponível\" com o servidor de antes (fromE2)", () => {
     const menu = read("../src/app/configuracoes/index.tsx");
     for (const key of ["documentos", "areas-de-atuacao"]) {

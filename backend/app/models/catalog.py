@@ -127,11 +127,20 @@ class UnproductiveReason(UUIDPrimaryKey, Timestamps, Base):
 # Ferramental, Áreas de atuação e Aptidões: uma regra só (services/technician_catalogs.py). A
 # central inclui, renomeia e desativa; exclui só o que nunca foi usado. Sem ordem manual: as listas
 # saem em ordem alfabética (name_key). Desativado, o item some das escolhas (app, ficha, filtros) e
-# fica guardado com quem já tinha; reativado, volta. `name_key` = core.text.fold(name), gravado
-# sozinho quando o nome muda (@validates): o banco recusa o nome repetido sem acento e sem
-# maiúsculas (uq_*_name_key), de reserva para a trava do serviço. `used_at`: o 1º uso (o item
-# entrou no perfil de alguém pelo app, pela central ou pela ficha); com ele, o item não sai mais
-# (desativa).
+# fica guardado com quem já tinha; reativado, volta. `name_key` = core.text.fold(name)
+# (`name_key_of`), gravado sozinho quando o nome muda (@validates): o banco recusa o nome repetido
+# sem acento e sem maiúsculas (uq_*_name_key), de reserva para a trava do serviço. `used_at`: o 1º
+# uso (o item entrou no perfil de alguém pelo app, pela central ou pela ficha); com ele, o item não
+# sai mais (desativa).
+
+# O tamanho da coluna name_key: o fold de um nome de 80 pode passar disso (a ligadura U+FB03 vira
+# "ffi"), e aí ele é cortado, como na migração c8f2a4e6b0d3 (key_of).
+NAME_KEY_MAX = 160
+
+
+def name_key_of(name: str | None) -> str:
+    """O name_key de um nome: o fold (sem acento e sem maiúsculas), cortado em NAME_KEY_MAX."""
+    return fold(name)[:NAME_KEY_MAX]
 
 
 class TechnicianTool(UUIDPrimaryKey, Timestamps, Base):
@@ -146,13 +155,13 @@ class TechnicianTool(UUIDPrimaryKey, Timestamps, Base):
     )
 
     name: Mapped[str] = mapped_column(String(80))
-    name_key: Mapped[str] = mapped_column(String(160))
+    name_key: Mapped[str] = mapped_column(String(NAME_KEY_MAX))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     @validates("name")
     def _name_key(self, _: str, name: str) -> str:
-        self.name_key = fold(name)
+        self.name_key = name_key_of(name)
         return name
 
 
@@ -169,14 +178,14 @@ class ServiceArea(UUIDPrimaryKey, Timestamps, Base):
     )
 
     name: Mapped[str] = mapped_column(String(80))
-    name_key: Mapped[str] = mapped_column(String(160))
+    name_key: Mapped[str] = mapped_column(String(NAME_KEY_MAX))
     code: Mapped[str | None] = mapped_column(String(32))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     @validates("name")
     def _name_key(self, _: str, name: str) -> str:
-        self.name_key = fold(name)
+        self.name_key = name_key_of(name)
         return name
 
 
@@ -188,11 +197,11 @@ class Skill(UUIDPrimaryKey, Timestamps, Base):
     __table_args__ = (UniqueConstraint("name_key", name="uq_skill_catalog_name_key"),)
 
     name: Mapped[str] = mapped_column(String(80))
-    name_key: Mapped[str] = mapped_column(String(160))
+    name_key: Mapped[str] = mapped_column(String(NAME_KEY_MAX))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     @validates("name")
     def _name_key(self, _: str, name: str) -> str:
-        self.name_key = fold(name)
+        self.name_key = name_key_of(name)
         return name

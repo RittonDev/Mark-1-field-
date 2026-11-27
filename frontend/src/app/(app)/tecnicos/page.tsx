@@ -109,7 +109,6 @@ import {
 import type {
   DayPeriod,
   ImportResult,
-  LevelTier,
   OperationalStatus,
   TechCatalogItem,
   Technician,
@@ -141,9 +140,7 @@ const UNAVAILABLE_COLOR = "#d97706";
 const CERTIFICATION_COLOR = { expired: "#dc2626", soon: "#d97706" } as const;
 const CERTIFICATION_HINT = "Vencidas ou vencendo em até 30 dias";
 
-/** Filtro rápido do elo (sobre a lista carregada): uma faixa ou quem está em risco de descer. */
-type LevelFilter = LevelTier | "at_risk";
-/** As faixas nos chips do filtro, da mais alta à mais baixa. */
+/** As faixas nos chips do filtro do elo, da mais alta à mais baixa (e "Em risco": quem pode descer). */
 const LEVEL_CHIPS = [...LEVEL_TIER_ORDER].reverse();
 const AT_RISK_HINT = "Abaixo do critério: desce se não voltar a cumprir em 30 dias";
 

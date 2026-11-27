@@ -1,11 +1,12 @@
 // Ferramental (Configurações › Perfil profissional): o técnico marca as ferramentas que leva, do catálogo que a central
 // mantém (Configurações › Técnicos, na central). Salva ao tocar, sem botão: os toques de perto vão juntos num envio só
 // (sem rede, avisa e não muda). Ferramenta desativada na central com a tela aberta: o servidor ignora a marcação e a
-// lista é relida (ela some). Com muitas ferramentas, aparece a busca. Ferramental mudado por último pela central: o
-// carimbo "Atualizado pela central em …" no topo.
+// lista é relida (ela some); ferramenta marcada pela central que a lista ainda não tem: a lista é relida. Com muitas
+// ferramentas, aparece a busca. Ferramental mudado por último pela central: o carimbo "Atualizado pela central em …" no
+// topo.
 
 import { Stack } from "expo-router";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CentralStamp } from "../../components/settings/CentralStamp";
@@ -52,7 +53,13 @@ export default function ToolsScreen() {
   const [query, setQuery] = useState("");
   const tools = useMemo(() => (catalog.data ? sortTools(catalog.data) : null), [catalog.data]);
 
-  const header = <Stack.Screen options={{ headerRight: () => <SavingStatus status={status} /> }} />;
+  // Uma ferramenta gravada que a lista não tem (a central a criou e marcou depois da leitura): relê a lista uma vez.
+  const missing = tools ? saved.filter((id) => !tools.some((tool) => tool.id === id)).join(",") : "";
+  useEffect(() => {
+    if (missing) void reloadToolCatalog();
+  }, [missing]);
+
+  const header =<Stack.Screen options={{ headerRight: () => <SavingStatus status={status} /> }} />;
 
   if (gate.status === "unavailable") {
     return (

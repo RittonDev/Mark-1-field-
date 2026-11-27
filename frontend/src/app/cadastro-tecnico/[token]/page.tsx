@@ -633,15 +633,27 @@ const UNCHOSEN = "border-line bg-surface text-ink hover:border-brand";
 const FOCUS_RING =
   "focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none";
 
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function Chip({
+  active,
+  onClick,
+  disabled = false,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  /** No limite da escolha: os que não estão marcados ficam travados. */
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      disabled={disabled}
       className={clsx(
         // Alvo de toque de 44 px no celular.
-        "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors sm:min-h-9",
+        "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9",
         FOCUS_RING,
         // No escuro, o azul forte: o branco sobre o azul da marca ficava abaixo de 4,5:1.
         active ? CHOSEN : UNCHOSEN,
@@ -672,18 +684,31 @@ interface SubmitResult {
   upload_expires_at?: string;
 }
 
-/** A ficha enviada, com o login (a ficha some depois do envio) e os arquivos já recebidos. */
+type FichaKind = FichaDocument["kind"];
+
+/** Um cartão de documento ainda sem o arquivo no servidor (o arquivo escolhido não cabe na sessionStorage). */
+interface FichaDraft {
+  id: string;
+  kind: FichaKind;
+  title: string;
+  /** "AAAA-MM-DD" ou ""; só na certificação. */
+  expires_on: string;
+}
+
+/** A ficha enviada, com o login (a ficha some depois do envio), os arquivos já recebidos e os cartões abertos. */
 interface SentState extends SubmitResult {
   login: string;
   documents: FichaDocument[];
+  drafts: FichaDraft[];
   savedAt: number;
 }
 
 /*
  * A ficha enviada fica nesta aba: depois do envio, a pessoa vai à câmera para os documentos, e o navegador do celular
  * pode descartar a aba. A sessionStorage (só desta aba; some ao fechá-la) guarda o protocolo, o login, o token dos
- * arquivos e o que já subiu: aberto de novo o mesmo link, volta o "Ficha enviada!" com os documentos, até o prazo dos
- * arquivos (sem ele, por 2 h). Sem sessionStorage, a página volta ao começo, como antes.
+ * arquivos, o que já subiu e os cartões abertos (sem o arquivo): aberto de novo o mesmo link, volta o "Ficha enviada!"
+ * com os documentos, até o prazo dos arquivos (sem ele, por 2 h). Sem sessionStorage, a página volta ao começo, como
+ * antes.
  */
 const SENT_KEY = "mf-cadastro-tecnico-enviada:";
 const SENT_TTL_MS = 2 * 3_600_000;
@@ -700,6 +725,18 @@ function isFichaDocument(value: unknown): value is FichaDocument {
     typeof d.file_name === "string" &&
     typeof d.size === "number" &&
     (d.expires_on === null || d.expires_on === undefined || typeof d.expires_on === "string")
+  );
+}
+
+function isFichaDraft(value: unknown): value is FichaDraft {
+  if (!value || typeof value !== "object") return false;
+  const d = value as Record<string, unknown>;
+  return (
+    typeof d.id === "string" &&
+    typeof d.kind === "string" &&
+    FICHA_KINDS.includes(d.kind) &&
+    typeof d.title === "string" &&
+    typeof d.expires_on === "string"
   );
 }
 
@@ -723,6 +760,7 @@ function loadSent(token: string): SentState | null {
       upload_expires_at: expires,
       login: typeof saved.login === "string" ? saved.login : "",
       documents: Array.isArray(saved.documents) ? saved.documents.filter(isFichaDocument) : [],
+      drafts: Array.isArray(saved.drafts) ? saved.drafts.filter(isFichaDraft) : [],
       savedAt,
     };
   } catch {
@@ -766,6 +804,7 @@ export default function TechnicianSignupPage() {
   const choices = useMemo(() => choicesOf(cat), [cat]);
   // Só o que está no catálogo de agora conta e vai no envio: o rascunho pode trazer uma área ou aptidão que saiu dele.
   const chosenAreas = form.service_areas.filter((key) => choices.areas.some((a) => a.key === key));
+  const areasFull = chosenAreas.length >= MAX_AREAS;
   const skillLabels = new Map(choices.skills.map((s) => [s.key, s.label]));
   const chosenSkills = form.skills.filter((s) => skillLabels.has(s.key));
   const formRef = useRef<HTMLFormElement>(null);
@@ -1034,7 +1073,7 @@ export default function TechnicianSignupPage() {
         },
       });
       clearDraft();
-      setSent({ ...res, login: form.email.trim().toLowerCase(), documents: [], savedAt: Date.now() });
+      setSent({ ...res, login: form.email.trim().toLowerCase(), documents: [], drafts: [], savedAt: Date.now() });
       window.scrollTo({ top: 0 });
     } catch (error) {
       if (error instanceof ApiError && error.status === 410) {
@@ -1088,13 +1127,29 @@ export default function TechnicianSignupPage() {
 
   return (
     <PublicShell wide footer="Maxx Field · seus dados são protegidos conforme a LGPD">
-      {sent ? (
-        <PublicPanel
-          icon={<CheckCircle2 className="size-10 text-brand" />}
-          title="Ficha enviada!"
-          text={`Protocolo ${sent.protocol}. A equipe analisa o seu cadastro e te avisa pelo WhatsApp como instalar o app. Seu login será ${login}, com a senha que você criou.`}
-          note={sent.email_verification === "queued" ? `Enviamos um link para ${login}. Abra para validar o seu e-mail.` : undefined}
-        />
+      {shownSent ? (
+        <>
+          <PublicPanel
+            icon={<CheckCircle2 className="size-10 text-brand" />}
+            title="Ficha enviada!"
+            text={`Protocolo ${shownSent.protocol}. A equipe analisa o seu cadastro e te avisa pelo WhatsApp como instalar o app. Seu login será ${shownSent.login || login}, com a senha que você criou.`}
+            note={
+              shownSent.email_verification === "queued"
+                ? `Enviamos um link para ${shownSent.login || login}. Abra para validar o seu e-mail.`
+                : undefined
+            }
+          />
+          {/* Sem o token (API de antes da Entrega 2), a ficha enviada não recebe arquivos. */}
+          {shownSent.upload_token ? (
+            <FichaDocuments
+              uploadToken={shownSent.upload_token}
+              expiresAt={shownSent.upload_expires_at ?? null}
+              documents={shownSent.documents}
+              drafts={shownSent.drafts}
+              onChange={(update) => setSent((s) => (s ? { ...s, ...update(s) } : s))}
+            />
+          ) : null}
+        </>
       ) : check === "loading" || (catalog.isLoading && check === "valid") ? (
         <LoadingBlock />
       ) : check === "invalid" ? (
@@ -1445,15 +1500,32 @@ export default function TechnicianSignupPage() {
 
               {step === 2 && cat ? (
                 <>
-                  <Group label="Em que você atende?" required field="service_areas" error={fieldError("service_areas")}>
-                    <div className="flex flex-wrap gap-2">
-                      {cat.service_areas.map((a) => (
-                        <Chip key={a.key} active={form.service_areas.includes(a.key)} onClick={() => toggle("service_areas", a.key)}>
-                          {a.label}
-                        </Chip>
-                      ))}
-                    </div>
-                  </Group>
+                  {/* Sem nenhuma área no catálogo, o grupo some (e não é obrigatório). */}
+                  {choices.areas.length ? (
+                    <Group
+                      label="Em que você atende?"
+                      required
+                      field="service_areas"
+                      error={fieldError("service_areas")}
+                      hint={areasFull ? `Limite de ${MAX_AREAS} áreas de atuação.` : undefined}
+                    >
+                      <div className="flex flex-wrap gap-2">
+                        {choices.areas.map((a) => {
+                          const active = chosenAreas.includes(a.key);
+                          return (
+                            <Chip
+                              key={a.key}
+                              active={active}
+                              disabled={!active && areasFull}
+                              onClick={() => toggle("service_areas", a.key)}
+                            >
+                              {a.label}
+                            </Chip>
+                          );
+                        })}
+                      </div>
+                    </Group>
+                  ) : null}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Anos de experiência" error={fieldError("years_experience")}>
                       <Input
@@ -1469,15 +1541,18 @@ export default function TechnicianSignupPage() {
                       />
                     </Field>
                   </div>
-                  <Group label="Aptidões" field="skills" error={fieldError("skills")}>
-                    <SkillCards
-                      skills={form.skills}
-                      levels={cat.skill_levels}
-                      suggestions={cat.skill_suggestions}
-                      onChange={(skills) => set("skills", skills)}
-                      invalidName={problem?.field === "skills" ? (problem.target ?? null) : null}
-                    />
-                  </Group>
+                  {/* Sem nenhuma aptidão no catálogo, o grupo some. */}
+                  {choices.skills.length ? (
+                    <Group label="Aptidões" field="skills" error={fieldError("skills")}>
+                      <SkillCards
+                        skills={chosenSkills}
+                        options={choices.skills}
+                        levels={cat.skill_levels}
+                        onChange={(skills) => set("skills", skills)}
+                        invalid={problem?.field === "skills"}
+                      />
+                    </Group>
+                  ) : null}
                   <Field label="Certificações e cursos" error={fieldError("certifications")}>
                     <Textarea
                       name="certifications"
@@ -1852,56 +1927,62 @@ function PhotoPicker({ value, onChange, name }: { value: string | null; onChange
 }
 
 /**
- * Aptidões no celular: um cartão por aptidão (nome e nível em botões de 44 px), as sugestões numa lista própria e
- * "Adicionar aptidão". Começa sem cartão; com 30, somem o botão e as sugestões.
+ * Aptidões do catálogo, legíveis no celular: um cartão por aptidão escolhida (o nome, o nível em botões de 44 px e
+ * Remover) e, abaixo, a busca com as aptidões que casam (sem as escolhidas), em ordem alfabética, até 20 de cada vez.
+ * Tocar numa soma o cartão (Intermediário) e leva o foco ao nível. Com 30, a busca dá lugar ao aviso do limite.
  */
 function SkillCards({
   skills,
+  options,
   levels,
-  suggestions,
   onChange,
-  invalidName,
+  invalid,
 }: {
+  /** As escolhidas que estão no catálogo de agora, na ordem em que foram escolhidas. */
   skills: Skill[];
+  /** O catálogo da ficha (as ativas), em ordem alfabética. */
+  options: CatalogItem[];
   levels: CatalogItem[];
-  suggestions: string[];
   onChange: (skills: Skill[]) => void;
-  /** `name` do nome com problema (o recado aparece no fim do grupo). */
-  invalidName: string | null;
+  /** O grupo tem um problema (a busca é marcada e recebe o foco). */
+  invalid: boolean;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
-  const addRef = useRef<HTMLButtonElement>(null);
-  const suggestionsId = useId();
-  // Depois de criar ou tirar um cartão, para onde vai o foco.
-  const [focusRequest, setFocusRequest] = useState<{ index: number; part: "name" | "level" } | { part: "add" } | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const resultsId = useId();
+  const [query, setQuery] = useState("");
+  // Depois de somar ou tirar um cartão, para onde vai o foco: o nível do cartão (o novo ou o que ficou no lugar) ou a
+  // busca (sem cartão).
+  const [focusRequest, setFocusRequest] = useState<{ key: string } | "search" | null>(null);
   useEffect(() => {
     if (!focusRequest) return;
-    if (focusRequest.part === "add") {
-      addRef.current?.focus();
+    if (focusRequest === "search") {
+      searchRef.current?.focus();
       return;
     }
-    const card = listRef.current?.querySelector<HTMLElement>(`[data-skill="${focusRequest.index}"]`);
-    const target =
-      focusRequest.part === "name"
-        ? card?.querySelector<HTMLElement>("input")
-        : (card?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]') ?? card?.querySelector<HTMLElement>('[role="radio"]'));
-    target?.focus();
+    const card = listRef.current?.querySelector<HTMLElement>(`[data-skill="${CSS.escape(focusRequest.key)}"]`);
+    (card?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]') ?? card?.querySelector<HTMLElement>('[role="radio"]'))?.focus();
   }, [focusRequest]);
 
+  const labels = new Map(options.map((o) => [o.key, o.label]));
+  const chosen = new Set(skills.map((s) => s.key));
+  const term = foldName(query);
+  const matches = options.filter((o) => !chosen.has(o.key) && (!term || foldName(o.label).includes(term)));
+  const shown = matches.slice(0, SKILL_MATCHES);
   const full = skills.length >= MAX_SKILLS;
-  const taken = new Set(skills.map((s) => foldName(s.name)));
-  const open = suggestions.filter((s) => !taken.has(foldName(s)));
-  const update = (index: number, patch: Partial<Skill>) => onChange(skills.map((s, i) => (i === index ? { ...s, ...patch } : s)));
-  const add = (name: string) => {
-    onChange([...skills, { name, level: DEFAULT_SKILL_LEVEL }]);
-    // Pela sugestão, o nome já está: falta o nível. Cartão vazio: o nome.
-    setFocusRequest({ index: skills.length, part: name ? "level" : "name" });
+
+  const update = (key: string, level: string) => onChange(skills.map((s) => (s.key === key ? { ...s, level } : s)));
+  const add = (key: string) => {
+    if (full || chosen.has(key)) return;
+    onChange([...skills, { key, level: DEFAULT_SKILL_LEVEL }]);
+    setFocusRequest({ key });
   };
   const remove = (index: number) => {
-    onChange(skills.filter((_, i) => i !== index));
-    // O botão sumiu com o cartão: o foco vai para o cartão que ficou no lugar (ou o de cima), ou para "Adicionar".
-    const left = skills.length - 1;
-    setFocusRequest(left > 0 ? { index: Math.min(index, left - 1), part: "name" } : { part: "add" });
+    const left = skills.filter((_, i) => i !== index);
+    onChange(left);
+    // O botão sumiu com o cartão: o foco vai para o nível do cartão que ficou no lugar (ou o de cima), ou para a busca.
+    const neighbor = left[Math.min(index, left.length - 1)];
+    setFocusRequest(neighbor ? { key: neighbor.key } : "search");
   };
 
   return (
@@ -1909,73 +1990,85 @@ function SkillCards({
       {skills.length ? (
         <div ref={listRef} className="flex flex-col gap-2">
           {skills.map((skill, i) => {
-            const n = i + 1;
+            const name = labels.get(skill.key) ?? skill.key;
             return (
-              <div key={i} data-skill={i} className="rounded-lg border border-line p-3">
+              <div key={skill.key} data-skill={skill.key} className="rounded-lg border border-line p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-ink-muted">Aptidão {n}</span>
+                  <span className="min-w-0 text-sm font-semibold break-words text-ink">{name}</span>
                   <button
                     type="button"
                     onClick={() => remove(i)}
                     className="-my-2.5 -mr-2.5 inline-flex size-11 shrink-0 items-center justify-center rounded-md text-ink-muted hover:bg-surface-2 hover:text-red-700 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:hover:text-red-400"
-                    aria-label={`Remover aptidão ${n}`}
+                    aria-label={`Remover ${name}`}
                   >
                     <Trash2 className="size-4" />
                   </button>
                 </div>
-                <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <Input
-                    name={`skill_${i}`}
-                    className="sm:min-w-0 sm:flex-1"
-                    value={skill.name}
-                    maxLength={80}
-                    aria-label={`Nome da aptidão ${n}`}
-                    aria-invalid={invalidName === `skill_${i}` ? true : undefined}
-                    onChange={(e) => update(i, { name: e.target.value })}
-                  />
-                  <LevelPicker
-                    label={`Nível da aptidão ${n}`}
-                    levels={levels}
-                    value={skill.level}
-                    onChange={(level) => update(i, { level })}
-                  />
+                <div className="mt-1.5">
+                  <LevelPicker label={`Nível de ${name}`} levels={levels} value={skill.level} onChange={(level) => update(skill.key, level)} />
                 </div>
               </div>
             );
           })}
         </div>
       ) : null}
-      {full ? null : (
+      {full ? (
+        <p className="text-xs text-ink-muted">Limite de {MAX_SKILLS} aptidões.</p>
+      ) : (
         <>
-          <Button ref={addRef} size="lg" className="self-start sm:h-9 sm:px-3.5" onClick={() => add("")}>
-            <Plus className="size-4" />
-            Adicionar aptidão
-          </Button>
-          {open.length ? (
-            <div className="flex flex-col gap-1.5">
-              <p id={suggestionsId} className="text-xs font-semibold text-ink/80">
-                Sugestões
-              </p>
-              <div role="group" aria-labelledby={suggestionsId} className="flex flex-wrap gap-2">
-                {open.map((name) => (
+          <div className="relative">
+            <Search aria-hidden className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-subtle" />
+            <Input
+              ref={searchRef}
+              // O problema do grupo (do servidor) leva o foco para cá.
+              name="skills"
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter não envia a etapa: com uma aptidão só na busca, ela entra.
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                if (term && matches.length === 1) add(matches[0].key);
+              }}
+              placeholder="Buscar aptidão"
+              aria-label="Buscar aptidão"
+              aria-controls={resultsId}
+              aria-invalid={invalid || undefined}
+              autoComplete="off"
+              enterKeyHint="search"
+              className="pl-9"
+            />
+          </div>
+          <div id={resultsId} className="flex flex-col gap-1.5">
+            {shown.length ? (
+              <div role="group" aria-label="Aptidões para escolher" className="flex flex-wrap gap-2">
+                {shown.map((option) => (
                   <button
-                    key={name}
+                    key={option.key}
                     type="button"
-                    onClick={() => add(name)}
+                    onClick={() => add(option.key)}
                     className={clsx(
-                      "inline-flex min-h-11 items-center gap-1 rounded-full border px-3 py-1.5 text-sm transition-colors",
+                      "inline-flex min-h-11 items-center gap-1 rounded-full border px-3 py-1.5 text-left text-sm transition-colors",
                       FOCUS_RING,
                       UNCHOSEN,
                     )}
                   >
-                    <Plus aria-hidden className="size-3.5" />
+                    <Plus aria-hidden className="size-3.5 shrink-0" />
                     <span className="sr-only">Adicionar </span>
-                    {name}
+                    {option.label}
                   </button>
                 ))}
               </div>
-            </div>
-          ) : null}
+            ) : null}
+            <p role="status" className="text-xs text-ink-muted empty:hidden">
+              {term && !matches.length
+                ? `Nenhuma aptidão com “${query.trim()}”.`
+                : matches.length > SKILL_MATCHES
+                  ? `Mais ${matches.length - SKILL_MATCHES}: refine a busca.`
+                  : ""}
+            </p>
+          </div>
         </>
       )}
     </div>

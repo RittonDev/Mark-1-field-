@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums import UserRole
 from app.core.text import clean, fold
 from app.models import ServiceArea, Skill, TechnicianTool, User
+from app.models.catalog import name_key_of
 from app.schemas.common import Ref
 from app.schemas.tech_profile import (
     SkillLevel,
@@ -410,7 +411,7 @@ async def seed_defaults(db: AsyncSession) -> None:
         pg_insert(ServiceArea)
         .values(
             [
-                {"id": uuid.uuid4(), "name": name, "name_key": fold(name), "code": code}
+                {"id": uuid.uuid4(), "name": name, "name_key": name_key_of(name), "code": code}
                 for code, name in DEFAULT_AREAS
             ]
         )
@@ -419,7 +420,10 @@ async def seed_defaults(db: AsyncSession) -> None:
     await db.execute(
         pg_insert(Skill)
         .values(
-            [{"id": uuid.uuid4(), "name": name, "name_key": fold(name)} for name in DEFAULT_SKILLS]
+            [
+                {"id": uuid.uuid4(), "name": name, "name_key": name_key_of(name)}
+                for name in DEFAULT_SKILLS
+            ]
         )
         .on_conflict_do_nothing()
     )
@@ -465,7 +469,7 @@ def _checked_name(spec: _Spec, raw: str) -> str:
 async def _check_name(db: AsyncSession, spec: _Spec, name: str, self_id: uuid.UUID | None) -> None:
     """O nome repetido sem acento e sem maiúsculas, entre ativos e desativados (com a trava)."""
     model = spec.model
-    other = await db.scalar(select(model.id).where(model.name_key == fold(name)))
+    other = await db.scalar(select(model.id).where(model.name_key == name_key_of(name)))
     if other is not None and other != self_id:
         raise CodedError(NAME_TAKEN.format(noun=spec.noun), "CATALOG_NAME_TAKEN", 409)
 
