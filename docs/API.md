@@ -1652,8 +1652,9 @@ histórico do cadastro. Motivo da senha e do histórico: uma conta invadida não
   - `pix`: desde 25/11/2026, 422 "Atualize o app: a chave PIX agora fica em Configurações › Formas de recebimento" (a
     chave virou forma de recebimento, com rotas próprias; até 24/11/2026 era `{key_type, key, holder_name}`, e null
     tirava a chave);
-  - `tool_ids`, `availability`, `transport`, `skills` e `education`: o perfil técnico, cada parte inteira e sem senha
-    (ver [Perfil técnico](#perfil-técnico-2026-11-19));
+  - `tool_ids`, `availability`, `transport`, `skills` e `education` e, desde 26/11/2026, `area_ids`: o perfil técnico,
+    cada parte inteira e sem senha (ver [Perfil técnico](#perfil-técnico-2026-11-19) e
+    [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26));
   - `current_password` (até 256).
 - Ordem do `PATCH`:
   1. Conta só o que muda de verdade (o mesmo celular ou a mesma cidade escritos de outro jeito não contam). Sem nada
@@ -1727,7 +1728,9 @@ operação), com o texto pronto para a tela:
 - perfil técnico: `tools`, `availability`, `skills` e `education` com o que **saiu** em `from` e o que **entrou** em
   `to`, e `transport` de → para (ver [Perfil técnico](#perfil-técnico-2026-11-19));
 - os campos do cadastro V2 (dados pessoais, empresa, veículo, e-mail pendente e validado, situação, formas de
-  recebimento, indisponibilidade, `application`, `password_link`): ver [Cadastro V2](#cadastro-v2-2026-11-25).
+  recebimento, indisponibilidade, `application`, `password_link`): ver [Cadastro V2](#cadastro-v2-2026-11-25);
+- desde 26/11/2026, `areas` (como `tools`), `documents`, `internal_attachments` (sem Técnicos Editar, "***"), `favorites`
+  e `ratings`, os quatro com a frase em `to`: ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26).
 
 E-mail e celular ficam em claro (a central desfaz uma troca indevida); chave PIX e conta, nunca. Gravam o histórico: o
 `PATCH /me/profile`, o cancelamento da troca de e-mail, as rotas das formas de recebimento, a foto e o
@@ -1737,7 +1740,9 @@ E-mail e celular ficam em claro (a central desfaz uma troca indevida); chave PIX
 /technicians/{id}/photo`, `DELETE /technicians/{id}/payout-methods/{method_id}` e o `PATCH /users/{id}` de técnico (via
 central, com o autor); a aprovação da ficha (via ficha, autor: quem aprovou; a linha "Aprovado na homologação", e o
 perfil técnico que vem da ficha entra sem linha própria); e o link do e-mail (via link: a senha nova e o e-mail
-validado). A importação por planilha e a do Field Control não entram.
+validado). A importação por planilha e a do Field Control não entram. Desde 26/11/2026, gravam também as rotas de
+documentos (app e central), a avaliação do cliente e os favoritos (via central), e a aprovação põe na linha um item
+`documents` por arquivo da ficha.
 
 Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisória)", "Senha definida pela central",
 "Senha criada no app" ou "Senha trocada no app" (e as duas pelo link do e-mail).
@@ -1807,11 +1812,15 @@ não começa com "technician." (a web mandaria o evento para o mapa).
   técnico na seção do que mudou (Formas de recebimento só com Pagamentos). Com `after_reset`, o título termina em "logo
   depois de a senha ser redefinida por {by}" e o aviso fica vermelho, também na troca só de e-mail.
 - `fields` traz também as partes do perfil técnico (`tools`, `availability`, `transport`, `skills`, `education`): ver
-  [Perfil técnico](#perfil-técnico-2026-11-19).
+  [Perfil técnico](#perfil-técnico-2026-11-19). Desde 26/11/2026, também `areas`, `documents`, `internal_attachments`,
+  `ratings` e `favorites` (sem aviso no sino: só atualizam as telas).
+- Desde 26/11/2026, quando a mudança não vem do app (via central, ficha ou link) e mexe em algo que o app mostra, sai
+  também `me.profile_changed`, só para o técnico e sem dados: ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26).
 
-**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-26", o dia da publicação do cadastro V2 (era "2026-11-20"; o
-`GET /public/onboarding/catalog` devolve a versão nova e a ficha grava a do servidor no aceite). Na publicação, vale a
-data do dia, igual nos três lugares.
+**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-26.2", a segunda versão do dia, da Entrega 2 (antes, "2026-11-26",
+o dia da publicação do cadastro V2, e "2026-11-20"; o `GET /public/onboarding/catalog` devolve a versão nova e a ficha
+grava a do servidor no aceite). Na publicação, vale a data do dia, igual nos três lugares (publicada noutro dia que não
+26/11/2026, a Entrega 2 sai com a data desse dia).
 - O texto (`PRIVACY_NOTICE`) e a versão (`PRIVACY_VERSION`) ficam em `frontend/src/lib/constants.ts` e
   `mobile/src/lib/constants.ts`, cópias idênticas; `frontend/src/lib/onboarding.ts` só reexporta. Mudar o texto pede
   mudar a versão nos dois lados (as duas cópias e `backend/app/schemas/onboarding.py`), no mesmo dia.
@@ -1835,12 +1844,15 @@ data do dia, igual nos três lugares.
   e a consulta de CEP, que leva só o CEP; a instituição financeira no pagamento), **E-mails** (só mensagens do
   cadastro, automáticas e sem resposta), Localização (GPS), Notas fiscais, Elo, Por quanto tempo (a ficha reprovada
   fica 180 dias contados da última análise e pode ser reaberta nesse prazo; o registro dos e-mails, 180 dias) e Seus
-  direitos (o CPF, depois de informado, só a central corrige). O texto final pede a revisão do dono ou do jurídico antes
-  de publicar.
+  direitos (o CPF, depois de informado, só a central corrige); e, desde a "2026-11-26.2", os documentos enviados na
+  ficha ou no app (documentos pessoais, certificações com a validade e o currículo), o perfil técnico também pela
+  central, a seção **Avaliações e anexos internos** (só da equipe, fora do app e do Elo) e a retenção dos arquivos e das
+  versões: ver [Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26). O texto final pede a revisão do dono ou do
+  jurídico antes de publicar.
 - No app (Perfil › Aviso de privacidade), a tela mostra o mesmo texto, só para leitura, com "Atualizado em
   {PRIVACY_DATE}": não grava ciência nem pede aceite de novo. Na versão nova, o cartão de Hoje avisa "Agora ele inclui
-  RG, veículo, empresa e formas de recebimento." (na "2026-11-20": "Agora ele fala do seu perfil técnico e dos registros
-  das ofertas de OS.").
+  documentos, currículo e avaliações." (na "2026-11-26": "Agora ele inclui RG, veículo, empresa e formas de
+  recebimento."; na "2026-11-20": "Agora ele fala do seu perfil técnico e dos registros das ofertas de OS.").
 
 ## Perfil técnico (2026-11-19)
 
@@ -1853,6 +1865,13 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
 `api/routes/catalog.py` (seção "ferramental dos técnicos"), `services/technicians.py`, `services/suggestions.py` e
 `services/onboarding.py`.
 
+**Desde 26/11/2026** ([Gestão dos técnicos](#gestão-dos-técnicos-2026-11-26)): a central também edita o perfil técnico
+(`PATCH /technicians/{id}`, com as regras daqui e o carimbo `central`); as **Áreas de atuação** viram a sexta parte
+(`area_ids`, carimbo `areas`, do catálogo de Configurações › Técnicos); as aptidões vêm do catálogo **Aptidões** (gravadas
+`{skill_id, level, since}`; a entrada é `{skill_id, level}` ou, do app de antes, `{name, level}`; o "desde" fica pelo
+id); o Ferramental passa a excluir o que nunca foi usado, o `GET` traz `applications` e `in_use` e o 409 ganha o código
+`CATALOG_NAME_TAKEN`. O resto desta seção vale com essas trocas, marcadas onde mudam.
+
 **Dados** (migração `f5a7c9e1b3d6`, depois de `e4b6d8f0a2c3`).
 - `users` ganha colunas, todas NOT NULL com default (a importação do Field Control e os INSERT em lote não passam por
   elas):
@@ -1863,12 +1882,13 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
   | `availability` | `[]` | turnos `"dia:turno"` (`"sat:afternoon"`), sem repetir, na ordem da grade |
   | `transport_modes` | `[]` | meios de transporte, na ordem da lista |
   | `has_driver_license` | `false` | CNH (só vale com a parte `transport` informada) |
-  | `skills` | `[]` | `[{name, level, since}]`, já ordenadas |
+  | `skills` | `[]` | `[{name, level, since}]`, já ordenadas (desde 26/11/2026, `[{skill_id, level, since}]`) |
   | `education` | `[]` | `[{id, course, level, institution, start, end}]`, já ordenadas |
   | `tech_profile_stamps` | `{}` | `{parte: {at, via}}`, só das partes já informadas |
 
 - Tabela `tool_catalog` (modelo `TechnicianTool`, em `models/catalog.py`): `id`, `name` (até 80, único exato:
-  `uq_tool_catalog_name`), `is_active` (padrão true), `created_at` e `updated_at`. Começa com 20 ferramentas de TI de
+  `uq_tool_catalog_name`), `is_active` (padrão true), `created_at` e `updated_at` (desde 26/11/2026, também `name_key`,
+  único, e `used_at`). Começa com 20 ferramentas de TI de
   campo (`DEFAULT_TOOLS`): Alicate de corte, Alicate de crimpar, Alicate de inserção (punch down), Caneta óptica (VFL),
   Escada, Etiquetadora, Ferro de solda, Furadeira, HD externo, Jogo de chaves Phillips e fenda, Kit de limpeza,
   Lanterna, Localizador de cabos, Máquina de fusão de fibra óptica, Multímetro, Notebook com cabo console,
