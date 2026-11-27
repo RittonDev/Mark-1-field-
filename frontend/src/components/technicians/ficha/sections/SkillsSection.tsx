@@ -11,7 +11,7 @@ import type { SkillLevel, TechCatalogItem, Technician, UUID } from "@/lib/types"
 import { partStamp, ProfileUnavailable, profileInfo, SkillsPart } from "../../TechProfileView";
 import { EmptyCatalog } from "../CatalogChips";
 import { fichaLabel } from "../FichaNav";
-import { apiErrorText, SectionCard, SectionForm } from "../SectionCard";
+import { apiErrorText, LegacyNote, SectionCard, SectionForm } from "../SectionCard";
 import { useSectionForm } from "../useSectionForm";
 
 /** Uma aptidão na tela: a do catálogo, o nível e o "desde" (a incluída agora ainda não tem: o servidor grava hoje). */
@@ -47,6 +47,8 @@ export function SkillsSection({ tech, canEdit }: { tech: Technician; canEdit: bo
   const pre = isPreGestao(tech);
   return (
     <SectionCard title={fichaLabel("aptidoes")} aside={partStamp(info, "skills")}>
+      {/* A API de antes da Gestão não grava o perfil pela central: só leitura, com o aviso para quem edita. */}
+      {canEdit && pre && info ? <LegacyNote /> : null}
       {!info ? (
         <ProfileUnavailable />
       ) : !pre || info.informed.skills ? (

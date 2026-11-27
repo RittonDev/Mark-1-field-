@@ -292,11 +292,6 @@ export function useTechCatalog(kind: TechCatalogKind, active?: boolean) {
   });
 }
 
-/** O catálogo de ferramentas: o mesmo que useTechCatalog("tools", active) (o nome de antes, para quem ainda usa). */
-export function useTechnicianTools(active?: boolean) {
-  return useTechCatalog("tools", active);
-}
-
 /**
  * Os documentos do técnico na ficha (Documentos, Currículo e Anexos internos; os internos só vêm com Técnicos Editar),
  * cada um com o link assinado de 30 min: relê a cada DOCUMENT_REFRESH_MS e, passado esse tempo, ao voltar para a aba.

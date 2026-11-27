@@ -16,7 +16,7 @@ import {
 import type { EducationLevel, Technician, UUID } from "@/lib/types";
 import { EducationPart, partStamp, ProfileUnavailable, profileInfo } from "../../TechProfileView";
 import { fichaLabel } from "../FichaNav";
-import { SectionCard, SectionForm } from "../SectionCard";
+import { LegacyNote, SectionCard, SectionForm } from "../SectionCard";
 import { type SectionErrors, useSectionForm } from "../useSectionForm";
 
 /** Um curso na tela: o gravado tem `id` (e a chave é ele); o incluído agora, só a chave. */
@@ -67,6 +67,8 @@ export function EducationSection({ tech, canEdit }: { tech: Technician; canEdit:
   const pre = isPreGestao(tech);
   return (
     <SectionCard title={fichaLabel("formacao")} aside={partStamp(info, "education")}>
+      {/* A API de antes da Gestão não grava o perfil pela central: só leitura, com o aviso para quem edita. */}
+      {canEdit && pre && info ? <LegacyNote /> : null}
       {!info ? (
         <ProfileUnavailable />
       ) : !pre || info.informed.education ? (

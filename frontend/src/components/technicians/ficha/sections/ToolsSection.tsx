@@ -9,7 +9,7 @@ import type { Technician, UUID } from "@/lib/types";
 import { partStamp, ProfileUnavailable, profileInfo, ToolsPart } from "../../TechProfileView";
 import { CatalogChips, EmptyCatalog } from "../CatalogChips";
 import { fichaLabel } from "../FichaNav";
-import { apiErrorText, SectionCard, SectionForm } from "../SectionCard";
+import { apiErrorText, LegacyNote, SectionCard, SectionForm } from "../SectionCard";
 import { useSectionForm } from "../useSectionForm";
 
 /** A busca aparece com mais de 15 ferramentas. */
@@ -35,6 +35,8 @@ export function ToolsSection({ tech, canEdit }: { tech: Technician; canEdit: boo
   const pre = isPreGestao(tech);
   return (
     <SectionCard title={fichaLabel("ferramental")} aside={partStamp(info, "tools")}>
+      {/* A API de antes da Gestão não grava o perfil pela central: só leitura, com o aviso para quem edita. */}
+      {canEdit && pre && info ? <LegacyNote /> : null}
       {!info ? (
         <ProfileUnavailable />
       ) : !pre || info.informed.tools ? (

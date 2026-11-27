@@ -382,8 +382,10 @@ FIELD_LABELS: dict[str, str] = {
     "reason": "Motivo",
     # Links por e-mail (validar o e-mail, nova senha).
     "token": "Link",
-    # Gestão dos técnicos (Entrega 2): áreas e aptidões do catálogo, documentos e a avaliação do
+    # Gestão dos técnicos (Entrega 2): áreas e aptidões do catálogo (a ficha da homologação manda
+    # as áreas em service_areas; o app e a central, em area_ids), documentos e a avaliação do
     # cliente na OS concluída.
+    "service_areas": "Áreas de atuação",
     "area_ids": "Áreas de atuação",
     "skill_id": "Aptidão",
     "title": "Título",

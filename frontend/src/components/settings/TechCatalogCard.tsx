@@ -9,7 +9,7 @@ import { ActiveState, FieldError, fold, plural, RowEditButton, SearchField } fro
 import { apiErrorText } from "@/components/technicians/ficha/SectionCard";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, Checkbox, Dialog, EmptyState, ErrorBox, Field, Input, LoadingBlock, Table, Td, Th } from "@/components/ui";
-import { api, apiErrorCode } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useCan } from "@/lib/permissions";
 import { useTechCatalog } from "@/lib/queries";
 import {
@@ -220,7 +220,9 @@ function CatalogDialog({
     },
     onSuccess: (saved) => done(`${cfg.noun} “${saved.name}” ${item ? "atualizada" : "cadastrada"}`),
     onError: (error) => {
-      if (apiErrorCode(error) === "CATALOG_IN_USE") onStale();
+      // Outra pessoa cadastrou o mesmo nome (409) ou excluiu o item (404) enquanto o diálogo estava aberto: a lista relê
+      // (o nome repetido passa a ser avisado aqui).
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) onStale();
     },
   });
 

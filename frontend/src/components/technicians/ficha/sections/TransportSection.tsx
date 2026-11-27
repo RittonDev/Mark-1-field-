@@ -6,7 +6,7 @@ import { cleanText, isPreGestao, transportBody } from "@/lib/techProfileEdit";
 import type { Technician, TransportMode } from "@/lib/types";
 import { partStamp, ProfileUnavailable, profileInfo, TransportPart, vehicleText } from "../../TechProfileView";
 import { fichaLabel } from "../FichaNav";
-import { SectionCard, SectionForm, SubTitle } from "../SectionCard";
+import { LegacyNote, SectionCard, SectionForm, SubTitle } from "../SectionCard";
 import { type SectionErrors, useSectionForm } from "../useSectionForm";
 
 interface TransportForm {
@@ -49,6 +49,8 @@ export function TransportSection({ tech, canEdit }: { tech: Technician; canEdit:
   const pre = isPreGestao(tech);
   return (
     <SectionCard title={fichaLabel("transporte")} aside={partStamp(info, "transport")}>
+      {/* A API de antes da Gestão não grava o perfil pela central: só leitura, com o aviso para quem edita. */}
+      {canEdit && pre && info ? <LegacyNote /> : null}
       {!info ? (
         <>
           <ProfileUnavailable />

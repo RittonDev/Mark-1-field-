@@ -266,8 +266,9 @@ export function listFacets(list: readonly Technician[], q: TechListQuery, ctx: L
   facets.elo = knownLevel ? elo : null;
   facets.cities = [...cities.entries()]
     .map(([key, entry]): CityOption => {
-      // A grafia mais comum; no empate, a que vem primeiro em ordem alfabética.
-      const city = [...entry.names.entries()].sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0]))[0][0];
+      // A grafia mais comum (as de uma cidade só mudam em acento, maiúsculas e espaços); no empate, a que aparece
+      // primeiro na lista, que vem em ordem de nome.
+      const city = [...entry.names.entries()].reduce((best, next) => (next[1] > best[1] ? next : best))[0];
       return { key, city, state: entry.state, label: entry.state ? `${city}-${entry.state}` : city, count: entry.count };
     })
     .sort((a, b) => collator.compare(a.city, b.city) || (a.state ?? "").localeCompare(b.state ?? ""));

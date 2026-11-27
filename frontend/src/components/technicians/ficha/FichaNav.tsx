@@ -72,7 +72,8 @@ const ITEM =
  * O menu da ficha: no computador, a coluna presa à esquerda (cada item é um link de verdade, com a seção na URL:
  * Ctrl/⌘+clique e o botão do meio abrem outra aba); no celular, um seletor acima da seção. Trocar de seção com
  * alteração não salva pergunta antes (os links pela guarda de useLeaveGuard; o seletor aqui).
- * `active` null: nenhuma seção do menu na tela (Formas de recebimento sem Pagamentos).
+ * `active` null: nenhuma seção do menu na tela (Formas de recebimento sem Pagamentos, Anexos internos sem Técnicos em
+ * Editar).
  */
 export function FichaNav({
   technicianId,

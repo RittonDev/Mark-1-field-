@@ -10,11 +10,14 @@ import {
   History,
   ImageIcon,
   Loader2,
+  Paperclip,
   Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
   Trash2,
   WifiOff,
+  X,
   XCircle,
 } from "lucide-react";
 import { useParams } from "next/navigation";
@@ -23,6 +26,7 @@ import { CepField } from "@/components/CepField";
 import { useConfirm } from "@/components/Confirm";
 import { apiText, isOffline, PublicPanel, PublicShell } from "@/components/PublicPage";
 import { Button, buttonClassName, Card, Checkbox, ErrorBox, Field, Input, LoadingBlock, Select, Textarea } from "@/components/ui";
+import { useNow } from "@/components/useNow";
 import { type AddressSlots, NO_ADDRESS, normalizeAddressNumber } from "@/lib/address";
 import { ApiError, apiErrorCode, errorMessage, request } from "@/lib/api";
 import { useIsClient } from "@/lib/auth";
@@ -47,6 +51,7 @@ import {
 } from "@/lib/constants";
 import {
   cleanDocumentTitle,
+  DOCUMENT_SENT,
   documentExpiryProblem,
   documentFileProblem,
   documentTitleProblem,
@@ -54,7 +59,7 @@ import {
   expiryLastDay,
   newUploadId,
 } from "@/lib/documents";
-import { formatBytes, formatDate, formatDateTime, todayISO } from "@/lib/format";
+import { dayKey, formatBytes, formatDate, formatDateTime, formatTime, todayISO } from "@/lib/format";
 import {
   isValidCnpj,
   isValidCpf,
@@ -2157,5 +2162,420 @@ function Group({
         <span className="text-xs text-ink-muted">{hint}</span>
       ) : null}
     </fieldset>
+  );
+}
+
+// --------------------------------------------------------------------------- documentos (depois do envio)
+
+/** Os grupos do bloco de documentos, na ordem da tela. */
+const FICHA_GROUPS: { kind: FichaKind; title: string; add: string }[] = [
+  { kind: "certification", title: "Certificações", add: "Adicionar certificação" },
+  { kind: "personal", title: "Documentos pessoais", add: "Adicionar documento" },
+  { kind: "resume", title: "Currículo", add: "Adicionar currículo" },
+];
+
+/** O prazo dos arquivos acabou (o texto do servidor, com ponto). */
+const FICHA_UPLOAD_GONE = "O prazo para enviar arquivos desta ficha acabou. Fale com a central pelo WhatsApp.";
+
+/** O arquivo escolhido num cartão e ainda não recebido, com o `client_upload_id` (o mesmo nas novas tentativas). */
+interface PickedFile {
+  file: File;
+  uploadId: string;
+}
+
+/**
+ * O erro de um envio ou de uma remoção, para a pessoa. `closed`: a ficha não recebe mais arquivos (o prazo acabou ou a
+ * ficha já foi analisada): o bloco trava.
+ */
+function fichaFileError(error: unknown): { message: string; closed: boolean } {
+  if (isOffline(error)) return { message: "Sem internet. Tente de novo.", closed: false };
+  if (error instanceof ApiError) {
+    if (error.status === 429) return { message: "Muitos envios. Espere um pouco e tente de novo.", closed: false };
+    if (error.status === 410) return { message: apiText(error, FICHA_UPLOAD_GONE), closed: true };
+    if (error.status === 409) {
+      return { message: apiText(error, "A ficha já foi analisada. Fale com a central pelo WhatsApp."), closed: true };
+    }
+    if (error.status < 500) return { message: apiText(error, errorMessage(error)), closed: false };
+  }
+  return { message: errorMessage(error), closed: false };
+}
+
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
+/** O problema de um cartão: a mensagem e o campo marcado (o título, a validade ou nenhum: o arquivo, o servidor). */
+interface DraftProblem {
+  message: string;
+  field: "title" | "expires_on" | null;
+}
+
+/** Campos com letra de 16 px e 44 px de altura no celular (abaixo disso o iPhone dá zoom); os de arquivo ficam ocultos. */
+const MOBILE_INPUTS =
+  "[&_input:not([type=file])]:h-11 [&_input]:text-base sm:[&_input:not([type=file])]:h-9 sm:[&_input]:text-sm";
+
+/**
+ * "Documentos (opcional)", no fim da ficha enviada: certificações, documentos pessoais e o currículo (um só), até 10
+ * arquivos e até o prazo do token (2 h). Cada cartão tem o título (com sugestões; não no currículo), a validade (só na
+ * certificação) e o arquivo, pela câmera ou escolhido: escolher já envia. Os arquivos recebidos e os cartões abertos (sem
+ * o arquivo) ficam na ficha enviada da aba, então voltam se a câmera fizer o navegador recarregar a página.
+ */
+function FichaDocuments({
+  uploadToken,
+  expiresAt,
+  documents,
+  drafts,
+  onChange,
+}: {
+  uploadToken: string;
+  expiresAt: string | null;
+  documents: FichaDocument[];
+  drafts: FichaDraft[];
+  /** Grava na ficha enviada os arquivos e os cartões, a partir do estado mais novo (os envios correm juntos). */
+  onChange: (update: (sent: SentState) => Partial<Pick<SentState, "documents" | "drafts">>) => void;
+}) {
+  const confirm = useConfirm();
+  const now = useNow(30_000);
+  const ids = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Por cartão: o arquivo que ainda não subiu, o envio em curso e o erro.
+  const [picked, setPicked] = useState<Record<string, PickedFile>>({});
+  const [sending, setSending] = useState<Record<string, true>>({});
+  const [errors, setErrors] = useState<Record<string, DraftProblem>>({});
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<{ id: string; message: string } | null>(null);
+  const [closedMessage, setClosedMessage] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  // Depois de somar, enviar ou tirar, para onde vai o foco (o elemento de antes sumiu da tela).
+  const [focusTarget, setFocusTarget] = useState<{ selector: string } | null>(null);
+  useEffect(() => {
+    if (!focusTarget) return;
+    rootRef.current?.querySelector<HTMLElement>(focusTarget.selector)?.focus();
+  }, [focusTarget]);
+
+  const expired = expiresAt ? now >= Date.parse(expiresAt) : false;
+  const closed = closedMessage ?? (expired ? FICHA_UPLOAD_GONE : null);
+  const atLimit = documents.length + drafts.length >= DOCUMENT_LIMITS.perFicha;
+  const hasResume = documents.some((d) => d.kind === "resume") || drafts.some((d) => d.kind === "resume");
+  const canAdd = (kind: FichaKind) => !closed && !atLimit && (kind !== "resume" || !hasResume);
+  const today = todayISO();
+  // O foco volta ao "Adicionar" do grupo ou, sem ele (no limite), ao título do grupo.
+  const groupFocus = (kind: FichaKind) => ({ selector: `[data-add="${kind}"], [data-group-title="${kind}"]` });
+  const deadline = expiresAt
+    ? dayKey(expiresAt) === dayKey(now)
+      ? `Envie até as ${formatTime(expiresAt)}.`
+      : `Envie até ${formatDateTime(expiresAt)}.`
+    : null;
+
+  const addDraft = (kind: FichaKind) => {
+    const id = newUploadId();
+    onChange((s) => ({ drafts: [...s.drafts, { id, kind, title: "", expires_on: "" }] }));
+    // O primeiro campo do cartão: o título (no currículo, "Tirar foto").
+    setFocusTarget({ selector: `[data-draft="${id}"] input` });
+  };
+  const patchDraft = (id: string, patch: Partial<Pick<FichaDraft, "title" | "expires_on">>) => {
+    onChange((s) => ({ drafts: s.drafts.map((d) => (d.id === id ? { ...d, ...patch } : d)) }));
+    setErrors((e) => withoutKey(e, id));
+  };
+  const dropDraft = (draft: FichaDraft) => {
+    onChange((s) => ({ drafts: s.drafts.filter((d) => d.id !== draft.id) }));
+    setPicked((p) => withoutKey(p, draft.id));
+    setErrors((e) => withoutKey(e, draft.id));
+    setFocusTarget(groupFocus(draft.kind));
+  };
+
+  const send = async (draft: FichaDraft, chosen: PickedFile) => {
+    setPicked((p) => ({ ...p, [draft.id]: chosen }));
+    const titleProblem = draft.kind === "resume" ? null : documentTitleProblem(draft.title);
+    const expiryProblem = draft.kind === "certification" ? documentExpiryProblem(draft.expires_on, todayISO()) : null;
+    const problem: DraftProblem | null = titleProblem
+      ? { message: titleProblem, field: "title" }
+      : expiryProblem
+        ? { message: expiryProblem, field: "expires_on" }
+        : null;
+    if (problem) {
+      // O arquivo fica guardado no cartão: corrigido o campo, "Enviar" manda o mesmo.
+      setErrors((e) => ({ ...e, [draft.id]: problem }));
+      setFocusTarget({ selector: `[data-draft="${draft.id}"] [data-field="${problem.field}"]` });
+      return;
+    }
+    setErrors((e) => withoutKey(e, draft.id));
+    setSending((s) => ({ ...s, [draft.id]: true }));
+    const body = new FormData();
+    body.append("token", uploadToken);
+    body.append("file", chosen.file, chosen.file.name);
+    body.append("kind", draft.kind);
+    body.append("title", draft.kind === "resume" ? DOCUMENT_KIND.resume : cleanDocumentTitle(draft.title));
+    if (draft.kind === "certification" && draft.expires_on) body.append("expires_on", draft.expires_on);
+    body.append("client_upload_id", chosen.uploadId);
+    try {
+      const doc = await request<FichaDocument>("/public/onboarding-documents", { method: "POST", form: body, auth: false });
+      // O foco estava no cartão (que some): vai para o "Adicionar" do grupo. Se a pessoa já está em outro, fica lá.
+      const card = rootRef.current?.querySelector(`[data-draft="${draft.id}"]`);
+      const active = document.activeElement;
+      const hadFocus = !active || active === document.body || Boolean(card?.contains(active));
+      onChange((s) => ({
+        documents: [...s.documents.filter((d) => d.id !== doc.id), doc],
+        drafts: s.drafts.filter((d) => d.id !== draft.id),
+      }));
+      setPicked((p) => withoutKey(p, draft.id));
+      setAnnouncement(`${DOCUMENT_SENT[doc.kind]}: ${doc.title}.`);
+      if (hadFocus) setFocusTarget(groupFocus(draft.kind));
+    } catch (error) {
+      const { message, closed: gone } = fichaFileError(error);
+      if (gone) setClosedMessage(message);
+      setErrors((e) => ({ ...e, [draft.id]: { message, field: null } }));
+    } finally {
+      setSending((s) => withoutKey(s, draft.id));
+    }
+  };
+
+  const pick = (draft: FichaDraft, file: File | undefined) => {
+    if (!file) return;
+    const problem = documentFileProblem(file);
+    if (problem) {
+      setPicked((p) => withoutKey(p, draft.id));
+      setErrors((e) => ({ ...e, [draft.id]: { message: problem, field: null } }));
+      return;
+    }
+    void send(draft, { file, uploadId: newUploadId() });
+  };
+
+  const removeDocument = async (doc: FichaDocument) => {
+    const ok = await confirm({ tone: "danger", title: `Remover ${doc.title}?`, description: "O arquivo sai da ficha.", confirmLabel: "Remover" });
+    if (!ok) return;
+    setRemoving(doc.id);
+    setRemoveError(null);
+    const removed = () => {
+      onChange((s) => ({ documents: s.documents.filter((d) => d.id !== doc.id) }));
+      setAnnouncement(`${doc.title} removido da ficha.`);
+      setFocusTarget(groupFocus(doc.kind));
+    };
+    try {
+      await request<void>(`/public/onboarding-documents/${encodeURIComponent(doc.id)}/remove`, {
+        method: "POST",
+        body: { token: uploadToken },
+        auth: false,
+      });
+      removed();
+    } catch (error) {
+      // Já tinha saído (outra aba): sai da lista também.
+      if (error instanceof ApiError && error.status === 404) {
+        removed();
+        return;
+      }
+      const { message, closed: gone } = fichaFileError(error);
+      if (gone) setClosedMessage(message);
+      else setRemoveError({ id: doc.id, message });
+    } finally {
+      setRemoving(null);
+    }
+  };
+
+  const filePicker = (draft: FichaDraft, mode: "camera" | "file") => (
+    <label
+      className={clsx(
+        // 44 px de altura no celular.
+        buttonClassName("secondary", "lg"),
+        "cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/45 sm:h-9 sm:px-3.5",
+      )}
+    >
+      {mode === "camera" ? <Camera aria-hidden className="size-4" /> : <Paperclip aria-hidden className="size-4" />}
+      {mode === "camera" ? "Tirar foto" : "Escolher arquivo"}
+      <input
+        type="file"
+        // A câmera de trás no celular (no computador, os dois abrem os arquivos); o servidor confere pelo conteúdo.
+        accept={mode === "camera" ? "image/*" : DOCUMENT_ACCEPT}
+        capture={mode === "camera" ? "environment" : undefined}
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          pick(draft, file);
+        }}
+      />
+    </label>
+  );
+
+  // Travado (prazo ou ficha analisada): só os grupos com arquivo, sem ações.
+  const groups = closed ? FICHA_GROUPS.filter((g) => documents.some((d) => d.kind === g.kind)) : FICHA_GROUPS;
+
+  return (
+    <Card className="mt-4 overflow-hidden">
+      <div ref={rootRef}>
+        <div className="border-b border-line px-5 py-4">
+          <h2 className="text-base font-bold tracking-[-0.01em] text-ink">Documentos (opcional)</h2>
+          {closed ? (
+            <p role="status" className="mt-0.5 text-sm text-ink-muted">
+              {closed}
+            </p>
+          ) : deadline ? (
+            <p className="mt-0.5 text-sm text-ink-muted">{deadline}</p>
+          ) : null}
+        </div>
+        {groups.length ? (
+          <div className={clsx("flex flex-col gap-5 px-5 py-5", MOBILE_INPUTS)}>
+            {groups.map((group) => {
+              const docs = documents.filter((d) => d.kind === group.kind);
+              const cards = closed ? [] : drafts.filter((d) => d.kind === group.kind);
+              const titleId = `${ids}-${group.kind}`;
+              return (
+                <section key={group.kind} aria-labelledby={titleId} className="flex flex-col gap-2">
+                  <h3 id={titleId} data-group-title={group.kind} tabIndex={-1} className="text-sm font-bold text-ink outline-none">
+                    {group.title}
+                  </h3>
+                  {docs.length ? (
+                    <ul className="flex flex-col gap-2">
+                      {docs.map((doc) => (
+                        <li key={doc.id} className="rounded-lg border border-line px-3 py-2">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <p className="min-w-0 flex-1 text-sm break-words text-ink-muted">
+                              <span className="font-semibold text-ink">{doc.title}</span> · {doc.file_name} · {formatBytes(doc.size)}
+                            </p>
+                            {closed ? null : (
+                              <Button
+                                size="lg"
+                                variant="ghost"
+                                className="-mr-2 px-3 sm:h-9"
+                                loading={removing === doc.id}
+                                disabled={removing !== null && removing !== doc.id}
+                                onClick={() => void removeDocument(doc)}
+                                aria-label={`Remover ${doc.title}`}
+                              >
+                                Remover
+                              </Button>
+                            )}
+                          </div>
+                          {removeError?.id === doc.id ? (
+                            <p role="alert" className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">
+                              {removeError.message}
+                            </p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {cards.map((draft) => {
+                    const busy = Boolean(sending[draft.id]);
+                    const chosen = picked[draft.id];
+                    const error = errors[draft.id] ?? null;
+                    const suggestions = draft.kind === "resume" ? [] : DOCUMENT_TITLE_SUGGESTIONS[draft.kind];
+                    return (
+                      <div key={draft.id} data-draft={draft.id} className="flex flex-col gap-3 rounded-lg border border-line p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-ink/80">{DOCUMENT_KIND[draft.kind]}</span>
+                          <button
+                            type="button"
+                            onClick={() => dropDraft(draft)}
+                            disabled={busy}
+                            className="-my-2.5 -mr-2.5 inline-flex size-11 shrink-0 items-center justify-center rounded-md text-ink-muted hover:bg-surface-2 hover:text-red-700 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none disabled:opacity-50 dark:hover:text-red-400"
+                            aria-label={`Descartar ${DOCUMENT_KIND[draft.kind].toLowerCase()}`}
+                          >
+                            <X aria-hidden className="size-4" />
+                          </button>
+                        </div>
+                        {draft.kind !== "resume" ? (
+                          <div className="flex flex-col gap-2">
+                            <Field label="Título" required>
+                              <Input
+                                data-field="title"
+                                value={draft.title}
+                                onChange={(e) => patchDraft(draft.id, { title: e.target.value })}
+                                maxLength={DOCUMENT_LIMITS.titleMax}
+                                disabled={busy}
+                                autoComplete="off"
+                                aria-invalid={error?.field === "title" || undefined}
+                              />
+                            </Field>
+                            {!draft.title.trim() && !busy ? (
+                              <div role="group" aria-label="Sugestões de título" className="flex flex-wrap gap-2">
+                                {suggestions.map((suggestion) => (
+                                  <button
+                                    key={suggestion}
+                                    type="button"
+                                    onClick={() => patchDraft(draft.id, { title: suggestion })}
+                                    className={clsx(
+                                      "inline-flex min-h-11 items-center rounded-full border px-3 py-1.5 text-sm transition-colors sm:min-h-9",
+                                      FOCUS_RING,
+                                      UNCHOSEN,
+                                    )}
+                                  >
+                                    {suggestion}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {draft.kind === "certification" ? (
+                          <Field label="Validade" className="sm:max-w-56">
+                            <Input
+                              data-field="expires_on"
+                              type="date"
+                              min={EXPIRY_FIRST_DAY}
+                              max={expiryLastDay(today)}
+                              value={draft.expires_on}
+                              onChange={(e) => patchDraft(draft.id, { expires_on: e.target.value })}
+                              disabled={busy}
+                              aria-invalid={error?.field === "expires_on" || undefined}
+                            />
+                          </Field>
+                        ) : null}
+                        {busy ? (
+                          <p role="status" className="flex items-center gap-2 text-sm text-ink-muted">
+                            <Loader2 aria-hidden className="size-4 animate-spin" />
+                            Enviando…
+                          </p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {filePicker(draft, "camera")}
+                            {filePicker(draft, "file")}
+                            {chosen ? (
+                              <Button variant="primary" size="lg" className="sm:h-9 sm:px-3.5" onClick={() => void send(draft, chosen)}>
+                                Enviar
+                              </Button>
+                            ) : null}
+                          </div>
+                        )}
+                        {chosen && !busy ? (
+                          <p className="text-xs break-words text-ink-muted">
+                            {chosen.file.name} · {formatBytes(chosen.file.size)}
+                          </p>
+                        ) : null}
+                        {error ? (
+                          <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">
+                            {error.message}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                  {canAdd(group.kind) ? (
+                    <Button
+                      data-add={group.kind}
+                      size="lg"
+                      className="self-start sm:h-9 sm:px-3.5"
+                      onClick={() => addDraft(group.kind)}
+                    >
+                      <Plus aria-hidden className="size-4" />
+                      {group.add}
+                    </Button>
+                  ) : null}
+                </section>
+              );
+            })}
+            {!closed && atLimit ? (
+              <p className="text-xs text-ink-muted">Limite de {DOCUMENT_LIMITS.perFicha} arquivos na ficha.</p>
+            ) : null}
+          </div>
+        ) : null}
+        <p role="status" className="sr-only">
+          {announcement}
+        </p>
+      </div>
+    </Card>
   );
 }
