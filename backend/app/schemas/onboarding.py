@@ -23,20 +23,9 @@ from app.schemas.records import format_phone
 from app.schemas.user import UserOut
 
 # ----------------------------------------------------------------- catálogo
-# Fonte única dos rótulos: o formulário público e a tela de análise leem daqui.
-
-SERVICE_AREAS: dict[str, str] = {
-    "impressoras": "Impressoras e multifuncionais",
-    "computadores": "Computadores e notebooks",
-    "redes": "Redes e cabeamento estruturado",
-    "wifi": "Wi-Fi e access points",
-    "cftv": "CFTV e câmeras IP",
-    "seguranca": "Alarmes e controle de acesso",
-    "telefonia": "Telefonia e PABX",
-    "servidores": "Servidores e storage",
-    "energia": "Nobreaks e energia",
-    "automacao": "Automação comercial (PDV)",
-}
+# Fonte única dos rótulos: o formulário público e a tela de análise leem daqui. As áreas de atuação
+# e as aptidões são os catálogos de Configurações › Técnicos (services/technician_catalogs.py; os
+# iniciais, DEFAULT_AREAS e DEFAULT_SKILLS, eram SERVICE_AREAS e SKILL_SUGGESTIONS daqui).
 
 AVAILABILITY: dict[str, str] = {
     "dias_uteis_manha": "Dias úteis — manhã",
@@ -52,25 +41,6 @@ SKILL_LEVELS: dict[str, str] = {
     "intermediario": "Intermediário",
     "avancado": "Avançado",
 }
-
-SKILL_SUGGESTIONS = [
-    "Windows 10/11",
-    "Linux",
-    "Active Directory",
-    "Impressoras HP",
-    "Impressoras Brother",
-    "Impressoras Ricoh / Kyocera",
-    "Switches gerenciáveis",
-    "Roteadores e firewall",
-    "Fibra óptica (fusão)",
-    "Certificação de cabeamento",
-    "DVR/NVR Intelbras",
-    "Câmeras Hikvision",
-    "Controle de acesso",
-    "PABX IP",
-    "Nobreaks",
-    "Montagem de rack",
-]
 
 VEHICLE_TYPES: dict[str, str] = {"carro": "Carro", "moto": "Moto", "outro": "Outro"}
 
@@ -94,7 +64,10 @@ UFS = frozenset(
 # na operação, e-mails do cadastro e a reabertura da ficha reprovada. 2026-11-26: o dia da
 # publicação do cadastro V2 (a versão é a data do dia em que sai, igual na web e no app). Versões
 # "AAAA-MM-DD" ou "AAAA-MM-DD.N" (a segunda do mesmo dia), comparadas como texto.
-PRIVACY_VERSION = "2026-11-26"
+# 2026-11-26.2 (a Entrega 2; publicada noutro dia, vira a data do dia, nos três lugares):
+# documentos, certificações e currículo; avaliações e anexos internos; perfil técnico também pela
+# central.
+PRIVACY_VERSION = "2026-11-26.2"
 
 
 class CatalogItem(BaseModel):
@@ -103,24 +76,32 @@ class CatalogItem(BaseModel):
 
 
 class OnboardingCatalog(BaseModel):
+    # As áreas de atuação e as aptidões ativas dos catálogos, em ordem alfabética (`key` = o id).
     service_areas: list[CatalogItem]
+    skills: list[CatalogItem]
     availability: list[CatalogItem]
     skill_levels: list[CatalogItem]
     vehicle_types: list[CatalogItem]
+    # Compat E2: tirar quando o app novo estiver em todos. Os nomes de `skills`, para o app e a
+    # ficha aberta de antes da Entrega 2 (sugerem pelo nome e mandam {name, level}).
     skill_suggestions: list[str]
     privacy_version: str
 
 
-def catalog() -> OnboardingCatalog:
+def catalog(service_areas: list[CatalogItem], skills: list[CatalogItem]) -> OnboardingCatalog:
+    """O catálogo da ficha pública, com as áreas e as aptidões ativas
+    (technician_catalogs.public_lists)."""
+
     def items(d: dict[str, str]) -> list[CatalogItem]:
         return [CatalogItem(key=k, label=v) for k, v in d.items()]
 
     return OnboardingCatalog(
-        service_areas=items(SERVICE_AREAS),
+        service_areas=service_areas,
+        skills=skills,
         availability=items(AVAILABILITY),
         skill_levels=items(SKILL_LEVELS),
         vehicle_types=items(VEHICLE_TYPES),
-        skill_suggestions=SKILL_SUGGESTIONS,
+        skill_suggestions=[item.label for item in skills],
         privacy_version=PRIVACY_VERSION,
     )
 
@@ -166,18 +147,15 @@ class InviteCheck(BaseModel):
 
 # ---------------------------------------------------------------- ficha pública
 
-# Um código das listas da ficha (áreas e disponibilidade). O código desconhecido volta na mensagem
-# ("Área desconhecida: ..."): o item enorme recusa antes, sem ecoar o valor. Os de hoje têm até 16
+# Um código da disponibilidade da ficha. O código desconhecido volta na mensagem ("Disponibilidade
+# desconhecida: ..."): o item enorme recusa antes, sem ecoar o valor. Os de hoje têm até 16
 # caracteres.
 CODE_MAX = 32
 Code = Annotated[str, Field(max_length=CODE_MAX)]
 # Bairro (o tamanho da coluna).
 DISTRICT_MAX = 120
-
-
-class SkillIn(BaseModel):
-    name: str = Field(min_length=2, max_length=80)
-    level: Literal["basico", "intermediario", "avancado"]
+# Aptidões na ficha (= TECH_PROFILE_LIMITS.skills).
+MAX_SKILLS = 30
 
 
 class ApplicationIn(BaseModel):
@@ -212,8 +190,13 @@ class ApplicationIn(BaseModel):
         default=None, description="CNPJ/MEI, se tiver", validate_default=True
     )
     years_experience: int | None = Field(default=None, ge=0, le=60)
-    service_areas: list[Code] = Field(min_length=1, max_length=len(SERVICE_AREAS))
-    skills: list[SkillIn] = Field(default_factory=list, max_length=30)
+    # Áreas de atuação: o id do catálogo ou, na ficha aberta antes da Entrega 2, o código antigo
+    # ("redes"). Desconhecida ou desativada, e nenhuma com o catálogo tendo alguma ativa: o envio
+    # recusa (technician_catalogs.resolve_areas, ficha=True).
+    service_areas: list[AreaValue] = Field(default_factory=list, max_length=MAX_AREAS)
+    # Aptidões do catálogo ({skill_id, level}) ou, na ficha de antes, pelo nome ({name, level}):
+    # technician_catalogs.resolve_skills.
+    skills: list[TechnicianSkillIn] = Field(default_factory=list, max_length=MAX_SKILLS)
     certifications: str | None = Field(default=None, max_length=2000)
     tools: str | None = Field(default=None, max_length=2000)
     has_vehicle: bool = False
@@ -378,14 +361,6 @@ class ApplicationIn(BaseModel):
         if uf not in UFS:
             raise ValueError("UF inválida")
         return uf
-
-    @field_validator("service_areas")
-    @classmethod
-    def _areas(cls, v: list[str]) -> list[str]:
-        unknown = set(v) - SERVICE_AREAS.keys()
-        if unknown:
-            raise ValueError(f"Área desconhecida: {', '.join(sorted(unknown))}")
-        return list(dict.fromkeys(v))
 
     @field_validator("availability")
     @classmethod

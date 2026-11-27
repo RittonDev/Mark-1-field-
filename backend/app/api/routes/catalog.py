@@ -1,13 +1,13 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import func, or_, select, text
+from fastapi import APIRouter, HTTPException, Response, status
+from sqlalchemy import func, or_, select
 
 from app.api.deps import DB, AdminUser, StaffUser, TicketManagerUser, access_user
 from app.core.access import channel_metadata
 from app.core.config import settings
-from app.core.enums import TicketPriority, UserRole
+from app.core.enums import TicketPriority
 from app.core.labels import enum_options
 from app.models import (
     Category,
@@ -15,7 +15,6 @@ from app.models import (
     ServiceType,
     SlaPolicy,
     Team,
-    TechnicianTool,
     UnproductiveReason,
     ViolationReason,
 )
@@ -36,19 +35,20 @@ from app.schemas.catalog import (
     ViolationReasonUpdate,
 )
 from app.schemas.tech_profile import (
-    TechnicianToolCreate,
-    TechnicianToolOut,
-    TechnicianToolUpdate,
+    TechCatalogItemCreate,
+    TechCatalogItemOut,
+    TechCatalogItemUpdate,
 )
-from app.services import durations, tech_profile, technician_levels
+from app.services import durations, technician_catalogs, technician_levels
 from app.services.sla import DEFAULT_SLA_MINUTES
+from app.services.technician_catalogs import Kind
 from app.services.workflow import workflow_metadata
 
 router = APIRouter(tags=["catalog"])
 
-# Categorias, motivos de violação e o ferramental dos técnicos ficam em Configurações; tipos de
-# serviço têm tela própria. O SLA continua só com o administrador; os motivos de improdutiva, com
-# toda a gestão.
+# Categorias, motivos de violação e os catálogos dos técnicos (Ferramental, Áreas de atuação e
+# Aptidões) ficam em Configurações; tipos de serviço têm tela própria. O SLA continua só com o
+# administrador; os motivos de improdutiva, com toda a gestão.
 SettingsEdit = access_user("setup.settings", level="edit")
 ServiceTypesEdit = access_user("setup.service_types", level="edit")
 
@@ -408,97 +408,135 @@ async def update_unproductive_reason(
     return reason
 
 
-# ------------------------------------------------------------ ferramental dos técnicos
-# O técnico marca no app as ferramentas que tem (users.tool_ids guarda os ids); a central inclui,
-# renomeia e desativa em Configurações › Técnicos, sem excluir e sem ordem manual.
-
-TOOL_NAME_TAKEN = "Já existe uma ferramenta com este nome"
-TOOL_MISSING = "Ferramenta não encontrada"
-
-
-def _tool_out(tool: TechnicianTool, counts: dict[str, int] | None) -> TechnicianToolOut:
-    """`counts` None: quem pediu é o técnico (sem a contagem)."""
-    return TechnicianToolOut(
-        id=tool.id,
-        name=tool.name,
-        is_active=tool.is_active,
-        technicians=None if counts is None else counts.get(str(tool.id), 0),
-    )
+# ------------------------------------------------- catálogos de Configurações › Técnicos
+# Ferramental (/technician-tools), Áreas de atuação (/technician-areas) e Aptidões
+# (/technician-skills), com uma regra só (services/technician_catalogs.py): o técnico guarda os ids
+# (users.tool_ids, users.service_areas, users.skills[].skill_id; a ficha da homologação, as áreas e
+# as aptidões). Qualquer pessoa da equipe lê, em ordem alfabética: o técnico (o app) só os ativos,
+# sem as contagens e com o `active` ignorado; a gestão filtra por `active` e vê `technicians`,
+# `applications` e `in_use`. Configurações em Editar inclui, renomeia (vale para todos) e desativa
+# (some das escolhas e fica com quem tinha; reativado, volta); exclui só o que nunca foi usado, e o
+# usado volta 409 CATALOG_IN_USE ("desative"). Sem ordem manual.
 
 
-async def _lock_tool_catalog(db: DB) -> None:
-    """Um cadastro ou renomeação por vez no catálogo, até o fim da transação: o nome repetido sem
-    acento e sem maiúsculas e o limite de MAX_TOOLS são conferidos lendo o catálogo antes de gravar,
-    e dois pedidos juntos ("Multímetro" e "multimetro") passariam os dois. Em READ COMMITTED, a
-    leitura feita depois da trava já vê o que o outro pedido gravou."""
-    await db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": "tool_catalog"}
-    )
+async def _create(db: DB, kind: Kind, body: TechCatalogItemCreate) -> TechCatalogItemOut:
+    item = await technician_catalogs.create(db, kind, body.name)
+    await db.commit()
+    return item
 
 
-async def _check_tool_name(db: DB, name: str, self_id: uuid.UUID | None) -> None:
-    """Nome repetido sem acento e sem maiúsculas ("Multimetro" = "Multímetro"), com o catálogo
-    travado antes (_lock_tool_catalog). O banco só recusa o nome exato (uq_tool_catalog_name, a
-    reserva); o catálogo tem no máximo MAX_TOOLS nomes."""
-    wanted = tech_profile.fold(name)
-    for tool_id, other in await db.execute(select(TechnicianTool.id, TechnicianTool.name)):
-        if tool_id != self_id and tech_profile.fold(other) == wanted:
-            raise HTTPException(status.HTTP_409_CONFLICT, TOOL_NAME_TAKEN)
+async def _update(
+    db: DB, kind: Kind, item_id: uuid.UUID, body: TechCatalogItemUpdate
+) -> TechCatalogItemOut:
+    item = await technician_catalogs.update(db, kind, item_id, body)
+    await db.commit()
+    return item
 
 
-@router.get("/technician-tools", response_model=list[TechnicianToolOut])
+async def _delete(db: DB, kind: Kind, item_id: uuid.UUID) -> Response:
+    await technician_catalogs.delete(db, kind, item_id)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/technician-tools", response_model=list[TechCatalogItemOut])
 async def list_technician_tools(
     db: DB, user: StaffUser, active: bool | None = None
-) -> list[TechnicianToolOut]:
-    """O ferramental em ordem alfabética (sem acento e sem maiúsculas). O técnico (o app) recebe
-    só as ativas, com `technicians` null, e o `active` é ignorado. A gestão filtra por `active` e
-    vê em `technicians` quantos técnicos marcaram cada uma: os do papel técnico, ativos ou não, a
-    mesma regra do filtro `tool_id` de GET /technicians."""
-    technician = user.role == UserRole.TECHNICIAN
-    stmt = select(TechnicianTool)
-    if technician:
-        stmt = stmt.where(TechnicianTool.is_active.is_(True))
-    elif active is not None:
-        stmt = stmt.where(TechnicianTool.is_active.is_(active))
-    tools = sorted(await db.scalars(stmt), key=lambda t: (tech_profile.fold(t.name), t.name))
-    counts = None if technician else await tech_profile.tool_counts(db)
-    return [_tool_out(tool, counts) for tool in tools]
+) -> list[TechCatalogItemOut]:
+    """O Ferramental. `technicians`: os do papel técnico, com ou sem acesso, que marcaram (a mesma
+    regra do filtro `tool_id` de GET /technicians); `applications`: sempre 0 (a ficha tem o
+    ferramental em texto livre)."""
+    return await technician_catalogs.list_items(db, "tool", user, active)
 
 
 @router.post(
-    "/technician-tools", response_model=TechnicianToolOut, status_code=status.HTTP_201_CREATED
+    "/technician-tools", response_model=TechCatalogItemOut, status_code=status.HTTP_201_CREATED
 )
 async def create_technician_tool(
-    body: TechnicianToolCreate, db: DB, _: SettingsEdit
-) -> TechnicianToolOut:
-    """Ferramenta nova, já ativa. O catálogo aceita até MAX_TOOLS ferramentas (ativas e
-    inativas: não há excluir)."""
-    await _lock_tool_catalog(db)
-    await _check_tool_name(db, body.name, None)
-    total = await db.scalar(select(func.count()).select_from(TechnicianTool)) or 0
-    if total >= tech_profile.MAX_TOOLS:
-        raise HTTPException(422, f"O catálogo aceita até {tech_profile.MAX_TOOLS} ferramentas")
-    tool = TechnicianTool(name=body.name, is_active=True)
-    db.add(tool)
-    await db.commit()
-    return _tool_out(tool, {})
+    body: TechCatalogItemCreate, db: DB, _: SettingsEdit
+) -> TechCatalogItemOut:
+    """Ferramenta nova, já ativa: 2 a 80 caracteres; repetida (sem acento e sem maiúsculas,
+    também entre as desativadas) 409 CATALOG_NAME_TAKEN; até 200 no catálogo."""
+    return await _create(db, "tool", body)
 
 
-@router.patch("/technician-tools/{tool_id}", response_model=TechnicianToolOut)
+@router.patch("/technician-tools/{tool_id}", response_model=TechCatalogItemOut)
 async def update_technician_tool(
-    tool_id: uuid.UUID, body: TechnicianToolUpdate, db: DB, _: SettingsEdit
-) -> TechnicianToolOut:
-    """Só o que vier muda (null é ignorado). Renomear muda para todos (o técnico guarda o id).
-    Desativar não mexe nos técnicos: a ferramenta some do app, da ficha e do filtro da central, e
-    volta para quem tinha marcado quando reativada."""
-    tool = await db.get(TechnicianTool, tool_id)
-    if tool is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, TOOL_MISSING)
-    fields = body.model_dump(exclude_none=True)
-    if "name" in fields:  # só desativar ou reativar não precisa da trava
-        await _lock_tool_catalog(db)
-        await _check_tool_name(db, fields["name"], tool.id)
-    for key, value in fields.items():
-        setattr(tool, key, value)
-    await db.commit()
-    return _tool_out(tool, await tech_profile.tool_counts(db))
+    tool_id: uuid.UUID, body: TechCatalogItemUpdate, db: DB, _: SettingsEdit
+) -> TechCatalogItemOut:
+    """Só o que vier muda (null é ignorado): renomear ou desativar/reativar."""
+    return await _update(db, "tool", tool_id, body)
+
+
+@router.delete("/technician-tools/{tool_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_technician_tool(tool_id: uuid.UUID, db: DB, _: SettingsEdit) -> Response:
+    """Só a ferramenta nunca usada; com uso, 409 CATALOG_IN_USE (desative)."""
+    return await _delete(db, "tool", tool_id)
+
+
+@router.get("/technician-areas", response_model=list[TechCatalogItemOut])
+async def list_technician_areas(
+    db: DB, user: StaffUser, active: bool | None = None
+) -> list[TechCatalogItemOut]:
+    """As Áreas de atuação. `technicians`: os do papel técnico, com ou sem acesso, que têm a área;
+    `applications`: as fichas da homologação (de qualquer situação) que a citam."""
+    return await technician_catalogs.list_items(db, "area", user, active)
+
+
+@router.post(
+    "/technician-areas", response_model=TechCatalogItemOut, status_code=status.HTTP_201_CREATED
+)
+async def create_technician_area(
+    body: TechCatalogItemCreate, db: DB, _: SettingsEdit
+) -> TechCatalogItemOut:
+    """Área nova, já ativa (sem o código das 10 áreas de antes): 2 a 80 caracteres; repetida 409
+    CATALOG_NAME_TAKEN; até 100 no catálogo."""
+    return await _create(db, "area", body)
+
+
+@router.patch("/technician-areas/{area_id}", response_model=TechCatalogItemOut)
+async def update_technician_area(
+    area_id: uuid.UUID, body: TechCatalogItemUpdate, db: DB, _: SettingsEdit
+) -> TechCatalogItemOut:
+    """Só o que vier muda (null é ignorado): renomear ou desativar/reativar."""
+    return await _update(db, "area", area_id, body)
+
+
+@router.delete("/technician-areas/{area_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_technician_area(area_id: uuid.UUID, db: DB, _: SettingsEdit) -> Response:
+    """Só a área nunca usada; com uso, 409 CATALOG_IN_USE (desative)."""
+    return await _delete(db, "area", area_id)
+
+
+@router.get("/technician-skills", response_model=list[TechCatalogItemOut])
+async def list_technician_skills(
+    db: DB, user: StaffUser, active: bool | None = None
+) -> list[TechCatalogItemOut]:
+    """As Aptidões. `technicians`: os do papel técnico, com ou sem acesso, que têm a aptidão;
+    `applications`: as fichas da homologação (de qualquer situação) que a citam."""
+    return await technician_catalogs.list_items(db, "skill", user, active)
+
+
+@router.post(
+    "/technician-skills", response_model=TechCatalogItemOut, status_code=status.HTTP_201_CREATED
+)
+async def create_technician_skill(
+    body: TechCatalogItemCreate, db: DB, _: SettingsEdit
+) -> TechCatalogItemOut:
+    """Aptidão nova, já ativa: 2 a 80 caracteres; repetida 409 CATALOG_NAME_TAKEN; até 300 no
+    catálogo."""
+    return await _create(db, "skill", body)
+
+
+@router.patch("/technician-skills/{skill_id}", response_model=TechCatalogItemOut)
+async def update_technician_skill(
+    skill_id: uuid.UUID, body: TechCatalogItemUpdate, db: DB, _: SettingsEdit
+) -> TechCatalogItemOut:
+    """Só o que vier muda (null é ignorado): renomear ou desativar/reativar."""
+    return await _update(db, "skill", skill_id, body)
+
+
+@router.delete("/technician-skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_technician_skill(skill_id: uuid.UUID, db: DB, _: SettingsEdit) -> Response:
+    """Só a aptidão nunca usada; com uso, 409 CATALOG_IN_USE (desative)."""
+    return await _delete(db, "skill", skill_id)
