@@ -9,9 +9,9 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
-from app.core.enums import TicketStatus, UserRole
+from app.core.enums import ApplicationStatus, TicketStatus, UserRole
 from app.db.base import utcnow
-from app.models import Location, Ticket, User
+from app.models import Location, TechnicianApplication, Ticket, User
 from app.services import tech_profile
 from tests.conftest import World, requires_db
 from tests.test_api import create
@@ -323,18 +323,67 @@ async def test_availability_is_a_small_signal(
 async def test_service_areas_come_from_the_technician(
     client: AsyncClient, engine: AsyncEngine, world: World
 ) -> None:
-    """As áreas de atuação são as do cadastro do técnico (copiadas da ficha na aprovação)."""
+    """As áreas de atuação são as do cadastro do técnico (ids do catálogo), comparadas com a OS
+    pelo código da área; o motivo leva o nome atual. A ficha aprovada não serve de reserva (a
+    aprovação já copia), e a área desativada ou nova (sem código) não entra."""
+    sup = world.supervisor.headers
+    cftv, redes = world.area_ids["cftv"], world.area_ids["redes"]
     async with engine.begin() as conn:
         await conn.execute(
-            update(User).where(User.id == world.tech.user.id).values(service_areas=["cftv"])
+            update(User).where(User.id == world.tech.user.id).values(service_areas=[cftv, redes])
         )
-    rows = await _ranking(
-        client,
-        world,
-        {"city": "Cidade Exemplo", "state": "SP", "title": "Câmera sem imagem", "limit": 10},
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        db.add(
+            TechnicianApplication(
+                status=ApplicationStatus.APPROVED,
+                full_name="Redes Exemplo",
+                email="redes.ficha@exemplo.com",
+                phone="(11) 98888-7777",
+                document="12345678909",
+                city="Cidade Exemplo",
+                state="SP",
+                coverage_area="Cidade Exemplo",
+                service_areas=[cftv],
+                skills=[],
+                privacy_consent_at=datetime(2026, 11, 1, tzinfo=UTC),
+                privacy_version="2026-11-26",
+                user_id=world.tech_other.user.id,
+            )
+        )
+        await db.commit()
+    place = {"city": "Cidade Exemplo", "state": "SP", "limit": 10}
+    tech, other = str(world.tech.user.id), str(world.tech_other.user.id)
+
+    async def reasons(title: str) -> tuple[list[str], list[str]]:
+        rows = await _ranking(client, world, {**place, "title": title})
+        return rows[tech]["reasons"], rows[other]["reasons"]
+
+    mine, theirs = await reasons("Câmera sem imagem e rack de rede")
+    assert "Atende CFTV e câmeras IP, Redes e cabeamento estruturado" in mine
+    assert not any(reason.startswith("Atende ") for reason in theirs)
+
+    # Renomeada: o motivo leva o nome novo (o código segue achando a área pelo texto da OS).
+    r = await client.patch(
+        f"{API}/technician-areas/{cftv}", json={"name": "Câmeras e CFTV"}, headers=sup
     )
-    assert "Atende CFTV" in rows[str(world.tech.user.id)]["reasons"]
-    assert "Atende CFTV" not in rows[str(world.tech_other.user.id)]["reasons"]
+    assert r.status_code == 200, r.text
+    mine, _ = await reasons("Câmera sem imagem")
+    assert "Atende Câmeras e CFTV" in mine
+    # Desativada: não entra.
+    await client.patch(f"{API}/technician-areas/{cftv}", json={"is_active": False}, headers=sup)
+    mine, _ = await reasons("Câmera sem imagem")
+    assert not any(reason.startswith("Atende ") for reason in mine)
+    # Área nova (sem código): o texto da OS não acha.
+    r = await client.post(f"{API}/technician-areas", json={"name": "Câmeras térmicas"}, headers=sup)
+    async with engine.begin() as conn:
+        await conn.execute(
+            update(User)
+            .where(User.id == world.tech.user.id)
+            .values(service_areas=[cftv, r.json()["id"]])
+        )
+    await client.patch(f"{API}/technician-areas/{cftv}", json={"is_active": True}, headers=sup)
+    mine, _ = await reasons("Câmera térmica sem imagem")
+    assert [reason for reason in mine if reason.startswith("Atende ")] == ["Atende Câmeras e CFTV"]
 
 
 async def test_availability_across_midnight(
